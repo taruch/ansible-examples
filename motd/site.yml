@@ -1,0 +1,9 @@
+---
+
+- name: apply MOTD to all nodes
+  hosts: all
+  remote_user: root
+  become: true
+
+  roles:
+    - motd
