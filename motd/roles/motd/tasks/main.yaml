@@ -1,9 +1,5 @@
 ---
 
-- name: Print all available facts
-  ansible.builtin.debug:
-    var: hostvars[inventory_hostname]
-
 - name: Update MOTD
   template:
     src: motd.j2
