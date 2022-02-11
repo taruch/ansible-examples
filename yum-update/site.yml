@@ -8,7 +8,7 @@
   tasks:
   - name: Upgrade all packages, excluding kernel & foo related packages
     yum:
-      #name: '*'
+      name: '*'
       security: yes
       state: latest
       #exclude: kernel*,foo*
