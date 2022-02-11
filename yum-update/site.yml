@@ -1,0 +1,14 @@
+---
+
+- name: apply yum security updates to all nodes
+  hosts: all
+  remote_user: truch
+  become: true
+
+  tasks:
+  - name: Upgrade all packages, excluding kernel & foo related packages
+    yum:
+      #name: '*'
+      security: yes
+      state: latest
+      #exclude: kernel*,foo*

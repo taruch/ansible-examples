@@ -1,0 +1,11 @@
+[satellite]
+#satellite.local
+
+[ansible-controller]
+#aapcontrol.local
+
+[ansible-hub]
+#aaphub.local
+
+[test]
+testhost1.local
