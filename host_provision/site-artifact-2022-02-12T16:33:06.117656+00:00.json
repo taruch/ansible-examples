@@ -1,0 +1,63 @@
+{
+    "version": "1.0.0",
+    "plays": [
+        {
+            "playbook": "/home/truch/ansible-examples/host_provision/site.yml",
+            "playbook_uuid": "ba24ef9e-3de4-47f6-bd8f-f7e5d859091d",
+            "play": "apply MOTD to all nodes",
+            "play_uuid": "963fd3c4-7922-f757-c633-000000000006",
+            "play_pattern": "all",
+            "name": "apply MOTD to all nodes",
+            "pattern": "all",
+            "uuid": "963fd3c4-7922-f757-c633-000000000006",
+            "__play_name": "apply MOTD to all nodes",
+            "tasks": [
+                {
+                    "playbook": "/home/truch/ansible-examples/host_provision/site.yml",
+                    "playbook_uuid": "ba24ef9e-3de4-47f6-bd8f-f7e5d859091d",
+                    "play": "apply MOTD to all nodes",
+                    "play_uuid": "963fd3c4-7922-f757-c633-000000000006",
+                    "play_pattern": "all",
+                    "task": "Gathering Facts",
+                    "task_uuid": "963fd3c4-7922-f757-c633-000000000018",
+                    "task_action": "gather_facts",
+                    "task_args": "",
+                    "task_path": "/home/truch/ansible-examples/host_provision/site.yml:3",
+                    "host": "testhost1.local",
+                    "uuid": "0543c5e3-1ea6-41ea-b9ec-35bc3b04f574",
+                    "__host": "testhost1.local",
+                    "__result": "FAILED",
+                    "__changed": false,
+                    "__duration": "0s",
+                    "__number": 0,
+                    "__task": "Gathering Facts",
+                    "__task_action": "gather_facts",
+                    "remote_addr": "testhost1.local",
+                    "res": {
+                        "msg": "Missing sudo password",
+                        "_ansible_no_log": false
+                    },
+                    "start": "2022-02-12T16:33:05.059698",
+                    "end": "2022-02-12T16:33:05.657690",
+                    "duration": 0.597992,
+                    "ignore_errors": null,
+                    "event_loop": null
+                }
+            ]
+        }
+    ],
+    "stdout": [
+        "\u001b[1;35m[WARNING]: Invalid characters were found in group names but not replaced, use\u001b[0m",
+        "\u001b[1;35m-vvvv to see details\u001b[0m",
+        "",
+        "PLAY [apply MOTD to all nodes] *************************************************",
+        "",
+        "TASK [Gathering Facts] *********************************************************",
+        "\u001b[0;31mfatal: [testhost1.local]: FAILED! => {\"msg\": \"Missing sudo password\"}\u001b[0m",
+        "",
+        "PLAY RECAP *********************************************************************",
+        "\u001b[0;31mtesthost1.local\u001b[0m            : ok=0    changed=0    unreachable=0    \u001b[0;31mfailed=1   \u001b[0m skipped=0    rescued=0    ignored=0   "
+    ],
+    "status": "failed",
+    "status_color": 9
+}

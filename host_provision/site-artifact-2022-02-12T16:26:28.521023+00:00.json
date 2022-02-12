@@ -1,0 +1,28 @@
+{
+    "version": "1.0.0",
+    "plays": [
+        {
+            "playbook": "/home/truch/ansible-examples/host_provision/site.yml",
+            "playbook_uuid": "59286207-1631-4334-8fb7-d818b4f9e18a",
+            "play": "apply MOTD to all nodes",
+            "play_uuid": "1ea339e6-2f20-4dee-8377-000000000005",
+            "play_pattern": "all",
+            "name": "apply MOTD to all nodes",
+            "pattern": "all",
+            "uuid": "1ea339e6-2f20-4dee-8377-000000000005",
+            "__play_name": "apply MOTD to all nodes",
+            "tasks": []
+        }
+    ],
+    "stdout": [
+        "\u001b[1;35m[WARNING]: provided hosts list is empty, only localhost is available. Note that\u001b[0m",
+        "\u001b[1;35mthe implicit localhost does not match 'all'\u001b[0m",
+        "",
+        "PLAY [apply MOTD to all nodes] *************************************************",
+        "\u001b[0;36mskipping: no hosts matched\u001b[0m",
+        "",
+        "PLAY RECAP *********************************************************************"
+    ],
+    "status": "successful",
+    "status_color": 13
+}

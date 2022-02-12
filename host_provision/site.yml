@@ -2,11 +2,12 @@
 
 - name: apply MOTD to all nodes
   hosts: all
-  remote_user: truch
-  become: true
+  remote_user: root
+  #become: true
 
   tasks:
     - ping:
 
   roles:
     - motd
+    - create_ansible_user
