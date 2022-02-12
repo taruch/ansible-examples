@@ -2,7 +2,7 @@
 
 - name: apply yum security updates to all nodes
   hosts: all
-  remote_user: truch
+  remote_user: ansible
   become: true
 
   tasks:
