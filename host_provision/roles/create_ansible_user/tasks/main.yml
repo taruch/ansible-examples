@@ -17,4 +17,4 @@
     dest: "/etc/sudoers"
     state: "present"
     regexp: "^%wheel"
-    line: "%admin ALL=(ALL) NOPASSWD: ALL"
+    line: "%wheel ALL=(ALL) NOPASSWD: ALL"
