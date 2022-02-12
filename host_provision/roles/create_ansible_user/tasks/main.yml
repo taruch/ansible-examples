@@ -16,5 +16,5 @@
   lineinfile:
     dest: "/etc/sudoers"
     state: "present"
-    regexp: "^.?%whell"
+    regexp: "^%wheel"
     line: "%admin ALL=(ALL) NOPASSWD: ALL"
