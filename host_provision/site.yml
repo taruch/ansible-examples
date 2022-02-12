@@ -5,9 +5,6 @@
   remote_user: root
   #become: true
 
-  tasks:
-    - ping:
-
   roles:
     - motd
     - create_ansible_user
