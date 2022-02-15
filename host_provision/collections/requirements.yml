@@ -3,5 +3,5 @@
 collections:
   - name: ansible.utils
     source: https://aaphub.local/api/automation-hub/
-  - name: redhat.satellite
-    source: https://aaphub.local/api/automation-hub/
+  #- name: redhat.satellite
+  #  source: https://aaphub.local/api/automation-hub/
