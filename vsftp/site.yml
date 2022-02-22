@@ -1,7 +1,7 @@
 ---
 
 - name: install ftpserver
-  hosts: ftpserver
+  hosts: all
   #remote_user: root
   become: true
   become_method: sudo
