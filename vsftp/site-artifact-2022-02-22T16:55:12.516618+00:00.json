@@ -1,0 +1,60 @@
+{
+    "version": "1.0.0",
+    "plays": [
+        {
+            "playbook": "/home/truch/ansible-examples/vsftp/site.yml",
+            "playbook_uuid": "f1267b87-2d28-40ef-8782-77a57f8b36d6",
+            "play": "install ftpserver",
+            "play_uuid": "be8ddf00-80df-bf8a-5ec0-000000000006",
+            "play_pattern": "ftpserver",
+            "name": "install ftpserver",
+            "pattern": "ftpserver",
+            "uuid": "be8ddf00-80df-bf8a-5ec0-000000000006",
+            "__play_name": "install ftpserver",
+            "tasks": [
+                {
+                    "playbook": "/home/truch/ansible-examples/vsftp/site.yml",
+                    "playbook_uuid": "f1267b87-2d28-40ef-8782-77a57f8b36d6",
+                    "play": "install ftpserver",
+                    "play_uuid": "be8ddf00-80df-bf8a-5ec0-000000000006",
+                    "play_pattern": "ftpserver",
+                    "task": "Gathering Facts",
+                    "task_uuid": "be8ddf00-80df-bf8a-5ec0-000000000015",
+                    "task_action": "gather_facts",
+                    "task_args": "",
+                    "task_path": "/home/truch/ansible-examples/vsftp/site.yml:3",
+                    "host": "testhost1.local",
+                    "uuid": "75be6812-1193-4737-a638-84a9fa20941e",
+                    "__host": "testhost1.local",
+                    "__result": "UNREACHABLE",
+                    "__changed": false,
+                    "__duration": "0s",
+                    "__number": 0,
+                    "__task": "Gathering Facts",
+                    "__task_action": "gather_facts",
+                    "remote_addr": "testhost1.local",
+                    "start": "2022-02-22T16:55:11.996783",
+                    "end": "2022-02-22T16:55:12.051516",
+                    "duration": 0.054733,
+                    "res": {
+                        "unreachable": true,
+                        "msg": "Failed to connect to the host via ssh: ansible@testhost1.local: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).",
+                        "changed": false
+                    }
+                }
+            ]
+        }
+    ],
+    "stdout": [
+        "",
+        "PLAY [install ftpserver] *******************************************************",
+        "",
+        "TASK [Gathering Facts] *********************************************************",
+        "\u001b[1;31mfatal: [testhost1.local]: UNREACHABLE! => {\"changed\": false, \"msg\": \"Failed to connect to the host via ssh: ansible@testhost1.local: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).\", \"unreachable\": true}\u001b[0m",
+        "",
+        "PLAY RECAP *********************************************************************",
+        "\u001b[0;31mtesthost1.local\u001b[0m            : ok=0    changed=0    \u001b[1;31munreachable=1   \u001b[0m failed=0    skipped=0    rescued=0    ignored=0   "
+    ],
+    "status": "failed",
+    "status_color": 9
+}

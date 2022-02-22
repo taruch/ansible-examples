@@ -1,0 +1,29 @@
+---
+- name: Install FTP server when host in ftpserver group
+  ansible.builtin.yum:
+    name: vsftpd
+    state: latest
+  when: inventory_hostname in groups["ftpserver"]
+  ignore_errors: yes
+
+- name: Enable chron service
+  ansible.builtin.systemd:
+    name: vsftpd.service
+    state: started
+    enabled: yes
+  when: inventory_hostname in groups["ftpserver"]
+  ignore_errors: yes
+
+- name: Install chrony server when host in ftpserver group
+  ansible.builtin.yum:
+    name: chrony
+    state: latest
+  when: inventory_hostname in groups["ftpserver"]
+  ignore_errors: yes
+
+- name: Enable vsftp service
+  ansible.builtin.systemd:
+    name: chronyd.service
+    state: started
+    enabled: yes
+  when: inventory_hostname in groups["ftpserver"]

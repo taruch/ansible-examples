@@ -1,0 +1,10 @@
+---
+
+- name: install ftpserver
+  hosts: ftpserver
+  #remote_user: root
+  become: true
+  become_method: sudo
+
+  roles:
+    - vsftp
