@@ -1,3 +1,11 @@
 ---
 
-
+- name: "Create a host with build context"
+  theforeman.foreman.host:
+    username: "admin"
+    password: "changeme"
+    server_url: "https://satellite.vmware.local"
+    name: "new_host"
+    hostgroup: my_hostgroup
+    build: true
+    state: present
