@@ -4,13 +4,13 @@
   hosts: all
   #remote_user: root
 
-  tasks:
-    - name: restart vsftp
-      systemd:
-        name: vsftpd.service
-        state: restarted
-      become: yes
-      become_method: sudo
-      become_user: ansible
+  #tasks:
+  #  - name: restart vsftp
+  #    systemd:
+  #      name: vsftpd.service
+  #      state: restarted
+  #    become: yes
+  #    become_method: sudo
+  #    become_user: ansible
   #roles:
   #  - vsftp
