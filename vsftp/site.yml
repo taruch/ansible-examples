@@ -6,5 +6,10 @@
   become: true
   become_method: sudo
 
-  roles:
-    - vsftp
+  tasks:
+    - name: restart vsftp
+      systemd:
+        name: vsftpd.service
+        state: restarted
+  #roles:
+  #  - vsftp

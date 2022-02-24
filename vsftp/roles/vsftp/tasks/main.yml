@@ -5,7 +5,7 @@
     state: latest
   ignore_errors: yes
 
-- name: Enable chron service
+- name: Enable vsftpd service
   ansible.builtin.systemd:
     name: vsftpd.service
     state: started
@@ -18,7 +18,7 @@
     state: latest
   ignore_errors: yes
 
-- name: Enable vsftp service
+- name: Enable chrony service
   ansible.builtin.systemd:
     name: chronyd.service
     state: started
