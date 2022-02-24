@@ -3,8 +3,8 @@
 - name: install ftpserver
   hosts: all
   remote_user: ansible
-  become: yes
-  become_method: sudo
+  #become: yes
+  #become_method: sudo
   #become_user: ansible
 
   tasks:
@@ -12,5 +12,7 @@
     systemd:
       name: vsftpd.service
       state: restarted
+    become: yes
+    become_method: sudo
   #roles:
   #  - vsftp
