@@ -2,11 +2,7 @@
 
 - name: get contents of authorized_keys
   hosts: all
-  #remote_user: truch
   become: true
-
-  #vars:
-  #   pb1_contents: "{{ lookup('file', '/root/.ssh/authorized_keys') }}"
 
   tasks:
     - name: Get contents of unauthorized_keys 
@@ -22,5 +18,3 @@
         data:
           auth_keys_results:  "{{ pb1_contents.stdout_lines  }}"
 
-  roles:
-  #  - create_ansible_user
