@@ -3,6 +3,7 @@
 - name: get contents of authorized_keys
   hosts: all
   #remote_user: truch
+  become: true
 
   vars:
      pb1_contents: "{{ lookup('file', '/root/.ssh/authorized_keys') }}"
