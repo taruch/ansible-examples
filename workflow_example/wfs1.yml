@@ -1,0 +1,8 @@
+---
+
+- name: apply MOTD to all nodes
+  hosts: all
+  remote_user: root
+
+  roles:
+    - create_ansible_user

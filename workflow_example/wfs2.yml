@@ -1,0 +1,7 @@
+---
+
+- name: apply MOTD to all nodes
+  hosts: all
+
+  roles:
+    - motd
