@@ -1,7 +1,10 @@
 ---
 
-- name: apply MOTD to all nodes
+- name: print contents of authorized_keys
   hosts: all
+  #remote_user: truch
 
-  roles:
-    - motd
+  tasks:
+    - name: get contents of authorized_keys
+      debug: msg="pb2 - the value of pb1_contents is {{ pb1_contents }}"
+

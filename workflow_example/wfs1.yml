@@ -1,8 +1,15 @@
 ---
 
-- name: apply MOTD to all nodes
+- name: get contents of authorized_keys
   hosts: all
-  remote_user: root
+  #remote_user: truch
+
+  vars:
+     pb1_contents: "{{ lookup('file', '/root/.ssh/authorized_keys') }}"
+
+  tasks:
+    - name: get contents of authorized_keys
+      debug: msg="pb1 - the value of pb1_contents is {{ pb1_contents }}"
 
   roles:
-    - create_ansible_user
+  #  - create_ansible_user
