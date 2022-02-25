@@ -5,10 +5,15 @@
   #remote_user: truch
   become: true
 
-  vars:
-     pb1_contents: "{{ lookup('file', '/root/.ssh/authorized_keys') }}"
+  #vars:
+  #   pb1_contents: "{{ lookup('file', '/root/.ssh/authorized_keys') }}"
 
   tasks:
+    - name: Get contents of unauthorized_keys 
+      shell: cat /root/.ssh/authorized_keys
+      register: pb1_contents
+
+
     - name: get contents of authorized_keys
       debug: msg="pb1 - the value of pb1_contents is {{ pb1_contents }}"
 
