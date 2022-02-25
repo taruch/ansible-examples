@@ -5,6 +5,6 @@
   #remote_user: truch
 
   tasks:
-    - name: get contents of authorized_keys
-      debug: msg="pb2 - the value of pb1_contents is {{ pb1_contents }}"
+    - name: print contents of authorized_keys from PB1
+      debug: msg="pb2 - the value of pb1_contents is {{ auth_keys_results }}"
 

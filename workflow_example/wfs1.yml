@@ -15,7 +15,12 @@
 
 
     - name: get contents of authorized_keys
-      debug: msg="pb1 - the value of pb1_contents is {{ pb1_contents }}"
+      debug: msg="pb1 - the value of pb1_contents is {{ pb1_contents.stdout_lines }}"
+
+    - name: "Artifact URL of test results to Tower Workflows"
+      set_stats:
+        data:
+          auth_keys_results:  "{{ pb1_contents.stdout_lines  }}"
 
   roles:
   #  - create_ansible_user
