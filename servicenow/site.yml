@@ -1,0 +1,12 @@
+---
+
+- name: apply MOTD to all nodes
+  collections:
+    - redhat.satellite
+  hosts: all
+  remote_user: root
+  #become: true
+
+  roles:
+    - motd
+    - create_ansible_user
