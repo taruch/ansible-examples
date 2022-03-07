@@ -1,0 +1,18 @@
+---
+plugin: servicenow.itsm.now
+table: cmdb_ci_computer
+#fields: [name,host_name,fqdn,ip_address,os,manufacturer]
+columns:
+  - ip_address
+  - name
+  - fqdn
+  - os
+  - manufacturer
+#query:
+#  - operational_status: = 1
+#    fqdn: ISNOTEMPTY
+#    class: Computer
+#    manufacturer: STARTSWITH Cisco
+keyed_groups:
+  - key: os
+    separator: ""

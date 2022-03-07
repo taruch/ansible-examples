@@ -1,0 +1,20 @@
+{
+    "version": "1.0.0",
+    "plays": [],
+    "stdout": [
+        "\u001b[1;35m[WARNING]: provided hosts list is empty, only localhost is available. Note that\u001b[0m",
+        "\u001b[1;35mthe implicit localhost does not match 'all'\u001b[0m",
+        "\u001b[0;31mERROR! 'servicenow.servicenow.snow_record_find' is not a valid attribute for a Play\u001b[0m",
+        "\u001b[0;31m\u001b[0m",
+        "\u001b[0;31mThe error appears to be in '/home/truch/ansible-examples/ServiceNowQuery/site.yml': line 1, column 3, but may\u001b[0m",
+        "\u001b[0;31mbe elsewhere in the file depending on the exact syntax problem.\u001b[0m",
+        "\u001b[0;31m\u001b[0m",
+        "\u001b[0;31mThe offending line appears to be:\u001b[0m",
+        "\u001b[0;31m\u001b[0m",
+        "\u001b[0;31m\u001b[0m",
+        "\u001b[0;31m- name: Find open standard changes with my template\u001b[0m",
+        "\u001b[0;31m  ^ here\u001b[0m"
+    ],
+    "status": "failed",
+    "status_color": 9
+}
