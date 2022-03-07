@@ -1,0 +1,21 @@
+- name: Find open standard changes with my template
+  snow_record_find:
+    username: admin
+    password: 75wePjTNkUfT
+    #instance: dev99999
+    host: https://dev114222.service-now.com
+    table: cmdb_ci_computer
+    query:
+      sn_sys_class_name: "Server"
+    return_fields:
+      - os
+      #- number
+      #- sys_created_on
+      #- sys_updated_on
+      #- u_template
+      #- active
+      #- type
+      #- u_change_stage
+      #- sys_created_by
+      #- description
+      #- short_description
