@@ -23,7 +23,7 @@
 
   - name: Query ServiceNow API for host data
     uri:
-      url: {{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SN_SEARCH }}
+      url: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SN_SEARCH }}'
       user: "{{ SN_USERNAME }}"
       password: "{{ SN_PASSWORD }}"
       method: GET
