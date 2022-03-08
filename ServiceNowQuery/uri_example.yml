@@ -1,7 +1,7 @@
 ---
 
 - name: Get things from ServiceNow
-  hosts: localhost
+  hosts: all
   gather_facts: no
 
   tasks:
