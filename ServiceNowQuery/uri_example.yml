@@ -1,14 +1,27 @@
 ---
+
 - name: Get things from ServiceNow
   hosts: localhost
+  gather_facts: no
 
   tasks:
 
-  - name: Display all variables/facts known for a host
-    debug:
-      var: hostvars[inventory_hostname]
-    tags: debug_info
+#  - name: Display all variables/facts known for a host
+#    debug:
+#      var: hostvars[inventory_hostname].ansible_facts
+#    tags: debug_info
   
+  - name: Print some debug information 
+    vars: 
+      msg: |
+        Module Variables ("vars"):
+        --------------------------------
+        {{ vars | to_nice_json }} 
+        
+    debug: 
+      msg: "{{ msg.split('\n') }}"       
+    tags: debug_info
+
   - name: Query ServiceNow API for host data
     uri:
       url: https://dev114222.service-now.com/api/now/table/{{ TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SEARCH }}
