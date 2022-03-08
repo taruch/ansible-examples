@@ -14,7 +14,7 @@
       url: https://dev114222.service-now.com/api/now/table/{{ TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SEARCH }}
       #table=cmdb_ci_computer
       #name=ALDWXP
-      user: "{{ SN_USER }}"
+      user: "{{ SN_USERNAME }}"
       password: "{{ SN_PASSWORD }}"
       method: GET
       force_basic_auth: yes
