@@ -1,13 +1,13 @@
 ---
 
 - name: Get things from ServiceNow
-  hosts: all
+  hosts: localhost
   gather_facts: no
   vars:
     #for all hosts
-    #url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos'
+    url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos%2Cfqdn'
     #for single host
-    url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SN_SEARCH  }}'
+    #url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SN_SEARCH  }}'
 
   tasks:
   - name: Display all variables/facts known for a host
@@ -37,15 +37,20 @@
       body_format: json
     register: servicenow_response
 
- 
-  - name: print output
-    ansible.builtin.debug:
-      #msg: "{{ servicenow_out }}"
-      msg: "{{ servicenow_response.json.result[0].name }}"
+# For individual host 
+#  - name: print output
+#    ansible.builtin.debug:
+#      #msg: "{{ servicenow_out }}"
+#      msg: "{{ servicenow_response.json.result[0].name }}"
+#
+#  - name: "Artifact URL of enable passing results in Tower Workflows"
+#    set_stats:
+#      data:
+#        servicenow_out: "{{ servicenow_response.json.result[0].name }}"
 
+# For all hosts in inventory
   - name: "Artifact URL of enable passing results in Tower Workflows"
     set_stats:
       data:
-        servicenow_out: "{{ servicenow_response.json.result[0].name }}"
-
+        servicenow_out: "{{ servicenow_response.json.result }}"
 
