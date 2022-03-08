@@ -1,7 +1,5 @@
 ---
 
 collections:
-  - name: ansible.utils
-  - name: ansible.network
   - name: servicenow.itsm
   - name: servicenow.servicenow
