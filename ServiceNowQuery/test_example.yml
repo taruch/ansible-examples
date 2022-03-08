@@ -1,0 +1,12 @@
+---
+
+- name: Get things from ServiceNow
+  hosts: all
+  gather_facts: no
+
+  tasks:
+
+  - name: Display all variables/facts known for a host
+    debug:
+      var: inventory_hostname
+    tags: debug_info
