@@ -1,0 +1,30 @@
+---
+- name: Get things from ServiceNow
+  hosts: localhost
+
+  tasks:
+
+  - name: Query ServiceNow API for host data
+    uri:
+      url: https://dev114222.service-now.com/api/now/table/cmdb_ci_computer?sysparm_fields=name%2Cos&sysparm_limit=1&name=ALDWXP
+      user: admin
+      password: "{{ SN_PASSWORD }}"
+      method: GET
+      force_basic_auth: yes
+      headers:
+        Content-Type: "application/json"
+      body_format: json
+    register: servicenow_response
+
+ 
+  - name: print output
+    ansible.builtin.debug:
+      #msg: "{{ servicenow_out }}"
+      msg: "{{ servicenow_response.json.result[0].name }}"
+
+  - name: "Artifact URL of enable passing results in Tower Workflows"
+    set_stats:
+      data:
+        servicenow_out: "{{ servicenow_response.json.result[0].name }}"
+
+
