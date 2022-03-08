@@ -3,9 +3,13 @@
 - name: Get things from ServiceNow
   hosts: all
   gather_facts: no
+  vars:
+    #for all hosts
+    #url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos'
+    #for single host
+    url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SN_SEARCH  }}'
 
   tasks:
-
   - name: Display all variables/facts known for a host
     debug:
       var: hostvars[inventory_hostname]
@@ -23,9 +27,9 @@
 
   - name: Query ServiceNow API for host data
     uri:
-      url: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ inventory_hostname  }}'
-      user: "{{ SN_USERNAME }}"
-      password: "{{ SN_PASSWORD }}"
+      url: '{{ url_string }}'
+      user: '{{ SN_USERNAME }}'
+      password: '{{ SN_PASSWORD }}'
       method: GET
       force_basic_auth: yes
       headers:
