@@ -6,21 +6,20 @@
 
   tasks:
 
-#  - name: Display all variables/facts known for a host
-#    debug:
-#      var: hostvars[inventory_hostname].ansible_facts
-#    tags: debug_info
-  
-  - name: Print some debug information 
-    vars: 
-      msg: |
-        Module Variables ("vars"):
-        --------------------------------
-        {{ vars | to_nice_json }} 
-        
-    debug: 
-      msg: "{{ msg.split('\n') }}"       
+  - name: Display all variables/facts known for a host
+    debug:
+      var: hostvars[inventory_hostname].ansible_facts
     tags: debug_info
+  
+#  - name: Print some debug information 
+#    vars: 
+#      msg: |
+#        Module Variables ("vars"):
+#        --------------------------------
+#        {{ vars | to_nice_json }} 
+#    debug: 
+#      msg: "{{ msg.split('\n') }}"       
+#    tags: debug_info
 
   - name: Query ServiceNow API for host data
     uri:
