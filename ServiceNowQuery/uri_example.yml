@@ -8,7 +8,7 @@
 
   - name: Display all variables/facts known for a host
     debug:
-      var: hostvars[inventory_hostname].ansible_facts
+      var: hostvars[inventory_hostname]
     tags: debug_info
   
 #  - name: Print some debug information 
