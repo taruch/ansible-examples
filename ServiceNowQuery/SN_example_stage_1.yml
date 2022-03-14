@@ -28,20 +28,8 @@
       servicenow_out: '{{ servicenow_response.json.result }}'
     no_log: true
 
+  - name: "Artifact URL of enable passing results in Tower Workflows"
+    set_stats:
+      data:
+        stage1_out: "{{ servicenow_response.json.result }}"
 
-  # Print out variable
-  - name: "Print variable"
-    debug:
-      #msg: "{{ servicenow_out }}"
-      msg: '{{ (servicenow_out |  selectattr("name", "search", "lnux100") | list)[0].name }}'
-
-
-- name: Do Something with Output
-  hosts: all
-  gather_facts: no
-
-  # Print out variable
-  - name: "Print variable"
-    debug:
-      #msg: "{{ servicenow_out }}"
-      msg: '{{ (servicenow_out |  selectattr("name", "search", inventory_hostname ) | list)[0].name }}'
