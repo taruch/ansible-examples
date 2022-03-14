@@ -1,7 +1,8 @@
 - name: Do Something with Output
   hosts: all
   gather_facts: no
- 
+
+  tasks: 
   # Print out variable
   - name: "Print variable"
     debug:
