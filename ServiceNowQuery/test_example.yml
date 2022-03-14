@@ -9,22 +9,6 @@
     #for single host
     #url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SN_SEARCH  }}'
 
-  tasks:
-  - name: Display all variables/facts known for a host
-    debug:
-      var: hostvars[inventory_hostname]
-    tags: debug_info
-  
-#  - name: Print some debug information 
-#    vars: 
-#      msg: |
-#        Module Variables ("vars"):
-#        --------------------------------
-#        {{ vars | to_nice_json }} 
-#    debug: 
-#      msg: "{{ msg.split('\n') }}"       
-#    tags: debug_info
-
   - name: Query ServiceNow API for host data
     uri:
       url: '{{ url_string }}'
@@ -38,22 +22,6 @@
     register: servicenow_response
     no_log: true
 
-  # For individual host 
-#  - name: print output
-#    ansible.builtin.debug:
-#      #msg: "{{ servicenow_out }}"
-#      msg: "{{ servicenow_response.json.result[0].name }}"
-#
-#  - name: "Artifact URL of enable passing results in Tower Workflows"
-#    set_stats:
-#      data:
-#        servicenow_out: "{{ servicenow_response.json.result[0].name }}"
-
-#  - name: "Set output from ServiceNow"
-#    set_fact:
-#      data:
-#        "{{ inventory_hostname }}_servicenow_out: {{ servicenow_response.json.result[0].name }}"
-
   # For all hosts in inventory
   - name: "Artifact URL of enable passing results in Tower Workflows"
     set_fact:
@@ -66,3 +34,14 @@
     debug:
       #msg: "{{ servicenow_out }}"
       msg: '{{ (servicenow_out |  selectattr("name", "search", "lnux100") | list)[0].name }}'
+
+
+- name: Do Something with Output
+  hosts: all
+  gather_facts: no
+
+  # Print out variable
+  - name: "Print variable"
+    debug:
+      #msg: "{{ servicenow_out }}"
+      msg: '{{ (servicenow_out |  selectattr("name", "search", inventory_hostname ) | list)[0].name }}'
