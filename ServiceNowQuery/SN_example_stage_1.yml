@@ -9,6 +9,7 @@
     #for single host
     #url_string: '{{ SN_HOST }}/api/now/table/{{ SN_TABLE }}?sysparm_fields=name%2Cos&sysparm_limit=1&name={{ SN_SEARCH  }}'
 
+  tasks:
   - name: Query ServiceNow API for host data
     uri:
       url: '{{ url_string }}'
