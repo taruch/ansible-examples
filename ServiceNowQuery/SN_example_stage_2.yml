@@ -3,8 +3,8 @@
   gather_facts: no
 
   tasks: 
-  # Print out variable
-  - name: "Print variable"
-    debug:
-      #msg: "{{ servicenow_out }}"
-      msg: '{{ (stage1_out |  selectattr("name", "search", inventory_hostname ) | list)[0].name }}'
+
+ - name: "Set Variable for Host"
+    set_stats:
+      data:
+        Host_Most_Secret_Password: '{{ (stage1_out |  selectattr("name", "search", inventory_hostname ) | list)[0].name }}'

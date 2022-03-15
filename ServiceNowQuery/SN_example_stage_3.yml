@@ -1,0 +1,9 @@
+- name: Do Something with Output
+  hosts: all
+  gather_facts: no
+
+  tasks: 
+
+  - name: "Print variable"
+    debug:
+      msg: 'Host: {{ inventory_hostname }}, Password: {{ Host_Most_Secret_Password }}"
