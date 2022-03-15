@@ -5,7 +5,7 @@
 
   tasks: 
 
-  - name: "Set Variable for {{ inventory_hostname }}"
+  - name: "Set Variable"
     set_fact:
       Host_Most_Secret_Password: '{{ (stage1_out |  selectattr("name", "search", inventory_hostname ) | list)[0].name }}'
 
