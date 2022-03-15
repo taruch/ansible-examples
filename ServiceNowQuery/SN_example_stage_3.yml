@@ -1,3 +1,4 @@
+---
 - name: Do Something with Output
   hosts: all
   gather_facts: no

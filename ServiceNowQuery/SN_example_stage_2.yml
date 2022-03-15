@@ -4,7 +4,11 @@
 
   tasks: 
 
-  - name: "Set Variable for Host"
-    set_stats:
-      data:
-        Host_Most_Secret_Password: '{{ (stage1_out |  selectattr("name", "search", inventory_hostname ) | list)[0].name }}'
+  - name: "Set Variable for {{ inventory_hostname }}"
+    set_fact:
+      Host_Most_Secret_Password: '{{ (stage1_out |  selectattr("name", "search", inventory_hostname ) | list)[0].name }}'
+
+  - name: "Print variable"
+    debug:
+      msg: 'Host: {{ inventory_hostname }}, Password: {{ Host_Most_Secret_Password }}"
+
