@@ -9,6 +9,9 @@
   - name: Update yum cache
     yum:
       update_cache: yes
+    tags:
+    - bugfix
+    - security
 
   - name: Upgrade all security related packages
     yum:
