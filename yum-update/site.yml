@@ -23,7 +23,6 @@
     tags:
     - security
 
-  tasks:
   - name: Upgrade all errata required packages
     yum:
       name: '*'
