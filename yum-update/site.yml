@@ -16,7 +16,7 @@
     - security
 
   tasks:
-  - name: Upgrade all packages
+  - name: Upgrade all errata required packages
     yum:
       name: '*'
       bugfix: yes
