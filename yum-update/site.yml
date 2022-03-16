@@ -6,9 +6,20 @@
   become: true
 
   tasks:
-  - name: Upgrade all packages, excluding kernel & foo related packages
+  - name: Upgrade all security related packages
     yum:
       name: '*'
       security: yes
       state: latest
       #exclude: kernel*,foo*
+    tags:
+    - security
+
+  tasks:
+  - name: Upgrade all packages
+    yum:
+      name: '*'
+      bugfix: yes
+      state: latest
+    tags:
+    - bugfix
