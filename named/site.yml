@@ -1,0 +1,9 @@
+---
+
+- name: install and configure bind
+  hosts: all
+  remote_user: root
+  #become: true
+
+  roles:
+    - exphost.named

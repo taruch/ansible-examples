@@ -1,0 +1,3 @@
+[submodule "named/roles/exphost.named"]
+	path = named/roles/exphost.named
+	url = https://github.com/exphost/exphost.named.git
