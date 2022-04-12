@@ -1,9 +1,0 @@
-{
-    "version": "1.0.0",
-    "plays": [],
-    "stdout": [
-        "\u001b[0;31mERROR! the playbook: /home/truch/ansible-examples/host_provision does not appear to be a file\u001b[0m"
-    ],
-    "status": "failed",
-    "status_color": 9
-}
