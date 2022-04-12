@@ -1,0 +1,70 @@
+---
+dependency:
+  name: galaxy
+
+driver:
+  # Specifies the driver that should be used. Podman should also work
+  name: docker
+
+lint: |
+  set -e
+  yamllint .
+  ansible-lint -x 106 .
+
+platforms:
+  # Set name and hostname
+  - name: ns4
+    groups:
+      - dns
+    hostname: ns4
+    docker_networks:
+      - name: bind
+        ipam_config:
+          - subnet: "10.11.0.0/16"
+            gateway: "10.11.0.254"
+    networks:
+      - name: bind
+        ipv4_address: "10.11.0.4"
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-centos8}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ${PWD}:/etc/ansible/roles/bertvv.bind:ro
+      - ${PWD}/library:/root/.ansible/plugins/modules:ro
+    privileged: true
+    pre_build_image: true
+    tty: true
+    environment:
+      container: docker
+
+  - name: ns5
+    hostname: ns5
+    groups:
+      - dns
+    networks:
+      - name: bind
+        ipv4_address: "10.11.0.5"
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-centos8}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ${PWD}:/etc/ansible/roles/bertvv.bind:ro
+      - ${PWD}/library:/root/.ansible/plugins/modules:ro
+    privileged: true
+    pre_build_image: true
+    tty: true
+    environment:
+      container: docker
+
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      interpreter_python: auto_legacy_silent
+      callback_whitelist: profile_tasks
+    ssh_connection:
+      pipelining: true
+
+# Runs the verify.yml playbook
+verifier:
+  name: ansible
