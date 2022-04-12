@@ -2,8 +2,9 @@
 
 - name: install and configure bind
   hosts: all
-  remote_user: root
-  #become: true
+  remote_user: truch
+  become: true
+  become_method: sudo
 
   roles:
-    - exphost.named
+    - bertvv.bind

@@ -1,2 +1,10 @@
 220321174929.656 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
 220321174954.628 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+220321175641.471 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+220321175752.311 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+220321175816.562 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+220321175835.765 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+220321175844.183 WARNING 'ansible_navigator.image_manager.puller._log_message' Image inspection failed, image assumed to be corrupted or missing
+220321175844.686 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+220321175907.802 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+220321180000.448 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
