@@ -1,0 +1,30 @@
+---
+
+- name: apply MOTD to all nodes
+  collections:
+    - redhat.satellite
+  hosts: "localhost"
+  #remote_user: root
+  #become: true
+
+  tasks:
+  - name: "Create a host"
+    redhat.satellite.host:
+      username: "admin"
+      password: "password"
+      server_url: "https://satellite.local"
+      validate_certs: no
+      name: "{{ vm_fqdn }}"
+      location: "Default Location"
+      organization: "Default Organization"
+      hostgroup: "Default_Libvirt"
+      build: yes
+      compute_attributes:
+        start: "1"
+      state: present
+    register: create_out
+
+
+  - name: "Debug response"
+    ansible.builtin.debug:
+      msg: "{{ create_out }}"
