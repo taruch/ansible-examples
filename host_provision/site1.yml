@@ -10,9 +10,9 @@
   tasks:
   - name: "Create a host"
     redhat.satellite.host:
-      username: "admin"
-      password: "password"
-      server_url: "https://satellite.local"
+      username: "{{ Username }}"
+      password: "{{ Password }}"
+      server_url: "{{ Satellite_6_URL }}"
       validate_certs: no
       name: "{{ vm_fqdn }}"
       location: "Default Location"
@@ -28,3 +28,20 @@
   - name: "Debug response"
     ansible.builtin.debug:
       msg: "{{ create_out }}"
+
+  - name: "Debug response 2"
+    ansible.builtin.debug:
+      msg: "{{ create_out.diff.after.hosts[0].ip }}"
+
+  - name: Wait for the build to finish 
+    wait_for:
+      port: 22
+      host: '{{ create_out.diff.after.hosts[0].ip }}'
+      search_regex: OpenSSH
+      delay: 10
+      timeout: 1000
+    connection: local
+
+  - name: "Debug response 3"
+    ansible.builtin.debug:
+      msg: "{{ create_out.diff.after.hosts[0].ip }}"
