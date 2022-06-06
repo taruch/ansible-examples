@@ -3,7 +3,6 @@
 - name: "Create ansible machine account"
   user:
     name: ansible
-    uid: 970
     state: present
     groups: wheel
 
