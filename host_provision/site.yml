@@ -8,5 +8,5 @@
   #become: true
 
   roles:
-    - motd
+    #- motd
     - create_ansible_user
