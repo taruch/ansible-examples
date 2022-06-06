@@ -20,6 +20,7 @@ ply==3.11
 ptyprocess==0.5.2
 pycparser==2.19
 python-daemon==2.1.2
+python3-dnf==4.7.0-4
 pytz==2019.3
 PyYAML==5.4.1
 requirements-parser==0.2.0
