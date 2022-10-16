@@ -11,6 +11,11 @@
     user: ansible
     key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDFMqNFda1nqa7HcS8iPL7prZU/5/DYa/N7aw4yyaW8SxPuL4GJ4ADUSQ2/Hlj0wi13kGd53akhBM28ZFDW1L02wH5K5vbtszD0Eta89JghCd+aRRcDM95kK4lomH4Rl5D+G65Sj3vauc7Q8QUPYRdDk8aH5X3ngAo3n9nFufpkxqYcWXsy87Zcr6CjLDKYJ3VjGF4cLEwNUzdWrqrItMciVSz6OdDrjyAUSAzQSP7gYsyyKlEW+LDuEiuyDvSRY1g1GHtkudEOehC4zvedu5MV7401xS0w6PohI23m67Ah3L9Yt7J47o5uB9LV7W2SrzM/4Lptg/2sQ1LFIu3FPqZSzC1xk074THV/a3CoeOMHX76vy7oqM6LBbLxkM3s1+kA3iAzB+Kdom3DZrIVchaMW/B1jzHdxBO6G0k8W64k+P7WE+IebiUhbnT45Tt0Sz9h3j1e2YPaREVyp1yd2D89wgt2EgOb9D+V18G8swI66IQTAjCMBo12ilir9i0kCFOs= truch@truch.remote.csb"
 
+- name: "Add authorized keys"
+  authorized_key:
+    user: ansible
+    key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDdsz8oJxPhOpNF7aKJ14voMfAXEcEBCDsWVAPKtNTgsmPBQOIfyv8c2eO1DRVTo0MIUDQrxnAHKHgyvKkf1xjyG8k5QFwZRkNzanzyC/9p33ANrGNtaA37px81xEIhQhnJEBwfSAaz6p9GcZfkBykUq6THSYYoPvbaR9QuyNcYn02Csh4+u4uV07Pa2+apcQ1vevTJT+TzzCzWy6Pl3vA++RnFcH8//bqFvV++kUHRvXnwtc8/2w8Rdhtzvy8E5EQXuQwrQoJPOhLvFwjM881c8TAZsaPHQUVQvCc9TgDNlW9VtmA1BlBC3Rxlr5LSWWq2RgMuVnyowPxsHhYU9c0N truch@laptop.entrenchedrealist.com"
+
 - name: "Allow admin users to sudo without a password"
   lineinfile:
     dest: "/etc/sudoers"
