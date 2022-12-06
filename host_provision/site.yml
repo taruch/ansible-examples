@@ -1,6 +1,6 @@
 ---
 
-- name: apply MOTD to all nodes
+- name: Apply base configuration
   collections:
     - redhat.satellite
   hosts: all
