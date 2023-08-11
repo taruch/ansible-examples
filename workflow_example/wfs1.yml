@@ -3,23 +3,32 @@
 - name: get contents of authorized_keys
   hosts: all
   become: true
+  gather_facts: false
 
   tasks:
     #- name: Get contents of authorized_keys 
     #  shell: cat /root/.ssh/authorized_keys
     #  register: pb1_contents
 
-    - name: Get contents of authorized_keys 
-      ansible.builtin.set_fact:
-        pb1_contents: "{{lookup('ansible.builtin.file', '/home/ec2-user/.ssh/authorized_keys') }}"
+    - name: Find out what the remote machine's mounts are
+      ansible.builtin.slurp:
+        src: /home/ec2-user/.ssh/authorized_keys
+      register: program_conf
+
+    #  ansible.builtin.set_fact:
+    #    pb1_contents: "{{ lookup('ansible.builtin.file', '/home/ec2-user/.ssh/authorized_keys') }}"
     #  register: pb1_contents
 
+    - name: Set Fact from returned information
+      ansible.builtin.set_fact:
+        auth_keys: "{{ program_conf['content'] | b64decode }}"
 
-    - name: get contents of authorized_keys
-      debug: msg="pb1 - the value of pb1_contents is {{ pb1_contents.stdout_lines }}"
+    - name: Print returned information
+      ansible.builtin.debug:
+        var: auth_keys
 
     - name: "Artifact URL of test results to Tower Workflows"
       set_stats:
         data:
-          auth_keys_results:  "{{ pb1_contents.stdout_lines  }}"
+          auth_keys_results: "{{ auth_keys }}"
 

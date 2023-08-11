@@ -8,4 +8,4 @@
 #aaphub.local
 
 [test]
-testhost1.local
+18.220.206.226 ansible_user=ec2-user
