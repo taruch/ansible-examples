@@ -11,7 +11,7 @@
 
     - name: Get contents of authorized_keys 
       ansible.builtin.set_fact:
-        pb1_contents: "{{lookup('ansible.builtin.file', '/root/.ssh/authorized_keys') }}"
+        pb1_contents: "{{lookup('ansible.builtin.file', '/home/ec2-user/.ssh/authorized_keys') }}"
     #  register: pb1_contents
 
 
