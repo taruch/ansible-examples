@@ -15,10 +15,6 @@
         src: /home/ec2-user/.ssh/authorized_keys
       register: program_conf
 
-    #  ansible.builtin.set_fact:
-    #    pb1_contents: "{{ lookup('ansible.builtin.file', '/home/ec2-user/.ssh/authorized_keys') }}"
-    #  register: pb1_contents
-
     - name: Set Fact from returned information
       ansible.builtin.set_fact:
         auth_keys: "{{ program_conf['content'] | b64decode }}"
@@ -26,6 +22,7 @@
     - name: Print returned information
       ansible.builtin.debug:
         var: auth_keys
+        verbosity: 2
 
     - name: "Artifact URL of test results to Tower Workflows"
       set_stats:
