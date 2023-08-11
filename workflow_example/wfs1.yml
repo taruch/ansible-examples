@@ -26,6 +26,7 @@
 
     - name: "Artifact URL of test results to Tower Workflows"
       set_stats:
+      per_host: true
         data:
           auth_keys_results: "{{ auth_keys }}"
 
