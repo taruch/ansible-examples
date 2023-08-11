@@ -30,3 +30,4 @@
       set_stats:
         data:
           auth_key_results: "{{ auth_keys }}"
+          auth_key: "string"
