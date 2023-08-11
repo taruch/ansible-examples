@@ -5,9 +5,14 @@
   become: true
 
   tasks:
+    #- name: Get contents of authorized_keys 
+    #  shell: cat /root/.ssh/authorized_keys
+    #  register: pb1_contents
+
     - name: Get contents of authorized_keys 
-      shell: cat /root/.ssh/authorized_keys
-      register: pb1_contents
+      ansible.builtin.set_fact:
+        pb1_contents: "{{lookup('ansible.builtin.file', '/root/.ssh/authorized_keys') }}"
+    #  register: pb1_contents
 
 
     - name: get contents of authorized_keys
