@@ -17,7 +17,7 @@
 
     - name: Set Fact from returned information
       ansible.builtin.set_fact:
-        auth_keys: "{{ program_conf['content'] | b64decode }}"
+        auth_keys: "{{ (program_conf['content'] | b64decode).split('\n') }}"
 
     - name: Print returned information
       ansible.builtin.debug:
