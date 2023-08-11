@@ -17,7 +17,9 @@
 
     - name: Set Fact from returned information
       ansible.builtin.set_fact:
-        auth_keys: "{{ (program_conf['content'] | b64decode).split('\n') }}"
+        auth_keys:
+          - name: "{{ inventory_hostname }}"
+            content: "{{ (program_conf['content'] | b64decode).split('\n') }}"
 
     - name: Print returned information
       ansible.builtin.debug:
@@ -27,6 +29,4 @@
     - name: "Artifact URL of test results to Tower Workflows"
       set_stats:
         data:
-          auth_keys_results: "{{ auth_keys }}"
-        per_host: true
-
+          auth_key_results: "{{ auth_keys }}"
