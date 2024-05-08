@@ -1,0 +1,39 @@
+---
+
+- name: Create file
+  # Content suggestion provided by Ansible Lightspeed
+  ansible.builtin.copy:
+    dest: "/tmp/slurpthis.txt"
+    content: "This is the file content I want to splurp"
+    mode: '0644'
+
+
+- name: Slurp file from remote host
+  ansible.builtin.slurp:
+    src: "/tmp/slurpthis.txt"
+  register: slurpedfile
+  become: true
+
+# - name: Copy the CA cert to EE
+#   vars:
+#     ansible_connection: local
+#   ansible.builtin.copy:
+#     content: "{{ (slurpedfile['content'] | b64decode) }}"
+#     dest: "/tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer"
+#   delegate_to: localhost
+
+
+- name: Copy the cacert to your file server
+  # If your fileserver doesn't use the same credentials (username and password/key)
+  # you will need to create a separate credential type
+  vars:
+    ansible_user: "{{ CA_USERNAME }}"
+    ansible_password: "{{ CA_PASSWORD }}"
+  ansible.builtin.copy:
+    content: "{{ (slurpedfile['content'] | b64decode) }}"
+    dest: "/tmp/slurpthis.txt"
+    owner: ca-admin
+    group: ca-admin
+    mode: '0644'
+    backup: true
+  delegate_to: "{{ CA_HOST }}"

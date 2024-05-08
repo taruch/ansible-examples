@@ -1,5 +1,0 @@
----
-
-collections:
-  - name: servicenow.itsm
-  - name: servicenow.servicenow

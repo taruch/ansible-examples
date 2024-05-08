@@ -1,0 +1,10 @@
+---
+
+- name: Get Some Files
+  hosts: linux1
+  gather_facts: false
+
+  tasks:
+    - name: Get file from here and put it there
+      ansible.builtin.include_role:
+        name: copyexample
