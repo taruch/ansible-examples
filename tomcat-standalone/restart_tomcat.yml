@@ -5,7 +5,7 @@
   gather_facts: False
 
   tasks:
-    - name: Restart Tomcat Server
+    - name: Start service httpd, if not started
       ansible.builtin.service:
-        - name: tomcat
-          state: started
+        name: tomcat
+        state: started
