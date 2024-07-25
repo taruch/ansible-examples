@@ -1,0 +1,11 @@
+---
+- name: Restart the tomcat Server
+  hosts: "{{ _hosts }}"
+  become: true
+  gather_facts: False
+
+  tasks:
+    - name: Restart Tomcat Server
+      ansible.builtin.service:
+        - name: tomcat
+          state: started
