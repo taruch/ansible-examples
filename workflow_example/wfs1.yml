@@ -31,3 +31,16 @@
         data:
           auth_key_results: "{{ auth_keys }}"
           auth_key: "string"
+
+
+  # - name: per host collection and aggregate false via a workaround
+  #   ansible.builtin.set_stats:
+  #     data:
+  #       dist_ver_per_host_agg_false: "{{ dist_ver_per_host_agg_false | default({}) | combine({ inventory_hostname : { 'ver' : ansible_facts.distribution_version}}) }}"
+  #     aggregate: false
+ 
+  # - name: per host collection and aggregate true via a workaround
+  #   ansible.builtin.set_stats:
+  #     data:
+  #       dist_ver_per_host_agg_true: "{{ dist_ver_per_host_agg_true | default({}) | combine({ inventory_hostname : { 'ver' : ansible_facts.distribution_version}}) }}"
+  #     aggregate: true

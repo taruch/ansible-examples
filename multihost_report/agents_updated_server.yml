@@ -1,0 +1,293 @@
+---
+- name: Install and configure httpd
+  hosts: localhost
+  become: true
+  gather_facts: true
+  vars:
+    report_dir: /var/www/html/agent-reports
+    report_file: /var/www/html/agent-reports/report.html
+
+  tasks:
+    - name: Install httpd
+      ansible.builtin.dnf:
+        name: httpd
+        state: present
+      notify: Restart httpd
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Enable firewall http service
+      ansible.posix.firewalld:
+        service: http
+        state: enabled
+        immediate: true
+        permanent: true
+      when: "'firewalld.service' in ansible_facts.services"
+
+    - name: Disable httpd welcome page
+      ansible.builtin.file:
+        path: /etc/httpd/conf.d/welcome.conf
+        state: absent
+      notify: Restart httpd
+
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: '{{ report_dir }}'
+        state: directory
+        owner: root
+        group: root
+        mode: 0755
+
+  handlers:
+    - name: Restart httpd
+      ansible.builtin.service:
+        name: httpd
+        state: restarted
+        enabled: true
+
+- name: Check status and version of various agents and system information
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    aggregated_output: ""
+    report_dir: /var/www/html/agent-reports
+    report_file: /var/www/html/agent-reports/report.html
+
+  tasks:
+    - name: Check Splunk status
+      ansible.builtin.shell: sudo /opt/splunkforwarder/bin/splunk status | grep -E 'splunkd|splunk helpers'
+      register: splunk_status
+      ignore_errors: true
+
+    - name: Check Splunk version
+      ansible.builtin.shell: /opt/splunkforwarder/bin/splunk --version | grep -E 'Splunk Universal Forwarder'
+      register: splunk_version
+      ignore_errors: true
+
+    - name: Check Crowdstrike status
+      ansible.builtin.shell: systemctl is-active falcon-sensor
+      register: crowdstrike_status
+      ignore_errors: true
+
+    - name: Check Crowdstrike version
+      ansible.builtin.command: /opt/CrowdStrike/falconctl -g --version
+      register: crowdstrike_version
+      ignore_errors: true
+
+    - name: Check Tenable status
+      ansible.builtin.shell: systemctl is-active nessusagent
+      register: tenable_status
+      ignore_errors: true
+
+    - name: Check Tenable version
+      ansible.builtin.shell: /opt/nessus_agent/sbin/nessuscli -v | grep -E "nessuscli"
+      register: tenable_version
+      ignore_errors: true
+
+    - name: Check Nxlog status
+      ansible.builtin.shell: systemctl is-active nxlog
+      register: nxlog_status
+      ignore_errors: true
+
+    - name: Check Nxlog version
+      ansible.builtin.shell: /opt/nxlog/bin/nxlog -V | grep -E "version"
+      register: nxlog_version
+      ignore_errors: true
+
+    - name: Check Mdatp status
+      ansible.builtin.shell: systemctl is-active mdatp
+      register: mdatp_status
+      ignore_errors: true
+
+    - name: Check Mdatp version
+      ansible.builtin.command: /opt/microsoft/mdatp/sbin/wdavdaemonclient version
+      register: mdatp_version
+      ignore_errors: true
+
+    - name: Check Pacemaker service status
+      ansible.builtin.shell: systemctl is-active pcsd
+      register: pacemaker_status
+      ignore_errors: true
+
+    - name: Check Pacemaker version
+      ansible.builtin.shell: pcs --version
+      register: pacemaker_version
+      ignore_errors: true
+
+    - name: Check Crontab service status
+      ansible.builtin.shell: systemctl is-active crond
+      register: crontab_status
+      ignore_errors: true
+
+    - name: Check Kdump service status
+      ansible.builtin.shell: systemctl is-active kdump
+      register: kdump_status
+      ignore_errors: true
+
+    - name: Validate fstab integrity
+      ansible.builtin.command: ls -l /etc/fstab
+      register: fstab_integrity
+      ignore_errors: true
+
+    - name: Get the firmware version
+      ansible.builtin.shell: dmidecode -t 5 | tail -2
+      register: firmware_version
+      ignore_errors: true
+
+    - name: Get the OS Kernel version
+      ansible.builtin.shell: uname -r
+      register: kernel_version
+      ignore_errors: true
+
+    - name: Get the Red Hat OS release
+      ansible.builtin.shell: cat /etc/redhat-release
+      register: os_release
+      ignore_errors: true
+
+    - name: Get the hardware information (CPU count)
+      ansible.builtin.shell: cat /proc/cpuinfo | grep -i processor | wc -l
+      register: cpu_count
+      ignore_errors: true
+
+    - name: Get the hardware information (RAM)
+      ansible.builtin.shell: cat /proc/meminfo | head -1
+      register: ram_info
+      ignore_errors: true
+
+    - name: Create output content
+      set_fact:
+        output_content: |
+          <h2 style="border: 1px solid #ddd; padding: 10px; background-color: #f9f9f9;">Host: {{ inventory_hostname }}</h2>
+          <div style="border: 1px solid #ddd; padding: 10px; background-color: #f9f9f9;">
+            <table style="width:100%; border-collapse: collapse;">
+              <tr>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Parameter</th>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Value</th>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Splunk Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ splunk_status.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Splunk Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ splunk_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Crowdstrike Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ 'running' if crowdstrike_status.rc == 0 else 'not running' | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Crowdstrike Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ crowdstrike_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Tenable Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ 'running' if tenable_status.rc == 0 else 'not running' | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Tenable Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ tenable_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Nxlog Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ 'running' if nxlog_status.rc == 0 else 'not running' | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Nxlog Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ nxlog_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Mdatp Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ 'running' if mdatp_status.rc == 0 else 'not running' | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Mdatp Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ mdatp_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Pacemaker Service Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ 'active' if pacemaker_status.rc == 0 else 'inactive' | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Pacemaker Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ pacemaker_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Crontab Service Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ 'active' if crontab_status.rc == 0 else 'inactive' | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Kdump Service Status</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ 'active' if kdump_status.rc == 0 else 'inactive' | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Fstab Integrity</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ fstab_integrity.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Firmware Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ firmware_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">OS Kernel Version</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ kernel_version.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">Red Hat OS Release</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ os_release.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">CPU Count</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ cpu_count.stdout | default('Command failed') }}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">RAM Info</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ ram_info.stdout | default('Command failed') }}</td>
+              </tr>
+            </table>
+          </div>
+          <hr/>
+
+    # - name: Add host output to aggregated_output
+    #   set_fact:
+    #     aggregated_output: "{{ aggregated_output }}{{ output_content }}"
+
+    - name: Create HTML report on localhost
+      run_once: true
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Agent Status and Versions Report</title>
+              <style>
+                  body { font-family: Arial, sans-serif; margin: 20px; }
+                  h1 { color: #333; }
+                  ul { list-style-type: none; padding: 0; }
+                  li { margin-bottom: 10px; }
+                  hr { border: 1px solid #ddd; margin: 20px 0; }
+              </style>
+          </head>
+          <body>
+              <h1>Agent Status and Versions Report</h1>
+              {% for _host in ansible_play_hosts %}
+                {{ hostvars[_host]['output_content'] }}
+              {% endfor %}
+              {{ aggregated_output | safe }}
+          </body>
+          </html>
+        dest: "{{ report_file }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Ensure httpd is running on localhost
+      run_once: true
+      delegate_to: localhost
+      ansible.builtin.service:
+        name: httpd
+        state: started
+        enabled: true

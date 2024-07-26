@@ -1,6 +1,7 @@
 ---
 - name: Restart the tomcat Server
-  hosts: "{{ _hosts }}"
+  hosts: "{{ event.impactedEntities[0].entityId.id }}"
+  #hosts: "{{ _hosts }}"
   become: true
   gather_facts: False
 
