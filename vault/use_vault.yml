@@ -8,8 +8,8 @@
   tasks:
     - name: print out a variable
       ansible.builtin.debug:
-        var: "thing1_key: {{ thing1_key }}"
+        msg: "thing1_key: {{ thing1_key }}"
 
     - name: print out a variable
       ansible.builtin.debug:
-        var: "thing2_key: {{ thing2_key }}"
+        msg: "thing2_key: {{ thing2_key }}"
