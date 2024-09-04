@@ -4,7 +4,6 @@
   gather_facts: false
   vars_files:
     - ./vault1.yml
-    - ./vault2.yml
 
   tasks:
     - name: print out a variable
@@ -14,7 +13,3 @@
     - name: print out a variable
       ansible.builtin.debug:
         var: "thing2_key: {{ thing2_key }}"
-
-    - name: print out a variable
-      ansible.builtin.debug:
-        var: "thing3_key: {{ thing3_key }}"
