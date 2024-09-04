@@ -9,8 +9,8 @@
   tasks:
     - name: print out a variable
       ansible.builtin.debug:
-        var: "thing1_key: {{ thing1_value }}"
+        var: "thing1_key: {{ thing1_key }}"
 
     - name: print out a variable
       ansible.builtin.debug:
-        var: "thing2_key: {{ thing2_value }}"
+        var: "thing2_key: {{ thing2_key }}"
