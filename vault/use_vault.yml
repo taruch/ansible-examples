@@ -1,0 +1,11 @@
+---
+- name: Use a vault file
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - new_vault.yml
+
+  tasks:
+    - name: print out a variable
+      ansible.builtin.debug:
+        var: "{{ thing1 }}"
