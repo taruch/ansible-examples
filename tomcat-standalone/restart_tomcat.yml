@@ -1,5 +1,5 @@
 ---
-- name: Restart the tomcat Server
+- name: Service Down - Restart Service
   hosts: "{{ ansible_eda.event.impactedEntities[0].entityId.id }}"
   #hosts: "{{ _hosts }}"
   become: true
@@ -8,5 +8,5 @@
   tasks:
     - name: Start service httpd, if not started
       ansible.builtin.service:
-        name: tomcat
+        name: "{{ ansible_eda.event.impactedEntities[0].name }}"
         state: started
