@@ -1,0 +1,34 @@
+---
+- name: Install Security Patches
+  hosts: "{{ _host }}"
+  become: true
+  gather_facts: true
+  tasks:
+    - name: RedHat Security Updates execution block
+      when: ansible_os_family == "RedHat"
+      block:
+        - name: Upgrade all security related packages
+          ansible.builtin.yum:
+            name: '*'
+            security: true
+            state: latest
+            #exclude: kernel*,foo*
+          register: dnf_results
+    
+        - name: Print Results
+          ansible.builtin.debug:
+            msg: "{{ dnf_results.stdout_lines }}"
+
+        - name: check if reboot is required
+          ansible.builtin.shell:
+            cmd: "dnf needs-restarting -r -s"
+          register: needs_restarting
+          changed_when: needs_restarting.rc == 1
+          failed_when: false
+          notify: Reboot host
+  
+  handlers:
+    - name: Reboot host
+      ansible.builtin.reboot:
+        msg: "Ansible installed security updates - Machine reboots in 5 seconds"
+        reboot_timeout: 300
