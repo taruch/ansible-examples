@@ -1,0 +1,17 @@
+---
+- name: Lookup DNS host from EE
+  hosts: all
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+
+    - name: Lookup multiple names at once (from list variable)
+      ansible.builtin.debug:
+        msg: "A record found {{ item }}"
+      loop: "{{ query('community.general.dig', *hosts) }}"
+      vars:
+        hosts:
+          - example.org.
+          - example.com.
+          - gmail.com.
