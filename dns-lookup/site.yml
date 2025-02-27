@@ -15,3 +15,14 @@
           - example.org.
           - example.com.
           - gmail.com.
+
+
+    - name: Resolve DNS Entries
+      ansible.builtin.set_fact:
+        dns_resolution: "{{ lookup('community.general.dig', DNS_ENTRY | default('example.com')) | split(',') }}"
+      
+    - name: "The TXT record for example.org."
+      loop: "{{ dns_resolution }}"
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+        # msg: "{{ lookup('community.general.dig', DNS_ENTRY | default('example.com')) }}"
