@@ -14,7 +14,7 @@
   tasks:
     - name: Example of aap_configuration dispatch
       block:
-        - name: Include configuration for {{ demo }}
+        - name: Include configuration for deployment
           ansible.builtin.include_vars: "setup.yml"
 
         - name: Demo Components
