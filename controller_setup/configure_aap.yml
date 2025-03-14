@@ -8,9 +8,6 @@
     # aap_username: pass in as extravar
     # aap_password: pass in as extravar
 
-  # collections:
-  #   - awx.awx
-
   tasks:
     - name: Example of aap_configuration dispatch
       block:
