@@ -1,0 +1,288 @@
+---
+
+aap_organizations:
+  - name: aap_foo
+    description: This is the aap_foo Organization
+
+
+controller_credential_types:
+  - name: "Dynatrace Credential"
+    description: !unsafe ''
+    kind: "cloud"
+    inputs:
+      fields:
+      - id: DYNATRACE_HOST
+        type: string
+        label: Dynatrace Instace
+        secret: false
+      - id: DYNATRACE_API_KEY
+        type: string
+        label: Dynatrace API Key
+        secret: true
+      required:
+      - DYNATRACE_HOST
+      - DYNATRACE_API_KEY
+    injectors:
+      extra_vars:
+        dynatrace_url: !unsafe '{{ DYNATRACE_HOST }}'
+        dynatrace_api_key: !unsafe '{{ DYNATRACE_API_KEY }}'
+  - name: "ServiceNow"
+    description: !unsafe ''
+    kind: "cloud"
+    inputs:
+      fields:
+      - id: SN_USERNAME
+        type: string
+        label: Username
+      - id: SN_PASSWORD
+        type: string
+        label: Password
+        secret: true
+      - id: SN_HOST
+        type: string
+        label: Snow Host
+      required:
+      - SN_USERNAME
+      - SN_PASSWORD
+      - SN_HOST
+    injectors:
+      env:
+        SN_HOST: !unsafe '{{ SN_HOST }}'
+        SN_PASSWORD: !unsafe '{{ SN_PASSWORD }}'
+        SN_USERNAME: !unsafe '{{ SN_USERNAME }}'
+      extra_vars:
+        SN_HOST: !unsafe '{{ SN_HOST }}'
+        SN_PASSWORD: !unsafe '{{ SN_PASSWORD }}'
+        SN_USERNAME: !unsafe '{{ SN_USERNAME }}'
+
+
+aap_credentials:
+  - name: "ServiceNow"
+    description: !unsafe ''
+    credential_type: "ServiceNow"
+    organization: "Default"
+    inputs:
+      SN_HOST: https://ven05430.service-now.com/
+      SN_PASSWORD: ''
+      SN_USERNAME: admin
+
+  - name: "JBOSS_Hosts"
+    description: !unsafe ''
+    credential_type: "Machine"
+    organization: "Default"
+    inputs:
+      username: ansible
+      ssh_key_data: ''
+      become_password: ''
+
+  - name: "Dynatrace"
+    description: !unsafe ''
+    credential_type: "Dynatrace Credential"
+    organization: "Default"
+    inputs:
+      DYNATRACE_HOST: pus61204.live.dynatrace.com
+      DYNATRACE_API_KEY: ''
+
+
+controller_projects:
+  - name: "ServiceNow"
+    description: !unsafe ''
+    organization: "Default"
+    scm_type: "git"
+    scm_url: "https://github.com/taruch/symmetrical-octo-umbrella.git"
+    scm_branch: ""
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: false
+    scm_update_cache_timeout: "0"
+    scm_refspec: ""
+    allow_override: false
+    update_project: false
+    timeout: "0"
+
+  - name: "AAP EDA Testing"
+    description: !unsafe ''
+    organization: "Default"
+    scm_type: "git"
+    scm_url: "https://github.com/taruch/aap-eda-testing.git"
+    scm_branch: ""
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: false
+    scm_update_cache_timeout: "0"
+    scm_refspec: ""
+    allow_override: false
+    update_project: false
+    timeout: "0"
+
+controller_templates:
+  - name: "SERVICENOW / Create Incident (Dynatrace)"
+    description: !unsafe ''
+    organization: "Default"
+    project: "ServiceNow"
+    inventory: "Demo Inventory"
+    playbook: "itsm_incident_create dynatrace.yml"
+    scm_branch: ""
+    forks: 0
+    limit: ""
+    verbosity: 0
+    job_type: "run"
+    job_slice_count: 1
+    use_fact_cache: false
+    credentials:
+      - "ServiceNow"
+    allow_simultaneous: false
+    ask_scm_branch_on_launch: false
+    ask_diff_mode_on_launch: false
+    ask_tags_on_launch: false
+    ask_skip_tags_on_launch: false
+    ask_job_type_on_launch: false
+    ask_verbosity_on_launch: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_credential_on_launch: false
+    ask_execution_environment_on_launch: false
+    ask_labels_on_launch: false
+    ask_forks_on_launch: false
+    ask_job_slice_count_on_launch: false
+    ask_timeout_on_launch: false
+    ask_instance_groups_on_launch: false
+    extra_vars: ""
+    job_tags: ""
+    force_handlers: false
+    skip_tags: ""
+    start_at_task: ""
+    timeout: 0
+    execution_environment: "Product Demos EE"
+    host_config_key: ""
+    survey_enabled: false
+    become_enabled: false
+    diff_mode: false
+    webhook_service: ""
+    prevent_instance_group_fallback: false
+
+  - name: "DYNATRACE / Stop Services Demo"
+    description: !unsafe ''
+    organization: "Default"
+    project: "AAP EDA Testing"
+    inventory: "Demo Inventory"
+    playbook: "demo/stop_jboss.yml"
+    scm_branch: ""
+    forks: 0
+    limit: ""
+    verbosity: 0
+    job_type: "run"
+    job_slice_count: 1
+    use_fact_cache: false
+    credentials:
+      - "JBOSS_Hosts"
+    allow_simultaneous: false
+    ask_scm_branch_on_launch: false
+    ask_diff_mode_on_launch: false
+    ask_tags_on_launch: false
+    ask_skip_tags_on_launch: false
+    ask_job_type_on_launch: false
+    ask_verbosity_on_launch: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_credential_on_launch: false
+    ask_execution_environment_on_launch: false
+    ask_labels_on_launch: false
+    ask_forks_on_launch: false
+    ask_job_slice_count_on_launch: false
+    ask_timeout_on_launch: false
+    ask_instance_groups_on_launch: false
+    extra_vars: ""
+    job_tags: ""
+    force_handlers: false
+    skip_tags: ""
+    start_at_task: ""
+    timeout: 0
+    host_config_key: ""
+    survey_enabled: false
+    become_enabled: false
+    diff_mode: false
+    webhook_service: ""
+    prevent_instance_group_fallback: false
+
+  - name: "DYNATRACE / Restore Service Availability"
+    description: !unsafe ''
+    organization: "Default"
+    project: "AAP EDA Testing"
+    inventory: "Demo Inventory"
+    playbook: "demo/restart_web_service.yml"
+    scm_branch: ""
+    forks: 0
+    limit: ""
+    verbosity: 0
+    job_type: "run"
+    job_slice_count: 1
+    use_fact_cache: false
+    credentials:
+      - "Dynatrace"
+      - "JBOSS_Hosts"
+    allow_simultaneous: false
+    ask_scm_branch_on_launch: false
+    ask_diff_mode_on_launch: false
+    ask_tags_on_launch: false
+    ask_skip_tags_on_launch: false
+    ask_job_type_on_launch: false
+    ask_verbosity_on_launch: false
+    ask_variables_on_launch: true
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_credential_on_launch: false
+    ask_execution_environment_on_launch: false
+    ask_labels_on_launch: false
+    ask_forks_on_launch: false
+    ask_job_slice_count_on_launch: false
+    ask_timeout_on_launch: false
+    ask_instance_groups_on_launch: false
+    extra_vars: ""
+    job_tags: ""
+    force_handlers: false
+    skip_tags: ""
+    start_at_task: ""
+    timeout: 0
+    execution_environment: "Default execution environment"
+    host_config_key: ""
+    survey_enabled: false
+    become_enabled: false
+    diff_mode: false
+    webhook_service: ""
+    prevent_instance_group_fallback: false
+
+
+controller_workflows:
+  - name: "DYNATRACE Service Restoration"
+    description: !unsafe ''
+    organization: "Default"
+    state: "present"
+    simplified_workflow_nodes:
+      - identifier: "Incident Create"
+        workflow_job_template: "DYNATRACE Service Restoration"
+        unified_job_template: "SERVICENOW / Create Incident (Dynatrace)"
+        limit: ""
+        limit: ""
+        organization: "Default"
+        all_parents_must_converge: "False"
+      - identifier: "b9da42fb-0459-47d6-bcec-f0c3978d258a"
+        workflow_job_template: "DYNATRACE Service Restoration"
+        unified_job_template: "DYNATRACE / Restore Service Availability"
+        limit: ""
+        limit: ""
+        organization: "Default"
+        all_parents_must_converge: "False"
+        always_nodes:
+          - Incident Create
+    ask_variables_on_launch: "True"
+    allow_simultaneous: "False"
+    scm_branch: ""
+    limit: ""
+    ask_limit_on_launch: false
+    ask_inventory_on_launch: false
+    webhook_service: ""
+    extra_vars: ""
+    survey_enabled: False

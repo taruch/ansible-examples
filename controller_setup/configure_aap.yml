@@ -1,0 +1,26 @@
+---
+- name: Ansible Automation Platform Post Install Configuration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # aap_validate_certs: pass in as extravar
+    # aap_hostname: pass in as extravar
+    # aap_username: pass in as extravar
+    # aap_password: pass in as extravar
+
+  # collections:
+  #   - awx.awx
+
+  tasks:
+    - name: Example of aap_configuration dispatch
+      block:
+        - name: Include configuration for {{ demo }}
+          ansible.builtin.include_vars: "setup.yml"
+
+        - name: Demo Components
+          ansible.builtin.include_role:
+            name: infra.aap_configuration.dispatch
+          vars:
+            controller_dependency_check: false  # noqa: var-naming[no-role-prefix]
+
+...
