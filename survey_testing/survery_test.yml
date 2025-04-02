@@ -1,0 +1,9 @@
+---
+- name: Accepting survey variables
+  hosts: all
+  vars:
+    survey_var: "{{ _survey_var | split('\n')}}"
+  tasks:
+    - name: Print out the variable
+      ansible.builtin.debug:
+        msg: "{{ survey_var }}"
