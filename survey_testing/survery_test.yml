@@ -1,6 +1,6 @@
 ---
 - name: Accepting survey variables
-  hosts: all
+  hosts: "{{ _survey_var | split('\n')}}"
   vars:
     survey_var: "{{ _survey_var | split('\n')}}"
   tasks:
