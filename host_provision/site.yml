@@ -1,8 +1,6 @@
 ---
 
 - name: Apply base configuration
-  collections:
-    - redhat.satellite
   hosts: all
   remote_user: root
   #become: true
