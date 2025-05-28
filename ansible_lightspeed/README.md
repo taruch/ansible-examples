@@ -1,8 +1,12 @@
-# Lightspeed playbook generation examples #
+# Lightspeed Demo Examples #
 
+## Task Generation Example 1 ##
+Open the task_suggestions1.yml and uncomment each of the tasks 1 by 1.
 
+## Playbook Generation Example 2 ##
+Open the task_suggestions2.yml, uncomment the play name, click to the end of the line, and hit enter. This will actually provide suggestions for the entire playbook.
 
-## Example 1 - Configure new AWS VPC and Deploy a VM ##
+## Playbook Generation Example 1 - Configure new AWS VPC and Deploy a VM ##
 
 Go to the Ansible icon on the left hand side of the VSC window and select "Generate a playbook".  Drop the below, or just type these in.
 """
@@ -70,7 +74,7 @@ Select Continue at the bottom and it will give you a reasonable playbook to star
 </pre>
 
 
-## Example 2: ##
+## Playbook Generation Example 2: ##
 
 Go to the Ansible icon on the left hand side of the VSC window and select "Generate a playbook".  Drop the below, or just type these in.
 """
