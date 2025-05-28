@@ -1,0 +1,14 @@
+---
+
+- name: Deploy monitoring
+  hosts: monitoring
+  become: true
+
+  tasks:
+    # - name: Include redhat.rhel_system_roles.cockpit
+
+    # - name: Copy files/cockpit.conf to /etc/cockpit/cockpit.conf
+
+    # - name: Restart cockpit service
+
+    # - name: Allow cockpit service through firewall
