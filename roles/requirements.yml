@@ -1,0 +1,6 @@
+---
+roles:
+  # RHEL 7 compliance roles from ComplianceAsCode
+  - name: geerlingguy.elasticsearch 
+  - name: redhatofficial.rhel7-cis
+    version: 0.1.72
