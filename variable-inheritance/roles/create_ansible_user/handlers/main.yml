@@ -1,0 +1,6 @@
+---
+# handlers file for create_ansible_user
+- name: Restart_SSHD_service
+  ansible.builtin.service:
+    name: sshd
+    state: restarted

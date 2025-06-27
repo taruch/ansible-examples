@@ -1,0 +1,26 @@
+# tasks file for create_ansible_user
+- name: "Create ansible machine account"
+  ansible.builtin.user:
+    name: ansible
+    state: present
+    groups: wheel
+
+- name: "Allow admin users to sudo without a password"
+  ansible.builtin.lineinfile:
+    dest: "/etc/sudoers"
+    state: "present"
+    regexp: "^%wheel"
+    line: "%wheel ALL=(ALL) NOPASSWD: ALL"
+
+- name: Password based logins are disabled - only public key based logins are allowed.
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  # The loop below disables root login, password authentication, enables public key authentication, and disables challenge-response authentication
+  loop:
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^#?ChallengeResponseAuthentication', line: 'ChallengeResponseAuthentication no' }
+    - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+  notify: Restart_SSHD_service

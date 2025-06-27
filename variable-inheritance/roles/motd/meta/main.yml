@@ -1,0 +1,17 @@
+---
+
+galaxy_info:
+  author: Jiri Tyr
+  description: Customizable Message Of The Day (motd)
+  license: MIT
+  min_ansible_version: 1.7
+  platforms:
+    - name: Debian
+      versions:
+        - all
+    - name: EL
+      versions:
+        - all
+  categories:
+    - system
+dependencies: []

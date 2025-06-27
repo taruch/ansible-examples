@@ -1,0 +1,43 @@
+# ssh_key is defined in the 'all' group in inventory, so it is inherited by all hosts
+# it can be overridden in a specific host or group (it is overridden in the acc group)
+
+
+- name: "Add authorized keys"
+  ansible.posix.authorized_key:
+    user: ansible
+    key: "{{ item }}"
+    state: present
+  loop: "{{ ssh_keys | default([ssh_key]) }}"
+  when: ssh_keys is defined or ssh_key is defined
+
+- name: "Remove unauthorized key"
+  ansible.posix.authorized_key:
+    user: ansible
+    key: "{{ epic_cluster_pubkey }}"
+    state: absent
+  when: inventory_hostname not in groups['type_epicodb'] and epic_cluster_pubkey is defined
+
+# - name: Print out ntp configuration
+#   ansible.builtin.debug:
+#     msg: "{{ ntp_global }}"
+#     verbosity: 2
+
+# - name: Combine host and group defined NTP configuration
+#   ansible.builtin.set_fact:
+#     device_ntp: "{{ ntp_global | combine(group_ntp_global | default({})) }}"
+
+# - name: Update NTP Configuration
+#   cisco.ios.ios_ntp_global:
+#     config: "{{ device_ntp }}"
+#     state: replaced
+#   register: result
+
+# - name: Print any NTP configuration changes
+#   ansible.builtin.debug:
+#     msg: "{{ result.commands }}"
+
+
+- name: Print out SSH Keys
+  ansible.builtin.debug:
+    msg: "SSH Keys for {{ inventory_hostname }}: {{ ssh_keys | default([ssh_key]) }}"
+  when: ssh_keys is defined or ssh_key is defined
