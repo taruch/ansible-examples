@@ -7,3 +7,7 @@
     - name: Print out the variable
       ansible.builtin.debug:
         msg: "{{ hosts_var }}"
+
+    - name: Print out msg
+      ansible.builtin.debug:
+        msg: "Hey I just ran an action"
