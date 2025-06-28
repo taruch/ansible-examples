@@ -13,5 +13,5 @@ jobs:
           controller_username: ${{ secrets.CONTROLLER_USERNAME }}
           controller_password: ${{ secrets.CONTROLLER_PASSWORD }}
           job_template: "Survey Test"
-          extra_vars: "_survey_var=aws-rhel8\naws-rhel9"
+          extra_vars: "_survey_var=aws-rhel8"
           validate_certs: false
