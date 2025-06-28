@@ -1,9 +1,9 @@
 ---
 - name: Accepting survey variables
-  hosts: "{{ _survey_var | split('\n')}}"
+  hosts: "{{ _hosts | split('\n')}}"
   vars:
-    survey_var: "{{ _survey_var | split('\n')}}"
+    hosts_var: "{{ _hosts | split('\n')}}"
   tasks:
     - name: Print out the variable
       ansible.builtin.debug:
-        msg: "{{ survey_var }}"
+        msg: "{{ hosts_var }}"
