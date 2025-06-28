@@ -10,11 +10,8 @@ jobs:
         uses: ansible-cloud/aap_controller_action@v1.2.8
         with:
           controller_host: ${{ secrets.CONTROLLER_HOST }}
-          CONTROLLER_HOST: ${{ secrets.CONTROLLER_HOST }}
           controller_username: ${{ secrets.CONTROLLER_USERNAME }}
-          CONTROLLER_USERNAME: ${{ secrets.CONTROLLER_USERNAME }}
           controller_password: ${{ secrets.CONTROLLER_PASSWORD }}
-          CONTROLLER_PASSWORD: ${{ secrets.CONTROLLER_PASSWORD }}
           job_template: "Survey Test"
           extra_vars: "_survey_var=aws-rhel8\naws-rhel9"
           validate_certs: false
