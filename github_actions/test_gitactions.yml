@@ -7,7 +7,7 @@
 
     - name: Debug EDA Event Data
       ansible.builtin.debug:
-        msg: "{{ pull_request_event }}"
+        msg: "{{ pull_request_event | default('pull_request_event not provided') }}"
 
     # - name: Debug EDA Event Data
     #   ansible.builtin.debug:
