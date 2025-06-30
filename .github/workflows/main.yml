@@ -1,3 +1,4 @@
+---
 on: push
 
 jobs:
@@ -5,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Kick off Automation controller job
     steps:
-      - name: Load the ansible-cloud action
+      - name: AAP Automation Controller Action
         id: controller_job
         uses: ansible-cloud/aap_controller_action@v3.0.5
         #uses: ansible-cloud/aap_controller_action@v1.2.8
@@ -16,3 +17,5 @@ jobs:
           job_template: "Survey Test"
           extra_vars: "_survey_var=aws-rhel8"
           validate_certs: false
+        env:
+          pull_request_event: ${{ github.event.pull_request.number }}
