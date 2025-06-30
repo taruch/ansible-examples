@@ -1,3 +1,4 @@
+collections/ansible_collections
 wordpress-nginx/hosts
 .DS_Store
 *.log
