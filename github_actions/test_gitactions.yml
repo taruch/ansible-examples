@@ -1,0 +1,35 @@
+---
+- name: Test GitHub Actions
+  hosts: "{{ _hosts | default('localhost') }}"
+  become: false
+  gather_facts: false
+  tasks:
+
+    - name: Debug EDA Event Data
+      ansible.builtin.debug:
+        msg: "{{ pull_request_event }}"
+
+    # - name: Debug EDA Event Data
+    #   ansible.builtin.debug:
+    #     msg: "{{ ansible_eda.event.payload | type_debug }}"
+
+    # - name: Debug EDA Event Data eventData level
+    #   ansible.builtin.debug:
+    #     msg: "{{ ansible_eda.event.payload.eventData }}"
+
+    # - name: Debug EDA Event Data eventData level
+    #   ansible.builtin.debug:
+    #     msg: "{{ ansible_eda.event.payload.eventData | type_debug }}"
+
+    # - name: Debug EDA Fix JSON
+    #   ansible.builtin.set_fact:
+    #     event: "{{ host_msg | string }}"
+
+
+    # - name: Debug EDA Event Data
+    #   ansible.builtin.debug:
+    #     msg: "{{ event | ansible.builtin.from_json }}"
+
+    # - name: Debug EDA New JSON
+    #   ansible.builtin.debug:
+    #     msg: "{{ newEventData }}"
