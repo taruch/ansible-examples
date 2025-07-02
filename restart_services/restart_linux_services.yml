@@ -1,0 +1,53 @@
+---
+- name: Restart Linux Services
+  hosts: "{{ _hosts }}" # Define your target group of Linux servers here
+  become: true         # This playbook requires root privileges to manage services
+  gather_facts: false  # No need to gather facts for this specific task
+
+  vars:
+    # List of services to restart.
+    # You can add or remove services from this list as needed.
+    services_to_restart:
+      - sshd
+      - nginx # Example: If Nginx is installed
+      - apache2 # Example: If Apache is installed (on Debian/Ubuntu)
+      # - httpd # Example: If Apache is installed (on RHEL/CentOS)
+      # - mysqld # Example: If MySQL is installed
+      # - postgresql # Example: If PostgreSQL is installed
+
+  tasks:
+    - name: Ensure systemd is available (for modern Linux distributions)
+      ansible.builtin.stat:
+        path: /run/systemd/system
+      register: systemd_check
+      delegate_to: "{{ inventory_hostname }}" # Run on the target host
+      changed_when: false
+      failed_when: false
+      # This task checks if systemd is running on the target host.
+      # This helps in determining which service module to use.
+
+    - name: Restart services using systemd (for systemd-based systems)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true # Ensure the service is enabled to start on boot
+      loop: "{{ services_to_restart }}"
+      when: systemd_check.stat.exists
+      # This task iterates through the 'services_to_restart' list and restarts each service
+      # using the 'systemd' module. It also ensures the service is enabled.
+      # It only runs if systemd is detected.
+
+    - name: Restart services using service module (for older/non-systemd systems)
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true # Ensure the service is enabled to start on boot
+      loop: "{{ services_to_restart }}"
+      when: not systemd_check.stat.exists
+      # This task provides a fallback for older Linux distributions that might not use systemd,
+      # or if systemd is not detected for some reason. It uses the generic 'service' module.
+      # It only runs if systemd is NOT detected.
+
+    - name: Report services restarted
+      ansible.builtin.debug:
+        msg: "Services {{ services_to_restart }} restarted on {{ inventory_hostname }}"
