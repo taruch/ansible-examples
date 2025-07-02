@@ -1,0 +1,35 @@
+---
+- name: Reboot a Windows server and wait for it to come back online
+  hosts: "{{ _hosts }}" 
+  gather_facts: false # Gathering facts can sometimes cause issues or delays on Windows before WinRM is fully established post-reboot
+  become: true # This task requires elevated privileges to reboot the server
+  become_method: runas # Use 'runas' for Windows, which is the equivalent of sudo
+
+  vars:
+    # Define WinRM connection variables. Ensure these are securely managed (e.g., Ansible Vault).
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm # Common transport, or 'credssp' if configured
+    ansible_winrm_server_cert_validation: ignore # Set to 'validate' in production with proper certificates
+    ansible_winrm_port: 5986 # Use 5985 for HTTP, 5986 for HTTPS (default for https)
+    ansible_winrm_scheme: https # Use 'http' or 'https'
+
+  tasks:
+    - name: Display a warning message before rebooting
+      ansible.builtin.debug:
+        msg: "Initiating server reboot on {{ inventory_hostname }}. This will cause a brief outage."
+
+    - name: Reboot the Windows server
+      ansible.builtin.win_reboot: # Using win_reboot for explicit Windows compatibility, or ansible.builtin.reboot also works
+        reboot_timeout: 600 # Wait up to 600 seconds (10 minutes) for the server to reboot and become reachable
+        connect_timeout: 60 # Timeout for initial connection attempt to the server
+        # post_reboot_delay: 30 # Optional: Add an additional delay after the server is reachable, before the task completes
+
+    - name: Confirm Windows server is back online
+      ansible.builtin.wait_for_connection:
+        delay: 10 # Initial delay before first connection attempt
+        timeout: 300 # Total time to wait for the connection to be established (5 minutes)
+      delegate_to: localhost # This task runs on the Ansible control node, waiting for the target
+
+    - name: Display success message
+      ansible.builtin.debug:
+        msg: "Windows server {{ inventory_hostname }} has been successfully rebooted and is back online."
