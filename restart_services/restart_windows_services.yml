@@ -1,0 +1,37 @@
+---
+- name: Restart specified Windows services
+  hosts: "{{ _hosts }}" # Replace with your Windows inventory group or hostname
+  gather_facts: false # Not strictly necessary for service management, but good practice for Windows playbooks
+  become: true # This task requires elevated privileges to manage services
+  become_method: runas # Use 'runas' for Windows, which is the equivalent of sudo
+
+  vars:
+    # Define WinRM connection variables. Ensure these are securely managed (e.g., Ansible Vault).
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm # Common transport, or 'credssp' if configured
+    ansible_winrm_server_cert_validation: ignore # Set to 'validate' in production with proper certificates
+    # ansible_winrm_port: 5986 # Use 5985 for HTTP, 5986 for HTTPS (default for https)
+    # ansible_winrm_scheme: https # Use 'http' or 'https'
+
+    # List of services to restart. Customize this list with the actual service names.
+    # You can find Windows service names in the Services (services.msc) console.
+    services_to_restart:
+      - 'Spooler' # Example: Print Spooler service
+      - 'BITS'    # Example: Background Intelligent Transfer Service
+
+  tasks:
+    - name: Display services to be restarted
+      ansible.builtin.debug:
+        msg: "Attempting to restart the following services on {{ inventory_hostname }}: {{ services_to_restart }}"
+
+    - name: Restart Windows services
+      ansible.windows.win_service:
+        name: "{{ item }}" # The service name to act upon
+        state: restarted # Ensures the service is stopped and then started
+        # start_mode: auto # Optional: Set the service to start automatically on system boot
+      loop: "{{ services_to_restart }}" # Loop through the list of services defined in 'services_to_restart'
+      register: service_restart_result # Register the output for review
+
+    - name: Display restart results
+      ansible.builtin.debug:
+        var: service_restart_result.results # Show the results for each service restart attempt
