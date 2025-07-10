@@ -1,0 +1,56 @@
+---
+- name: Create an AAP Job Template Schedule
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  collections:
+    - ansible.controller # Make sure this collection is installed
+
+  vars:
+    # --- AAP Connection Details ---
+    controller_host: https://your_aap_hostname.example.com
+    controller_username: your_aap_username
+    controller_password: your_aap_password # Use Ansible Vault for this!
+    # controller_oauthtoken: your_aap_oauth_token # Recommended for production/CI/CD
+    # validate_certs: false # Set to true or remove if using valid, trusted certificates
+
+    # --- Schedule Specifics ---
+    job_template_name: "Daily Backup Job"
+    schedule_name: "Daily Backup Schedule 2AM"
+    schedule_description: "Runs the daily backup job every day at 2 AM EDT."
+
+    # RRule for every day at 2 AM
+    # DTSTART is important for the initial start time.
+    # The timezone (America/New_York for EDT) is crucial.
+    # Note: AAP schedules typically respect the timezone of the Controller host,
+    # but specifying it in DTSTART is good practice for clarity.
+    # Current time is Thursday, July 10, 2025 at 1:09:29 PM EDT.
+    # Let's set the first run for tomorrow at 2 AM
+    rrule_string: "DTSTART:20250711T020000;FREQ=DAILY;INTERVAL=1"
+    # Example for every Mon-Fri at 10 AM:
+    # rrule_string: "DTSTART:20250714T100000;FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+    # Example for 1st of every month at midnight:
+    # rrule_string: "DTSTART:20250801T000000;FREQ=MONTHLY;BYMONTHDAY=1"
+
+    # Optional: Extra variables to pass to the scheduled job
+    schedule_extra_vars:
+      backup_type: "full"
+      notify_on_completion: true
+
+  tasks:
+    - name: Ensure the daily backup schedule exists
+      ansible.controller.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        # controller_oauthtoken: "{{ controller_oauthtoken | default(omit) }}"
+        # validate_certs: "{{ validate_certs | default(true) }}"
+        
+        name: "{{ schedule_name }}"
+        description: "{{ schedule_description }}"
+        enabled: true
+        rrule: "{{ rrule_string }}"
+        job_template: "{{ job_template_name }}" # Link to the Job Template by name
+        extra_vars: "{{ schedule_extra_vars | to_json }}" # Must be a JSON string
+        state: present
