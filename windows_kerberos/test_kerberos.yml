@@ -1,0 +1,139 @@
+---
+- name: Troubleshoot Kerberos kinit in Execution Environment
+  hosts: localhost # This playbook runs on the Ansible control node/Execution Environment
+  connection: local
+  gather_facts: false # No need to gather extensive facts for this debugging
+
+  vars:
+    # --- REQUIRED VARIABLES ---
+    # Set these variables before running the playbook.
+    # For AAP, these can be set in the Job Template's Extra Variables or Credential.
+    kerberos_principal: "{{ username | default( lookup('env', 'KERBEROS_PRINCIPLE')) }}" # Example: "ansible_admin@EXAMPLE.COM"
+    kerberos_password: "{{ password | default( lookup('env', 'KERBEROS_PASSWORD')) }}" # The password for the Kerberos principal
+    kerberos_realm: "{{ default_realm | default( lookup('env', 'KERBEROS_REALM')) }}" # Your Kerberos realm (e.g., EXAMPLE.COM)
+    kdc_hostname: "{{ kdc | default( lookup('env', 'KDC_HOSTNAME')) }}" # FQDN or IP of your Key Distribution Center (KDC)
+
+    # --- OPTIONAL VARIABLES ---
+    # Path to the krb5.conf file within the Execution Environment.
+    # Ensure this path is accessible and writable by the user running the playbook.
+    krb5_conf_path: "/etc/krb5.conf"
+
+  tasks:
+    - name: Display playbook variables
+      ansible.builtin.debug:
+        msg: |
+          Kerberos Principal: {{ kerberos_principal }}
+          Kerberos Realm: {{ kerberos_realm }}
+          KDC Hostname: {{ kdc_hostname }}
+          krb5.conf Path: {{ krb5_conf_path }}
+      tags: always
+
+#    - ansible.builtin.yum:
+#        name:
+#          - krb5-workstation
+#          - krb5-libs
+#          - krb5-devel
+#          - bind-utils # For dig
+#          - nc         # For nc
+#        state: present
+#      become: true
+
+    - name: Copy krb5.conf template to Execution Environment
+      ansible.builtin.template:
+        src: krb5.conf.j2
+        dest: "{{ krb5_conf_path }}"
+        mode: '0644'
+      become: true
+      # This task needs to run as root to write to /etc/krb5.conf
+      # If your EE doesn't allow this, you'll need to pre-bake krb5.conf into the EE image
+      # or mount it via AAP settings.
+
+    - name: Verify krb5.conf content
+      ansible.builtin.command: cat {{ krb5_conf_path }}
+      register: krb5_conf_content
+      changed_when: false
+      failed_when: false # Allow to proceed even if cat fails, as it might be a permission issue
+      tags: always
+    - name: Show krb5.conf content
+      ansible.builtin.debug:
+        msg: "{{ krb5_conf_content.stdout }}"
+      when: krb5_conf_content.rc == 0
+      tags: always
+
+    - name: Check DNS SRV record resolution for KDC (TCP)
+      ansible.builtin.shell: "dig +short _kerberos._tcp.{{ kerberos_realm }} SRV"
+      register: kdc_srv_tcp_lookup
+      changed_when: false
+      failed_when: false # Allow to proceed even if DNS lookup fails
+    - name: Show KDC SRV TCP lookup result
+      ansible.builtin.debug:
+        msg: "DNS SRV _kerberos._tcp.{{ kerberos_realm }} (TCP): {{ kdc_srv_tcp_lookup.stdout | default('No SRV records found or DNS error') }}"
+      tags: always
+
+    - name: Check DNS SRV record resolution for KDC (UDP)
+      ansible.builtin.shell: "dig +short _kerberos._udp.{{ kerberos_realm }} SRV"
+      register: kdc_srv_udp_lookup
+      changed_when: false
+      failed_when: false # Allow to proceed even if DNS lookup fails
+    - name: Show KDC SRV UDP lookup result
+      ansible.builtin.debug:
+        msg: "DNS SRV _kerberos._udp.{{ kerberos_realm }} (UDP): {{ kdc_srv_udp_lookup.stdout | default('No SRV records found or DNS error') }}"
+      tags: always
+
+    - name: Check direct DNS A record resolution for KDC hostname
+      ansible.builtin.shell: "dig +short {{ kdc_hostname }} A"
+      register: kdc_a_lookup
+      changed_when: false
+      failed_when: false
+
+    - name: Show KDC A record lookup result
+      ansible.builtin.debug:
+        msg: "DNS A record for {{ kdc_hostname }}: {{ kdc_a_lookup.stdout | default('No A record found or DNS error') }}"
+      tags: always
+
+    - name: Test network connectivity to KDC on port 88 (TCP)
+      ansible.builtin.wait_for:
+        host: "{{ kdc_hostname }}"
+        port: 88
+        timeout: 5
+        state: started
+      register: kdc_port_check
+      ignore_errors: true # Don't fail the playbook if port is unreachable
+
+    - name: Show KDC port 88 connectivity result
+      ansible.builtin.debug:
+        msg: "Connectivity to {{ kdc_hostname }}:88 (TCP): {{ kdc_port_check }}"
+      tags: always
+
+    - name: Attempt kinit with KRB5_TRACE for detailed debugging
+      ansible.builtin.shell: |
+        echo "{{ kerberos_password }}" | KRB5_TRACE=/dev/stderr kinit {{ kerberos_principal }}
+      args:
+        executable: /bin/bash # Ensure bash is used for pipe and env var setting
+      register: kinit_attempt
+      no_log: true # Prevent password from appearing in logs
+      changed_when: false
+      ignore_errors: true # Allow to proceed even if kinit fails
+    - name: Show kinit attempt result (stdout)
+      ansible.builtin.debug:
+        msg: "kinit stdout: {{ kinit_attempt.stdout | default('No stdout') }}"
+      tags: always
+    - name: Show kinit attempt result (stderr - includes KRB5_TRACE output)
+      ansible.builtin.debug:
+        msg: "kinit stderr (KRB5_TRACE): {{ kinit_attempt.stderr | default('No stderr') }}"
+      tags: always
+    - name: Show kinit attempt return code
+      ansible.builtin.debug:
+        msg: "kinit return code: {{ kinit_attempt.rc }}"
+      tags: always
+
+    - name: Display current Kerberos ticket cache (klist)
+      ansible.builtin.command: klist
+      register: klist_output
+      changed_when: false
+      failed_when: false # Allow to proceed even if klist fails (e.g., no tickets)
+    - name: Show klist output
+      ansible.builtin.debug:
+        msg: "{{ klist_output.stdout | default('No Kerberos tickets found or klist error') }}"
+      tags: always
+

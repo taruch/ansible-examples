@@ -1,0 +1,25 @@
+# /etc/krb5.conf - Kerberos configuration for Ansible Execution Environment
+
+[logging]
+ default = FILE:/var/log/krb5libs.log
+ kdc = FILE:/var/log/krb5kdc.log
+ admin_server = FILE:/var/log/kadmind.log
+
+[libdefaults]
+ default_realm = {{ kerberos_realm | upper }}
+ dns_lookup_realm = true
+ dns_lookup_kdc = true
+ ticket_lifetime = 24h
+ renew_lifetime = 7d
+ forwardable = true
+ rdns = false # Set to true if reverse DNS is reliably configured and preferred
+
+[realms]
+ {{ kerberos_realm | upper }} = {
+     kdc = {{ kdc_hostname }}
+     admin_server = {{ kdc_hostname }} # Often the same as KDC
+ }
+
+[domain_realm]
+ .{{ kerberos_realm | lower }} = {{ kerberos_realm | upper }}
+ {{ kerberos_realm | lower }} = {{ kerberos_realm | upper }}
