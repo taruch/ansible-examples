@@ -1,0 +1,55 @@
+---
+# This is an Ansible inventory file that defines groups and hosts.
+all: # keys must be unique, i.e. only one 'hosts' per group
+  hosts:
+    general-1:
+      ansible_host: ec2-3-133-151-57.us-east-2.compute.amazonaws.com
+      ansible_user: ec2-user
+      host_type: "common"
+    acc-1:
+      ansible_host: ec2-3-147-27-184.us-east-2.compute.amazonaws.com
+      ansible_user: ec2-user
+      host_type: ""
+    datadomain-1:
+      ansible_host: ec2-3-133-151-57.us-east-2.compute.amazonaws.com
+      ansible_user: ec2-user
+      host_type: datadomain
+    epcotodb-1:
+      ansible_host: ec2-18-224-57-53.us-east-2.compute.amazonaws.com
+      ansible_user: ec2-user
+      host_type: epcot-odb
+  vars:
+    common_ssh_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCqxOFOa4ZJJE/K1fcLZ6d8oKpniKKnwejKqAbDCPj7ssGJypGByljOhB1vFraf6B1Mf8BA852nwCUELKubd+M4MREHuTlVXU4uxzsJWgKUgSZg0yYjbIzR5s45svXy3TqwQUp1oIuyQKJONBF2W61HtM9TJjmCPzW8dh1VCZkDh98d2GbvVOpblCSUIbjhLGcVHTTc4/0822t0vNFvv/jL7xuqmjbUqvmSxsOTd5EI+bXX7ZpoBpcsD055dUyd1kF87j5mM1/C2UJ+qH5GXpZIjw8HT/zEjwTJB9DCvWHrUyE5AoYhcdN8yUHRUo4SnqxhINLSwJN+oomelAApFNBD common"
+    ssh_key: "{{ common_ssh_key }}"
+    epcot_cluster_pubkey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCKajxePzEJsgF1U0NVRf6UZ713Qju6ZqZnr+L+dn3BbbD1W51zmaJKlTHstnFkvj241fpd/THZOj8CBXUBazOsOKn1v8x97QiY0IAiQ0rsQvVO0EaowpjAWTmlIQB+wDudjPn+zog8j1Tlg8AxOaXAOpnoZmwzIJxC5aL2CCHDLiLFxuDuEXMHtvsW7+k1Rw7PxdUn+JM+dHwJGRvakioE/VjKreGZ81gq776s7naPqA3dWClgI2V2nLWLLVC6Y7GUcZhurM7N5jzCFHYU2lkSvXTTT5pAsVDs052minR/d8Zvcc7aDPbvsdMH3Wl0D6733AMGB9Jz5fgJ7CPwy/MR epcot-odb-cluster"
+
+  children:
+    acc:
+      hosts:
+        acc-1:
+        datadomain-1:
+      vars:
+        group_ssh_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDNKK+VoFFofg/3t9pMhZ5uilS9AqSd84aNQ8gu5f8+SgBgd5uc8+6lDfmSnLLEhxhxJDh3y1tZ8lqK3vy5U9Ws1G8b+TYQ6nBauRG9WjRMomU9+6NnXFhnG8ZTNC9XqV59uFDRUhUPw+2Mhf51Jmx8saEGU7OGyasrNG4Y0olp95jeUGbNrgeg3KUherg89daMkQqu1BEI+c26LVB0Ale7kxdZ5v+k8oXb0LOk4tjvU83pIq8FFJz0FbJpFggLE1+96yG0isPj8e6DBsHAFq20/ACP91LAM/Y5DUmo+dQfWjgQGIS3IA32Z6wwd3HO5y9jSuPeqQCHJR+NGArkUgYH acc-group"
+        ssh_key: "{{ group_ssh_key }}"
+    epcot:
+      hosts:
+        epcotodb-1 # same host as above, additional group membership
+      vars:
+        group_ssh_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7i1OhPYyH2w2aotTw9DUKQqs1dceBDeIwKj67W0gRrDWAgdwXyWvmXGq9AZ3HMWCzR+WJ0eHb7RMe9AT7yobBMqJFWd0kW73SZdhiKhAaUJh2nlmoUMIvCILuXcagLr2iXO2pTZ6815EAArbZAnP+Kov39k0TV5LZHmzqpMVLkUEKJugOPsUFHzMyoyCP0ook9jJnTWXqjfqRMruj5I4MXb7qvxItISlTwqskqsKAyrBTb8TBejPCL7OJPxYFqT4iPYFKA8wIaqRFo+ygTkSHw1oK6RTHNOlyjno4PSHsGIepOZB+qSMZp+Sjy4tfyMWrsRJ4dEgkyh+ClEO+rb2v epcot-group"
+        ssh_key: "{{ group_ssh_key }}"
+    type_datadomain:
+      hosts:
+        datadomain-1: # same host as above, additional group membership
+      vars:
+        ansible_group_priority: 10
+        ssh_keys:
+          - "{{ common_ssh_key | default(omit) }}"
+          - "{{ group_ssh_key | default(omit) }}"
+    type_epcotodb:
+      hosts:
+        epcotodb-1: # same host as above, additional group membership
+      vars:
+        ansible_group_priority: 10
+        ssh_keys:
+          - "{{ common_ssh_key | default(omit) }}"
+          - "{{ epcot_cluster_pubkey }}"
