@@ -3,19 +3,19 @@
 all: # keys must be unique, i.e. only one 'hosts' per group
   hosts:
     general-1:
-      ansible_host: ec2-3-133-151-57.us-east-2.compute.amazonaws.com
+      ansible_host: <FQDN>
       ansible_user: ec2-user
       host_type: "common"
     acc-1:
-      ansible_host: ec2-3-147-27-184.us-east-2.compute.amazonaws.com
+      ansible_host: <FQDN>
       ansible_user: ec2-user
       host_type: ""
     datadomain-1:
-      ansible_host: ec2-3-133-151-57.us-east-2.compute.amazonaws.com
+      ansible_host: <FQDN>
       ansible_user: ec2-user
       host_type: datadomain
     epcotodb-1:
-      ansible_host: ec2-18-224-57-53.us-east-2.compute.amazonaws.com
+      ansible_host: <FQDN>
       ansible_user: ec2-user
       host_type: epcot-odb
   vars:
