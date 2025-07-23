@@ -6,7 +6,7 @@
 
   tasks:
     - name: print contents of authorized_keys from PB1
-      debug: msg="pb2 - the value of pb1_contents is {{ auth_keys_results }}"
+      debug: msg="pb2 - the value of pb1_contents is {{ auth_key_results }}"
 
     - name: Cat the motd file
       delegate_to: localhost
