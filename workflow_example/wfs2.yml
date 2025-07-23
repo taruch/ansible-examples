@@ -10,4 +10,4 @@
 
     - name: Cat the motd file
       delegate_to: localhost
-      ansible.builtin.command: "cat /tmp/{{ inventory_hostname }}_motd"
+      ansible.builtin.command: "cat /tmp/{{ inventory_hostname }}/messages"
