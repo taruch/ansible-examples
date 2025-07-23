@@ -10,6 +10,11 @@
     #  shell: cat /root/.ssh/authorized_keys
     #  register: pb1_contents
 
+    - name: Get the motd file
+      ansible.builtin.fetch:
+        src: '/var/log/messages'
+        dest: "/tmp/{{ inventory_hostname }}_motd"
+
     - name: Find out what the remote machine's mounts are
       ansible.builtin.slurp:
         src: /home/ec2-user/.ssh/authorized_keys
@@ -21,6 +26,7 @@
           - name: "{{ inventory_hostname }}"
             content: "{{ (program_conf['content'] | b64decode).split('\n') }}"
 
+
     - name: Print returned information
       ansible.builtin.debug:
         var: auth_keys
@@ -30,7 +36,6 @@
       set_stats:
         data:
           auth_key_results: "{{ auth_keys }}"
-          auth_key: "string"
 
 
   # - name: per host collection and aggregate false via a workaround
