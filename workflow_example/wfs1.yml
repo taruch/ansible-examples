@@ -13,7 +13,8 @@
     - name: Get the motd file
       ansible.builtin.fetch:
         src: '/var/log/messages'
-        dest: "/tmp/{{ inventory_hostname }}_motd"
+        dest: "/tmp/{{ inventory_hostname }}/"
+        flat: True
 
     - name: Find out what the remote machine's mounts are
       ansible.builtin.slurp:
