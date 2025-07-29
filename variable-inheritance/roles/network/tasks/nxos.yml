@@ -1,0 +1,15 @@
+---
+- name: Get Cisco Nexus SSH Config
+  cisco.nxos.nxos_command:
+    commands:
+      - show ssh server
+  register: output_ssh
+
+- name: Debug Post-NXOS
+  ansible.builtin.debug:
+    var: output_ssh
+
+- name: Set Fact
+  when: output_ssh.skipped is not defined
+  ansible.builtin.set_fact:
+    my_cool_fact: "{{ output_ssh.stdout }}"

@@ -1,0 +1,38 @@
+---
+# tasks file for SSHv2
+- name: Assume Devices are not compliant
+  ansible.builtin.set_fact:
+    compliant_sshv2: False
+    reason_sshv2: "SSHv2 is not enabled"
+
+- name: Get WLAN Controller SSH Config
+  when: inventory_hostname in groups['other']
+  ansible.builtin.import_tasks: wlan.yml
+
+
+# Send Command Output to variable
+- name: Get Cisco IOS Config
+  when: inventory_hostname in groups['iosxr']
+  ansible.builtin.import_tasks: iosxr.yml
+
+- name: Get Cisco Nexus SSH Config
+  when: inventory_hostname in groups['nxos']
+  ansible.builtin.import_tasks: nxos.yml
+
+- name: Debug WLAN
+  debug:
+    var: my_cool_fact
+
+
+# Search output for compliance
+
+- name: Determine Compliance
+  ansible.builtin.set_fact:
+    compliant_sshv2: True
+    reason_sshv2: "SSHv2 Is Enabled"
+  when: >
+    (output_ssh is search("SSH Enabled - version 2.0")) or
+    (output_ssh is search("ssh version 2 is enabled")) or
+    (output_ssh is search("SSH version 2.0 is Enabled"))
+  register: ssh_version
+...

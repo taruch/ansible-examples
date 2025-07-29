@@ -1,0 +1,11 @@
+---
+- name: Check Network Compliance
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Import network compliance tasks
+      ansible.builtin.include_role:
+        name: network
+
+...

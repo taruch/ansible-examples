@@ -1,0 +1,43 @@
+---
+- name: RHEL8 SSH Command
+  when: inventory_hostname in groups['other']
+  ansible.builtin.command: "ssh -V"
+  register: output_ssh
+
+- name: Set gather_facts
+  when: output_ssh.skipped is false
+  ansible.builtin.set_fact:
+    my_cool_fact: "{{ output_ssh.stdout }}"
+
+- name: Debug Pre-RHEL9 
+  debug:
+    var: my_cool_fact
+
+- name: RHEL9 SSH Command
+  ansible.builtin.command: "ssh -V"
+  register: output_ssh
+  when: inventory_hostname in groups['rhel9']
+
+- name: Debug Post-RHEL9 
+  debug:
+    var: output_ssh
+
+- name: Reports Server SSH Command
+  ansible.builtin.command: "which ssh"
+  register: output_ssh
+  when: inventory_hostname in groups['other']
+
+- name: Debug Post Other
+  debug:
+    var: output_ssh
+
+# Search output for compliance
+- name: Determine Compliance
+  debug:
+    var: output_ssh
+  when: >
+    (output_ssh is search("SSH Enabled - version 2.0")) or
+    (output_ssh is search("ssh version 2 is enabled")) or
+    (output_ssh is search("SSH version 2.0 is Enabled"))
+  register: ssh_version
+...

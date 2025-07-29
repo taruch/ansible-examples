@@ -1,0 +1,15 @@
+# Send Command Output to variable
+- name: Get Cisco IOS Config
+  cisco.ios.ios_command:
+    commands:
+      - show ip ssh
+  register: output_ssh
+
+- name: Debug Post-IOSXR
+  ansible.builtin.debug:
+    var: output_ssh
+
+- name: Set Fact
+  when: output_ssh.skipped is not defined
+  ansible.builtin.set_fact:
+    my_cool_fact: "{{ output_ssh.stdout }}"

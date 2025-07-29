@@ -1,0 +1,14 @@
+- name: Get WLAN Controller SSH Config
+  when: inventory_hostname in groups['other']
+  ansible.builtin.command: "ssh -V"
+  changed_when: false  # Indicate this task does not change anything
+  register: output_ssh
+
+- name: Debug Post-WLAN
+  debug:
+    var: output_ssh
+
+- name: Set Fact
+  when: output_ssh.skipped is not defined
+  ansible.builtin.set_fact:
+    my_cool_fact: "{{ output_ssh.stdout }}"
