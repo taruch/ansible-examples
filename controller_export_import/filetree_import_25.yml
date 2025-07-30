@@ -38,33 +38,43 @@
   tasks:
     - name: Read configuration variables from the exported filetree
       ansible.builtin.include_role:
-        name: infra.controller_configuration.filetree_read
+        # name: infra.controller_configuration.filetree_read
+        name: infra.aap_configuration_extended.filetree_read
       vars:
         # These variables tell filetree_read where to find your exported configuration
-        orgs: "Default"
-        dir_orgs_vars: "./export_ft2"
-        filetree_controller_organizations: "./export_ft2/"
-        filetree_controller_credential_types: "./export_ft2/"
-        filetree_controller_credentials: "./export_ft2/"
-        filetree_controller_credential_input_sources: "./export_ft2/"
-        filetree_controller_notification_templates: "./export_ft2/"
-        filetree_controller_projects: "./export_ft2/"
-        filetree_controller_inventories: "./export_ft2/"
-        filetree_controller_inventory_sources: "./export_ft2/"
-        filetree_controller_job_templates: "./export_ft2/"
-        filetree_controller_templates: "./export_ft2/"
-        filetree_controller_workflow_job_templates: "./export_ft2/"
-        filetree_controller_schedules: "./export_ft2/"
-        filetree_controller_labels: "./export_ft2/"
-        filetree_controller_notifications: "./export_ft2/"
+        orgs: ""
+        dir_orgs_vars: "./export_ft4/"
+        # filetree_controller_settings: "./export_ft4/"
+        filetree_controller_organizations: "./export_ft4/"
+        filetree_controller_credential_types: "./export_ft4/"
+        filetree_controller_credentials: "./export_ft4/"
+        filetree_controller_notification_templates: "./export_ft4/"
+        filetree_controller_projects: "./export_ft4/"
+        filetree_controller_inventories: "./export_ft4/"
+        filetree_controller_inventory_sources: "./export_ft4/"
+        filetree_controller_job_templates: "./export_ft4/"
+        filetree_controller_workflow_job_templates: "./export_ft4/"
+        # filetree_controller_schedules: "./export_ft4/"
+        # filetree_controller_notifications: "./export_ft4/"
+        # filetree_controller_labels: "./export_ft4/"
         # If you have a specific directory structure for your filetree, you can specify it here
         # dir_settings_vars: "{{ dir_settings_vars | default(omit) }}" # Include if you have global settings
         # If your export structure uses an 'env' directory (e.g., orgs/MyOrg/env/dev), specify it:
         # filetree_env: "dev"
 
+    # - name: Include configuration for {{ demo }}
+    #   ansible.builtin.include_vars: "export_ft4/current_credential_types.yaml"
+    # 
+    # - name: Demo Components
+    #   ansible.builtin.include_role:
+    #     name: infra.controller_configuration.dispatch
+    #   vars:
+    #     controller_dependency_check: false  # noqa: var-naming[no-role-prefix]
+
     - name: Dispatch the configuration to AAP 2.5
       ansible.builtin.include_role:
         name: infra.aap_configuration.dispatch
+      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
 
 
   post_tasks:

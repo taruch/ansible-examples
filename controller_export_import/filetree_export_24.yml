@@ -1,5 +1,5 @@
 ---
-- hosts: all
+- hosts: localhost
   connection: local
   gather_facts: false
   vars:
@@ -7,10 +7,10 @@
     controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    output_path: "./export_filetree"
+    output_path: "./export_aap"
     input_tag:  ['labels', 'applications', 'instance_groups', 'settings', 'inventory', 'credentials', 'credential_types', 'notification_templates', 'organizations', 'projects', 'execution_environments', 'job_templates', 'workflow_job_templates', 'schedules']
-    flatten_output: true
-    organization_filter: "Default"  # Specify the organization to filter the export, if needed
+    # flatten_output: true
+    # organization_filter: "Default"  # Specify the organization to filter the export, if needed
 
   pre_tasks:
     - name: "Setup authentication (block)"
@@ -30,7 +30,6 @@
           ansible.builtin.set_fact:
             controller_oauthtoken: "{{ authtoken_res.json.token }}"
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
-      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
       when: controller_oauthtoken is not defined
       tags:
         - always
@@ -50,4 +49,5 @@
         validate_certs: "{{ controller_validate_certs }}"
         status_code: 204
       when: controller_oauthtoken_url is defined
+
 ...
