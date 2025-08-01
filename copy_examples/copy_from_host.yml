@@ -34,4 +34,4 @@
         ansible_ssh_key_data: "{{ copy_ssh_key_data | default(omit) }}"
       ansible.builtin.copy:
         src: /tmp/example.txt
-        dest: /home/ec2-user/example.txt
+        dest: ~/example.txt
