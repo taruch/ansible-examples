@@ -1,0 +1,12 @@
+---
+- name: Copy file from remote windows host to linux host
+  hosts: "{{ _linux_host }}"
+  gather_facts: false
+  tasks:
+
+    - name: Copy file from windows to linux
+      vars:
+        ansible_user: "{{ copy_username | default(omit) }}"
+        ansible_password: "{{ copy_password | default(omit) }}"
+        ansible_ssh_key_data: "{{ copy_ssh_key_data }}"
+      ansible.builtin.ping:
