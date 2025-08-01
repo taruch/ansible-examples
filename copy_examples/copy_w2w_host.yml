@@ -3,6 +3,12 @@
   hosts: "{{ _win_host1 }}"
   gather_facts: false
   tasks:
+
+    - name: Create some content on the remote windows host
+      ansible.windows.win_copy:
+        dest: C:\Users\ec2-user\Desktop\example.txt
+        content: "This is an example file."
+
     - name: Fetch file from remote windows host
       ansible.windows.win_fetch:
         src: C:\Users\ec2-user\Desktop\example.txt
@@ -14,6 +20,7 @@
       register: tail_output
 
     - name: Display the tail output
+      delegate_to: localhost
       ansible.builtin.debug:
         var: tail_output.stdout_lines
         verbosity: 2
