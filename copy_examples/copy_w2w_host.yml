@@ -1,5 +1,5 @@
 ---
-- name: Copy file from remote windows host to linux host
+- name: Copy file from remote windows host to windows host
   hosts: "{{ _win_host1 }}"
   gather_facts: false
   tasks:
