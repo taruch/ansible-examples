@@ -1,0 +1,30 @@
+---
+- name: Copy file from remote windows host to linux host
+  hosts: "{{ _windows_host }}"
+  gather_facts: false
+  tasks:
+    - name: Fetch file from remote windows host
+      ansible.windows.win_fetch:
+        src: C:\Users\ano-user\Desktop\example.txt
+        dest: /tmp/example.txt
+
+    - name: Tail the end of example.txt
+      delegate_to: localhost
+      ansible.builtin.command: tail -n 10 /tmp/example.txt
+      register: tail_output
+
+    - name: Display the tail output
+      ansible.builtin.debug:
+        var: tail_output.stdout_lines
+        verbosity: 2
+
+    - name: Copy file from windows to linux
+      delegate_to: "{{ _linux_host }}"
+      vars:
+        remote_linux_host: "{{ ansible_host }}"
+        ansible_user: "{{ ansible_user | default(omit) }}"
+        ansible_password: "{{ ansible_password | default(omit) }}"
+        ansible_ssh_key_data: "{{ ansible_ssh_key_data }}"
+      ansible.builtin.copy:
+        src: /tmp/example.txt
+        dest: /home/ec2-user/example.txt
