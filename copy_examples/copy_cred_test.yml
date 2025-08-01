@@ -4,6 +4,11 @@
   gather_facts: false
   tasks:
 
+    - name: Print out variables
+      delegate_to: localhost
+      ansible.builtin.debug:
+        msg: "User: {{ copy_username }}, Password: {{ copy_password }}, SSH Key: {{ copy_ssh_key_data }}"
+
     - name: Copy file from windows to linux
       vars:
         ansible_user: "{{ copy_username | default(omit) }}"
