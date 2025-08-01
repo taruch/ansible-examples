@@ -10,7 +10,7 @@
         content: "This is an example file."
 
     - name: Fetch file from remote windows host
-      ansible.windows.win_fetch:
+      ansible.builtin.fetch:
         src: C:\Users\ec2-user\Desktop\example.txt
         dest: /tmp/example.txt
 
