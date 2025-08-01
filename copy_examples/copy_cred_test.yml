@@ -8,5 +8,5 @@
       vars:
         ansible_user: "{{ copy_username | default(omit) }}"
         ansible_password: "{{ copy_password | default(omit) }}"
-        ansible_ssh_key_data: "{{ copy_ssh_key_data }}"
+        ansible_ssh_key_data: "{{ copy_ssh_key_data | default(omit) }}"
       ansible.builtin.ping:
