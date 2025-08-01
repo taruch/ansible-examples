@@ -13,6 +13,7 @@
       ansible.builtin.fetch:
         src: C:\Users\ec2-user\Desktop\example.txt
         dest: /tmp/example.txt
+        flat: yes
 
     - name: Tail the end of example.txt
       delegate_to: localhost
