@@ -1,6 +1,7 @@
 ---
 - name: Recursion Example Playbook
   hosts: localhost
+  gather_facts: false
   vars:
     my_list:
       - item1
@@ -13,3 +14,4 @@
       vars:
         items: "{{ my_list }}"
 
+...
