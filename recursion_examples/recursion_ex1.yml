@@ -1,0 +1,15 @@
+---
+- name: Recursion Example Playbook
+  hosts: localhost
+  vars:
+    my_list:
+      - item1
+      - item2
+      - item3
+
+  tasks:
+    - name: Recursive task to process items in a list
+      ansible.builtin.include_tasks: recurse_task_ex1.yml
+      vars:
+        items: "{{ my_list }}"
+

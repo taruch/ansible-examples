@@ -1,0 +1,21 @@
+---
+- name: Print current item
+  ansible.builtin.debug:
+    msg: "Processing {{ items[0] }}"
+
+- name: Generate remaining list
+  ansible.builtin.set_fact:
+    remaining_items: "{{ items[1:] }}"
+
+- name: Print remaining items
+  ansible.builtin.debug:
+    msg: "Remaining items: {{ remaining_items }}"
+    verbosity: 3
+
+- name: Recurse if more items remain
+  ansible.builtin.include_tasks: recurse_task_ex1.yml
+  vars:
+    items: "{{ remaining_items }}"
+  when: items | length > 0
+
+...
