@@ -10,7 +10,7 @@
 
   tasks:
     - name: Recursive task to process items in a list
-      ansible.builtin.include_tasks: recurse_task_ex1.yml
+      ansible.builtin.include_tasks: example2_recurse_task.yml
       vars:
         items: "{{ my_list }}"
 

@@ -1,0 +1,20 @@
+---
+- name: Print current item
+  ansible.builtin.debug:
+    msg: "Processing {{ items[0] }}"
+
+- name: Generate remaining list
+  ansible.builtin.set_fact:
+    new_items: "{{ items + ['item' + (items | length | string)] }}"
+
+- name: Print new items
+  ansible.builtin.debug:
+    msg: "New items: {{ new_items }}"
+
+- name: Recurse if more items remain
+  ansible.builtin.include_tasks: example2_recurse_task.yml
+  vars:
+    items: "{{ new_items }}"
+  when: '"item5" not in new_items'
+
+...

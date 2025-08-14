@@ -13,7 +13,7 @@
     verbosity: 3
 
 - name: Recurse if more items remain
-  ansible.builtin.include_tasks: recurse_task_ex1.yml
+  ansible.builtin.include_tasks: example1_recurse_task.yml
   vars:
     items: "{{ remaining_items }}"
   when: items | length > 0
