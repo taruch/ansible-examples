@@ -1,0 +1,25 @@
+---
+- name: Provision a new host in Red Hat Satellite
+  hosts: localhost # The playbook runs on the AAP host
+  connection: local
+  vars:
+    satellite_host: "satellite.example.com"
+    satellite_username: "admin"
+    satellite_password: "your_password"
+    new_hostname: "my-new-host.example.com"
+
+  tasks:
+    - name: Create the new host entry in Satellite
+      redhat.satellite.host:
+        server_url: "https://{{ satellite_host }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        validate_certs: false
+        name: "{{ new_hostname }}"
+        state: present
+        organization: "My_Org"
+        location: "My_Location"
+        hostgroup: "RHEL9_Servers"
+        content_view: "RHEL9_CV"
+        lifecycle_environment: "Development"
+        activation_key: "RHEL9-ak"
