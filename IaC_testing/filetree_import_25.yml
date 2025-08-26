@@ -51,6 +51,8 @@
             playbook: "linux/patching.yml"
           - name: "Windows / coolstuff"
             playbook: "windows/helpdesk_new_user_portal.yml"
+          - name: "RHEL / morecoolstuff"
+            playbook: "windows/helpdesk_new_user_portal.yml"  
       ansible.builtin.template:
         src: "templates/job_templates.j2"
         dest: "{{ import_path }}/current_job_templates.yaml"
@@ -76,7 +78,7 @@
         filetree_controller_projects: "{{ import_path }}"
         filetree_controller_inventories: "{{ import_path }}"
         filetree_controller_inventory_sources: "{{ import_path }}"
-        filetree_controller_job_templates: "{{ import_path }}"
+        filetree_controller_templates: "{{ import_path }}"
         filetree_controller_workflow_job_templates: "{{ import_path }}"
         filetree_controller_schedules: "{{ import_path }}"
         filetree_controller_notifications: "{{ import_path }}"
@@ -93,25 +95,6 @@
     - name: Dispatch the configuration to AAP 2.5
       ansible.builtin.include_role:
         name: infra.aap_configuration.dispatch
-      vars:
-        # aap_hostname: "{{ aap_hostname }}"
-        # aap_validate_certs: "{{ aap_validate_certs }}"
-        # aap_token: "{{ aap_token }}"
-        # controller_configuration_job_templates_secure_logging: false  # noqa: var-naming[no-role-prefix]
-        # controller_configuration_secure_logging: "{{ controller_configuration_secure_logging }}"
-        # controller_dependency_check: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_job_templates: true  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_organizations: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_credential_types: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_credentials: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_notification_templates: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_projects: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_inventories: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_inventory_sources: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_workflow_job_templates: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_schedules: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_notifications: false  # noqa: var-naming[no-role-prefix]
-        # controller_dispatch_labels: false  # noqa: var-naming[no-role-prefix]
 
   post_tasks:
     - name: "Delete the Authentication Token used"
