@@ -1,0 +1,127 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    controller_username: "{{ vault_controller_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+    aap_username: "{{ vault_aap_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+    import_path: "./files/job_templates"
+    controller_configuration_secure_logging: false
+  pre_tasks:
+    - name: "Setup authentication (block)"
+      block:
+        - name: "Get the Authentication Token for the future requests"
+          ansible.builtin.uri:
+            url: "https://{{ controller_hostname }}/api/gateway/v1/tokens/"
+            user: "{{ controller_username }}"
+            password: "{{ controller_password }}"
+            method: POST
+            force_basic_auth: true
+            validate_certs: "{{ controller_validate_certs }}"
+            status_code: 201
+          register: authtoken_res
+
+        - name: "Set the oauth token to be used since now"
+          ansible.builtin.set_fact:
+            controller_oauthtoken: "{{ authtoken_res.json.token }}"
+            aap_token: "{{ authtoken_res.json.token }}"
+            controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
+      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
+      when: controller_oauthtoken is not defined
+      tags:
+        - always
+
+  tasks:
+    - name: Create a temporary directory for the job templates
+      ansible.builtin.file:
+        path: "{{ import_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create a temporary vars file from a template and dictionary
+      vars:
+        templates:
+          - name: "LINUX / coolstuff"
+            playbook: "linux/patching.yml"
+          - name: "Windows / coolstuff"
+            playbook: "windows/helpdesk_new_user_portal.yml"
+      ansible.builtin.template:
+        src: "templates/job_templates.j2"
+        dest: "{{ import_path }}/current_job_templates.yaml"
+        mode: '0644'
+
+    - name: Cat the generated job templates file for debugging
+      ansible.builtin.command:
+        cmd: cat "{{ import_path }}/current_job_templates.yaml"
+      register: cat_output
+
+    - name: Read configuration variables from the exported filetree
+      ansible.builtin.include_role:
+        name: infra.aap_configuration_extended.filetree_read
+      vars:
+        # These variables tell filetree_read where to find your exported configuration
+        orgs: ""
+        dir_orgs_vars: "{{ import_path }}"
+        filetree_controller_settings: "{{ import_path }}"
+        filetree_controller_organizations: "{{ import_path }}"
+        filetree_controller_credential_types: "{{ import_path }}"
+        filetree_controller_credentials: "{{ import_path }}"
+        filetree_controller_notification_templates: "{{ import_path }}"
+        filetree_controller_projects: "{{ import_path }}"
+        filetree_controller_inventories: "{{ import_path }}"
+        filetree_controller_inventory_sources: "{{ import_path }}"
+        filetree_controller_job_templates: "{{ import_path }}"
+        filetree_controller_workflow_job_templates: "{{ import_path }}"
+        filetree_controller_schedules: "{{ import_path }}"
+        filetree_controller_notifications: "{{ import_path }}"
+        filetree_controller_labels: "{{ import_path }}"
+        # If you have a specific directory structure for your filetree, you can specify it here
+        # dir_settings_vars: "{{ dir_settings_vars | default(omit) }}" # Include if you have global settings
+        # If your export structure uses an 'env' directory (e.g., orgs/MyOrg/env/dev), specify it:
+        # filetree_env: "dev"
+
+    - name: Print the job templates for debugging
+      ansible.builtin.debug:
+        var: controller_templates
+
+    - name: Dispatch the configuration to AAP 2.5
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.dispatch
+      vars:
+        # aap_hostname: "{{ aap_hostname }}"
+        # aap_validate_certs: "{{ aap_validate_certs }}"
+        # aap_token: "{{ aap_token }}"
+        # controller_configuration_job_templates_secure_logging: false  # noqa: var-naming[no-role-prefix]
+        # controller_configuration_secure_logging: "{{ controller_configuration_secure_logging }}"
+        # controller_dependency_check: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_job_templates: true  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_organizations: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_credential_types: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_credentials: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_notification_templates: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_projects: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_inventories: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_inventory_sources: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_workflow_job_templates: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_schedules: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_notifications: false  # noqa: var-naming[no-role-prefix]
+        # controller_dispatch_labels: false  # noqa: var-naming[no-role-prefix]
+
+  post_tasks:
+    - name: "Delete the Authentication Token used"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}{{ controller_oauthtoken_url }}"
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 204
+      when: controller_oauthtoken_url is defined
+...
