@@ -13,29 +13,9 @@
 - name: "Remove unauthorized key"
   ansible.posix.authorized_key:
     user: ansible
-    key: "{{ epic_cluster_pubkey }}"
+    key: "{{ epcot_cluster_pubkey }}"
     state: absent
-  when: inventory_hostname not in groups['type_epicodb'] and epic_cluster_pubkey is defined
-
-# - name: Print out ntp configuration
-#   ansible.builtin.debug:
-#     msg: "{{ ntp_global }}"
-#     verbosity: 2
-
-# - name: Combine host and group defined NTP configuration
-#   ansible.builtin.set_fact:
-#     device_ntp: "{{ ntp_global | combine(group_ntp_global | default({})) }}"
-
-# - name: Update NTP Configuration
-#   cisco.ios.ios_ntp_global:
-#     config: "{{ device_ntp }}"
-#     state: replaced
-#   register: result
-
-# - name: Print any NTP configuration changes
-#   ansible.builtin.debug:
-#     msg: "{{ result.commands }}"
-
+  when: inventory_hostname not in groups['type_epcotodb'] and epcot_cluster_pubkey is defined
 
 - name: Print out SSH Keys
   ansible.builtin.debug:

@@ -3,6 +3,7 @@
 - name: Apply base configuration
   hosts: all
   become: true
+  gather_facts: false
 
   roles:
     # - motd
