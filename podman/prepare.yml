@@ -1,0 +1,26 @@
+---
+- name: Prepare container instances
+  hosts: localhost
+  gather_facts: false
+  become: true
+  tasks:
+    # - name: Install software in a container using dnf
+    #   containers.podman.podman_container_exec:
+    #     name: "{{ required_packages }}"
+    #     state: present
+    #   when: required_packages is defined
+
+    # - name: Define packages to install as a String
+    #   set_fact:
+    #     required_packages: "{{ required_packages | join(' ') }}"
+    #   when: required_packages is defined
+
+
+    - name: Ensure required_packages are installed in the container
+      loop: "{{ groups['all'] }}"
+      when: hostvars[item].required_packages is defined
+      containers.podman.podman_container_exec:
+        name: "{{ hostvars[item].ansible_host }}"
+        command: dnf -y install {{ hostvars[item].required_packages | join(' ') }}
+
+...

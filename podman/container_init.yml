@@ -1,0 +1,12 @@
+---
+- name: Start a container with Podman
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Ensure the 'my_web_server' container is running
+      containers.podman.podman_container:
+        name: my_web_server
+        image: nginx
+        state: started
+        ports:
+          - "8080:80"

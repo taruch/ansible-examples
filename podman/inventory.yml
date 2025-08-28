@@ -1,0 +1,31 @@
+---
+all:
+  children:
+    webservers:
+      hosts:
+        web-server:
+          ansible_host: web-server
+          #container_image: quay.io/centos/centos:stream9
+          container_image: registry.access.redhat.com/ubi9/ubi-init:latest
+          container_command: /sbin/init
+          container_privileged: true
+      vars:
+        http_port: 80
+        server_name: test-web
+        required_packages:
+          - python3
+          - systemd
+    databases:
+      hosts:
+        db-server:
+          ansible_host: db-server
+          #container_image: quay.io/centos/centos:stream9
+          container_image: registry.access.redhat.com/ubi9/ubi-init:latest
+          container_command: /sbin/init
+          container_privileged: true
+      vars:
+        db_name: testdb
+        db_user: testuser
+        required_packages:
+          - python3
+          - systemd

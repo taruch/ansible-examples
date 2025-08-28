@@ -1,0 +1,46 @@
+---
+- name: Create container instances
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create container network
+      containers.podman.podman_network:
+        name: molecule-linux-test
+        state: present
+
+    - name: Create test containers
+      containers.podman.podman_container:
+        name: "{{ hostvars[item].ansible_host }}"
+        image: "{{ hostvars[item].container_image }}"
+        command: "{{ hostvars[item].container_command }}"
+        privileged: "{{ hostvars[item].container_privileged }}"
+        state: started
+        network: molecule-linux-test
+        systemd: true
+      loop: "{{ groups['all'] }}"
+      register: container_creation
+
+    - name: Print out results
+      loop: "{{ container_creation.results }}"
+      ansible.builtin.debug:
+        var: item.container
+        verbosity: 2
+
+
+    - name: Get info about the container
+      containers.podman.podman_container_info:
+        name: "{{ groups['all'] }}"
+      register: container_info
+
+    - name: Print out results
+      loop: "{{ container_info.containers }}"
+      ansible.builtin.debug:
+        var: item
+
+    - name: Check if the container is up and running
+      loop: "{{ container_info.containers }}"
+      ansible.builtin.assert:
+        that:
+          - item.State.Running is defined
+          - item.State.Running == true
+        fail_msg: "The container {{ item.Name }} is not running."
