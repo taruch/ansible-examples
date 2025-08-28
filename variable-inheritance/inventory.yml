@@ -2,20 +2,20 @@
 # This is an Ansible inventory file that defines groups and hosts.
 all: # keys must be unique, i.e. only one 'hosts' per group
   hosts:
-    general-1:
-      ansible_host: <FQDN>
+    general1:
+      ansible_host: ec2-18-118-45-160.us-east-2.compute.amazonaws.com
       ansible_user: ec2-user
       host_type: "common"
-    acc-1:
-      ansible_host: <FQDN>
+    acc1:
+      ansible_host: ec2-3-18-214-239.us-east-2.compute.amazonaws.com
       ansible_user: ec2-user
       host_type: ""
-    datadomain-1:
-      ansible_host: <FQDN>
+    datadomain1:
+      ansible_host: ec2-3-22-236-63.us-east-2.compute.amazonaws.com
       ansible_user: ec2-user
       host_type: datadomain
-    epcotodb-1:
-      ansible_host: <FQDN>
+    epcotodb1:
+      ansible_host: ec2-3-137-158-240.us-east-2.compute.amazonaws.com
       ansible_user: ec2-user
       host_type: epcot-odb
   vars:
@@ -26,20 +26,20 @@ all: # keys must be unique, i.e. only one 'hosts' per group
   children:
     acc:
       hosts:
-        acc-1:
-        datadomain-1:
+        acc1:
+        datadomain1:
       vars:
         group_ssh_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDNKK+VoFFofg/3t9pMhZ5uilS9AqSd84aNQ8gu5f8+SgBgd5uc8+6lDfmSnLLEhxhxJDh3y1tZ8lqK3vy5U9Ws1G8b+TYQ6nBauRG9WjRMomU9+6NnXFhnG8ZTNC9XqV59uFDRUhUPw+2Mhf51Jmx8saEGU7OGyasrNG4Y0olp95jeUGbNrgeg3KUherg89daMkQqu1BEI+c26LVB0Ale7kxdZ5v+k8oXb0LOk4tjvU83pIq8FFJz0FbJpFggLE1+96yG0isPj8e6DBsHAFq20/ACP91LAM/Y5DUmo+dQfWjgQGIS3IA32Z6wwd3HO5y9jSuPeqQCHJR+NGArkUgYH acc-group"
         ssh_key: "{{ group_ssh_key }}"
     epcot:
       hosts:
-        epcotodb-1 # same host as above, additional group membership
+        epcotodb1 # same host as above, additional group membership
       vars:
         group_ssh_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7i1OhPYyH2w2aotTw9DUKQqs1dceBDeIwKj67W0gRrDWAgdwXyWvmXGq9AZ3HMWCzR+WJ0eHb7RMe9AT7yobBMqJFWd0kW73SZdhiKhAaUJh2nlmoUMIvCILuXcagLr2iXO2pTZ6815EAArbZAnP+Kov39k0TV5LZHmzqpMVLkUEKJugOPsUFHzMyoyCP0ook9jJnTWXqjfqRMruj5I4MXb7qvxItISlTwqskqsKAyrBTb8TBejPCL7OJPxYFqT4iPYFKA8wIaqRFo+ygTkSHw1oK6RTHNOlyjno4PSHsGIepOZB+qSMZp+Sjy4tfyMWrsRJ4dEgkyh+ClEO+rb2v epcot-group"
         ssh_key: "{{ group_ssh_key }}"
     type_datadomain:
       hosts:
-        datadomain-1: # same host as above, additional group membership
+        datadomain1: # same host as above, additional group membership
       vars:
         ansible_group_priority: 10
         ssh_keys:
@@ -47,7 +47,7 @@ all: # keys must be unique, i.e. only one 'hosts' per group
           - "{{ group_ssh_key | default(omit) }}"
     type_epcotodb:
       hosts:
-        epcotodb-1: # same host as above, additional group membership
+        epcotodb1: # same host as above, additional group membership
       vars:
         ansible_group_priority: 10
         ssh_keys:
