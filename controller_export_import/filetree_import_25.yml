@@ -1,5 +1,6 @@
 ---
-- hosts: localhost
+- name: Import file tree into controller
+  hosts: localhost
   connection: local
   gather_facts: false
   vars:
@@ -11,8 +12,11 @@
     aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+    import_path: "./export_to_25"
+
   pre_tasks:
     - name: "Setup authentication (block)"
+      when: controller_oauthtoken is not defined
       block:
         - name: "Get the Authentication Token for the future requests"
           ansible.builtin.uri:
@@ -30,10 +34,6 @@
             controller_oauthtoken: "{{ authtoken_res.json.token }}"
             aap_token: "{{ authtoken_res.json.token }}"
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
-      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
-      when: controller_oauthtoken is not defined
-      tags:
-        - always
 
   tasks:
     - name: Read configuration variables from the exported filetree
@@ -43,20 +43,20 @@
       vars:
         # These variables tell filetree_read where to find your exported configuration
         orgs: ""
-        dir_orgs_vars: "./export_ft4/"
-        # filetree_controller_settings: "./export_ft4/"
-        filetree_controller_organizations: "./export_ft4/"
-        filetree_controller_credential_types: "./export_ft4/"
-        filetree_controller_credentials: "./export_ft4/"
-        filetree_controller_notification_templates: "./export_ft4/"
-        filetree_controller_projects: "./export_ft4/"
-        filetree_controller_inventories: "./export_ft4/"
-        filetree_controller_inventory_sources: "./export_ft4/"
-        filetree_controller_job_templates: "./export_ft4/"
-        filetree_controller_workflow_job_templates: "./export_ft4/"
-        # filetree_controller_schedules: "./export_ft4/"
-        # filetree_controller_notifications: "./export_ft4/"
-        # filetree_controller_labels: "./export_ft4/"
+        dir_orgs_vars: "{{ import_path }}"
+        # filetree_controller_settings: "{{ import_path }}"
+        filetree_controller_organizations: "{{ import_path }}"
+        filetree_controller_credential_types: "{{ import_path }}"
+        filetree_controller_credentials: "{{ import_path }}"
+        filetree_controller_notification_templates: "{{ import_path }}"
+        filetree_controller_projects: "{{ import_path }}"
+        filetree_controller_inventories: "{{ import_path }}"
+        filetree_controller_inventory_sources: "{{ import_path }}"
+        filetree_controller_job_templates: "{{ import_path }}"
+        filetree_controller_workflow_job_templates: "{{ import_path }}"
+        # filetree_controller_schedules: "{{ import_path }}"
+        # filetree_controller_notifications: "{{ import_path }}"
+        # filetree_controller_labels: "{{ import_path }}"
         # If you have a specific directory structure for your filetree, you can specify it here
         # dir_settings_vars: "{{ dir_settings_vars | default(omit) }}" # Include if you have global settings
         # If your export structure uses an 'env' directory (e.g., orgs/MyOrg/env/dev), specify it:
@@ -64,7 +64,7 @@
 
     # - name: Include configuration for {{ demo }}
     #   ansible.builtin.include_vars: "export_ft4/current_credential_types.yaml"
-    # 
+    #
     # - name: Demo Components
     #   ansible.builtin.include_role:
     #     name: infra.controller_configuration.dispatch
@@ -74,7 +74,8 @@
     - name: Dispatch the configuration to AAP 2.5
       ansible.builtin.include_role:
         name: infra.aap_configuration.dispatch
-      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
+      vars:
+        controller_configuration_filetree_create_secure_logging: false
 
 
   post_tasks:
@@ -88,4 +89,5 @@
         validate_certs: "{{ controller_validate_certs }}"
         status_code: 204
       when: controller_oauthtoken_url is defined
+
 ...

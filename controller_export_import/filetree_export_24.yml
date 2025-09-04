@@ -1,5 +1,6 @@
 ---
-- hosts: localhost
+- name: Export file tree from controller
+  hosts: localhost
   connection: local
   gather_facts: false
   vars:
@@ -7,13 +8,28 @@
     controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    output_path: "./export_aap"
-    input_tag:  ['labels', 'applications', 'instance_groups', 'settings', 'inventory', 'credentials', 'credential_types', 'notification_templates', 'organizations', 'projects', 'execution_environments', 'job_templates', 'workflow_job_templates', 'schedules']
-    # flatten_output: true
+    output_path: "./export_ft6"
+    input_tag:
+      - 'labels'
+      - 'applications'
+      - 'instance_groups'
+      - 'settings'
+      - 'inventory'
+      - 'credentials'
+      - 'credential_types'
+      - 'notification_templates'
+      - 'organizations'
+      - 'projects'
+      - 'execution_environments'
+      - 'job_templates'
+      - 'workflow_job_templates'
+      - 'schedules'
+    flatten_output: false
     # organization_filter: "Default"  # Specify the organization to filter the export, if needed
 
   pre_tasks:
     - name: "Setup authentication (block)"
+      when: controller_oauthtoken is not defined
       block:
         - name: "Get the Authentication Token for the future requests"
           ansible.builtin.uri:
@@ -30,10 +46,6 @@
           ansible.builtin.set_fact:
             controller_oauthtoken: "{{ authtoken_res.json.token }}"
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
-      when: controller_oauthtoken is not defined
-      tags:
-        - always
-
 
   roles:
     - infra.controller_configuration.filetree_create
