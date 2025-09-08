@@ -12,7 +12,7 @@
     aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    import_path: "./export_to_25"
+    import_path: "./export_ft7"
 
   pre_tasks:
     - name: "Setup authentication (block)"
@@ -61,6 +61,9 @@
         # dir_settings_vars: "{{ dir_settings_vars | default(omit) }}" # Include if you have global settings
         # If your export structure uses an 'env' directory (e.g., orgs/MyOrg/env/dev), specify it:
         # filetree_env: "dev"
+        
+        # controller_configuration_secure_logging: false
+        # controller_configuration_credential_types_secure_logging: true
         controller_configuration_filetree_read_tasks:
           - {name: settings, var: controller_settings, tags: settings}
           - {name: organizations, var: aap_organizations, tags: organizations}
@@ -84,7 +87,6 @@
           - {name: schedules, var: controller_schedules, tags: schedules}
           - {name: roles, var: controller_roles, tags: roles}
 
-
     # - name: Include configuration for {{ demo }}
     #   ansible.builtin.include_vars: "export_ft4/current_credential_types.yaml"
     #
@@ -99,7 +101,9 @@
         name: infra.aap_configuration.dispatch
       vars:
         controller_configuration_filetree_create_secure_logging: false
-
+        aap_configuration_secure_logging: false
+        aap_configuration_collect_logs: false
+        cas_secure_logging: false
 
   post_tasks:
     - name: "Delete the Authentication Token used"
