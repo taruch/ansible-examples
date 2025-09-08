@@ -8,7 +8,7 @@
     controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    output_path: "./export_ft6"
+    output_path: "./export_ft7"
     input_tag:
       - 'labels'
       - 'applications'
@@ -19,6 +19,7 @@
       - 'credential_types'
       - 'notification_templates'
       - 'organizations'
+      - 'teams'
       - 'projects'
       - 'execution_environments'
       - 'job_templates'
