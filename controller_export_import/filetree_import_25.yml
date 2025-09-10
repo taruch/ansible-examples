@@ -101,6 +101,7 @@
         name: infra.aap_configuration.dispatch
       vars:
         controller_configuration_filetree_create_secure_logging: false
+        controller_configuration_filetree_read_secure_logging: false
         aap_configuration_secure_logging: false
         aap_configuration_collect_logs: false
         cas_secure_logging: false
