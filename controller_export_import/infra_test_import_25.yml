@@ -36,9 +36,9 @@
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
 
   tasks:
-    - name: Include configuration for {{ demo }}
+    - name: Include configuration info for credential types
       ansible.builtin.include_vars: "{{ import_path }}/current_credential_types.yaml"
-    
+
     - name: Dispatch the configuration to AAP 2.5
       ansible.builtin.include_role:
         name: infra.aap_configuration.dispatch
