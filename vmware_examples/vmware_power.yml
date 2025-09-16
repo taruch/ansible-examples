@@ -1,0 +1,34 @@
+---
+- name: Set power state of VMware VM in vCenter
+  hosts: localhost
+  gather_facts: false
+  environment:
+    ANSIBLE_HOST_KEY_CHECKING: false
+    VMWARE_HOST: "vcsnsx-vc.infra.demo.redhat.com"
+    VMWARE_USER: 'sandbox-hczw7@demo'
+    VMWARE_PASSWORD: 'lp,iytCvfcJ2'
+  vars:
+    vm_name: "rhel9test2"
+    vmpowerstate: "on"
+
+  tasks:
+    - name: Power off the vm
+      vmware.vmware.vm_powerstate:
+        datacenter: SDDC-Datacenter
+        name: "{{ vm_name }}"
+        state: powered-off
+      when: vmpowerstate == "off"
+
+    - name: Power on the vm
+      vmware.vmware.vm_powerstate:
+        datacenter: SDDC-Datacenter
+        name: "{{ vm_name }}"
+        state: powered-on
+      when: vmpowerstate == "on"
+
+    - name: Restart the vm
+      vmware.vmware.vm_powerstate:
+        datacenter: SDDC-Datacenter
+        name: "{{ vm_name }}"
+        state: restarted
+      when: vmpowerstate == "restart"

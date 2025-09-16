@@ -1,13 +1,16 @@
 ---
 - name: Copy file from remote windows host to linux host
-  hosts: "{{ _linux_host }}"
+  hosts: localhost
   gather_facts: false
   tasks:
 
     - name: Print out variables
       delegate_to: localhost
       ansible.builtin.debug:
-        msg: "User: {{ copy_username }}, Password: {{ copy_password }}, SSH Key: {{ copy_ssh_key_data }}"
+        msg: >
+          User: {{ copy_username | default('Not provided') }}
+          Password: {{ copy_password | default('Not provided') }}
+          SSH Key: {{ copy_ssh_key_data | default('Not provided') }}
 
     - name: Copy file from windows to linux
       vars:

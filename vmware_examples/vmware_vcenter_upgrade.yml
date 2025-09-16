@@ -1,0 +1,68 @@
+---
+- name: Part 1 - Mount Update ISO via vCenter API
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_prompt:
+    - name: vcenter_password
+      prompt: "Enter your vCenter password"
+      private: yes
+    - name: vcsa_root_password
+      prompt: "Enter the VCSA appliance root password"
+      private: yes
+
+  vars:
+    vcenter_hostname: "your-vcenter.example.com"
+    vcenter_username: "administrator@vsphere.local"
+    vcsa_vm_name: "name-of-your-vcsa-vm" # The VM name of your VCSA
+    datacenter_name: "MyDatacenter"
+    patch_iso_path: "[your_datastore] ISOs/VMware-vCenter-Server-Appliance-patch-FP.iso"
+
+  tasks:
+    - name: Mount the VCSA patch ISO to the VM
+      community.vmware.vmware_guest_cdrom:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+        name: "{{ vcsa_vm_name }}"
+        datacenter: "{{ datacenter_name }}"
+        state: present
+        type: iso
+        iso_path: "{{ patch_iso_path }}"
+
+# ---------------------------------------------------------------------------
+
+- name: Part 2 - Run Update Commands on VCSA via SSH
+  hosts: "{{ vcenter_hostname }}" # Target the VCSA directly by its hostname/IP
+  gather_facts: false
+
+  # These variables are passed from the first play
+  vars:
+    ansible_user: "root"
+    ansible_password: "{{ hostvars['localhost']['vcsa_root_password'] }}"
+    ansible_connection: "ssh"
+
+  tasks:
+    - name: Stage the update from the mounted ISO
+      ansible.builtin.shell: "software-packages stage --iso"
+      # This command can take several minutes
+      async: 1800 # 30 minutes
+      poll: 15
+      register: stage_result
+
+    - name: Display staging information
+      ansible.builtin.debug:
+        var: stage_result.stdout
+
+    - name: Install the staged software packages
+      ansible.builtin.shell: "software-packages install --staged"
+      # This command WILL cause the SSH connection to drop as VCSA reboots.
+      # We run it and ignore the expected failure.
+      ignore_errors: true
+
+    - name: Wait for VCSA to become available again after reboot
+      ansible.builtin.wait_for_connection:
+        delay: 60       # Initial wait time before starting checks
+        timeout: 1800   # Max time to wait (30 minutes)

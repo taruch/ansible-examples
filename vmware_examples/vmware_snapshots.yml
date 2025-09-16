@@ -1,0 +1,55 @@
+---
+- name: Create VMware VM Snapshot
+  # This playbook runs on your Ansible machine, not on the VM itself
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - secrets.yml
+
+  # Define variables for your vCenter environment and the target VM
+  vars:
+    vm_name: "rhel9test2"
+    snapshot_description: "Pre-upgrade snapshot taken on {{ ansible_date_time.date }}"
+
+  tasks:
+    - name: Get only date and time facts
+      tags:
+        - always
+      ansible.builtin.setup:
+        gather_subset:
+          - 'date_time'
+
+    - name: "Create snapshot for VM: {{ vm_name }}"
+      tags:
+        - snapshot_create
+      community.vmware.vmware_guest_snapshot:
+        # vCenter connection details
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false # Set to true in production with proper certs
+
+        # Target VM details
+        datacenter: "{{ vcenter_datacenter }}"
+        folder: "/{{ vcenter_folder }}"
+        name: "{{ vm_name }}"
+
+        # Snapshot parameters
+        snapshot_name: "Pre-Upgrade-Snapshot-{{ ansible_date_time.epoch }}"
+        description: "{{ snapshot_description }}"
+        memory_dump: true
+        quiesce: true
+        state: present
+
+    - name: Remove all snapshots of a VM
+      tags:
+        - snapshot_remove_all
+      community.vmware.vmware_guest_snapshot:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        datacenter: "{{ vcenter_datacenter }}"
+        folder: "/{{ vcenter_folder }}"
+        name: "{{ vm_name }}"
+        state: remove_all

@@ -25,3 +25,5 @@ If you had resources in the 2.4 system that were not assigned to an organization
 - Fix them in your 2.4 instance before you do the export (best)
 - Change the ORGANIZATIONLESS resources to a viable organization (works): find ./<export directory> -type f -exec sed -i 's/ORGANIZATIONLESS/Default/g' {} +
 - Remove the ORGANIZATIONLESS resources (probably not what you are looking for)
+
+- Also be aware that if you overwrite a credential that you require (such as an Ansible Hub) for syncing collections, that can be a problem.  It might be a good idea to delete those, or to fix them.

@@ -1,0 +1,82 @@
+---
+- name: Play 1 - Provision ESXi on Bare Metal via iDRAC
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    idrac_hostname: "your-idrac-ip"
+    idrac_user: "root"
+    idrac_password: "your-idrac-password"
+    esxi_iso_path: "nfs-server:/path/to/VMware-VMvisor-Installer-7.0U3-19482537.x86_64.iso"
+    kickstart_url: "http://your-web-server/ks.cfg"
+    new_esxi_hostname: "esxi-new-host.yourdomain.local"
+
+  tasks:
+    - name: Set kernel options to point to the Kickstart file
+      dellemc.openmanage.idrac_attributes:
+        idrac_ip: "{{ idrac_hostname }}"
+        idrac_user: "{{ idrac_user }}"
+        idrac_password: "{{ idrac_password }}"
+        attributes:
+          Kernel.LcdLanguage:
+            # We add 'ks=' to the kernel boot arguments
+            value: "ks={{ kickstart_url }}"
+
+    - name: Mount the ESXi Installer ISO via virtual media
+      dellemc.openmanage.idrac_virtual_media:
+        idrac_ip: "{{ idrac_hostname }}"
+        idrac_user: "{{ idrac_user }}"
+        idrac_password: "{{ idrac_password }}"
+        iso_image: "{{ esxi_iso_path }}"
+
+    - name: Set server to boot from virtual CD on next boot
+      dellemc.openmanage.idrac_boot:
+        idrac_ip: "{{ idrac_hostname }}"
+        idrac_user: "{{ idrac_user }}"
+        idrac_password: "{{ idrac_password }}"
+        boot_device: VCD-DVD
+        enable_boot_device: "once" # Only for the next boot
+
+    - name: Reboot the server to start the installation
+      dellemc.openmanage.idrac_server_power:
+        idrac_ip: "{{ idrac_hostname }}"
+        idrac_user: "{{ idrac_user }}"
+        idrac_password: "{{ idrac_password }}"
+        state: "reboot"
+
+
+- name: Play 2 - Add New ESXi Host to vCenter
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - secrets.yml
+  vars:
+    vcenter_cluster: "{{ vcenter_cluster }}"
+    new_esxi_hostname: "{{ new_esxi_hostname }}"
+    # The root password you set in the ks.cfg file
+    esxi_root_password: "{{ esxi_root_password }}"
+
+  tasks:
+    - name: Wait for the new ESXi host to come online
+      ansible.builtin.wait_for:
+        host: "{{ new_esxi_hostname }}"
+        port: 22
+        delay: 60        # Start checking after 60 seconds
+        timeout: 1200    # Wait for a maximum of 20 minutes
+      delegate_to: localhost
+
+    - name: Add the newly installed ESXi host to vCenter
+      community.vmware.vmware_host:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+        datacenter_name: "{{ vcenter_datacenter }}"
+        cluster_name: "{{ vcenter_cluster }}"
+        esxi_hostname: "{{ new_esxi_hostname }}"
+        esxi_username: "root"
+        esxi_password: "{{ esxi_root_password }}"
+        state: "present"

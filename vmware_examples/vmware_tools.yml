@@ -1,0 +1,20 @@
+---
+- name: Manage VMware Guest Settings
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars_files:
+    - secrets.yml
+
+  tasks:
+    - name: Ensure VMware Tools are set to upgrade on power cycle
+      community.vmware.vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false # Set to true in production with proper certs
+        name: "my-vm-01"
+        datacenter: "MyDatacenter"
+        tools_upgrade_policy: "upgrade_at_power_cycle" # Or 'manual'
+      delegate_to: localhost

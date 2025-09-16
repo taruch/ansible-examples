@@ -1,0 +1,38 @@
+---
+# The vm_memory_mb and vm_num_cpus variables can be passed at runtime and must be larger then current resources or will error out
+# ansible-navigator run -mstdout vmware_hotadd.yml -vv --eei=quay.io/sdunnesa/ee-sdunne:1.10 -e vm_memory_mb=8192 -e vm_num_cpus=4
+
+- name: Hot add resources to VMware VM in vCenter
+  hosts: localhost
+  gather_facts: true
+
+  vars_files:
+    - secrets.yml
+
+  vars:
+    vm_name: "rhel9test2"
+
+  tasks:
+    - name: VMware hotadd resources
+      ansible.builtin.import_role:
+        name: cloud.vmware_ops.provision_vm
+      vars:
+        provision_vm_hostname: "{{ vcenter_hostname }}"
+        provision_vm_username: "{{ vcenter_username }}"
+        provision_vm_password: "{{ vcenter_password }}"
+#        provision_vm_validate_certs: false
+        provision_vm_cluster: "Cluster-1"
+        provision_vm_folder: "{{ vcenter_folder }}"
+        provision_vm_datacenter: "{{ vcenter_datacenter }}"
+        provision_vm_name: "{{ vm_name }}"
+#        provision_vm_template: "{{ vm_template }}"
+#        provision_vm_port: "8989"
+#        provision_vm_disk:
+#        - size_gb: 10
+#          type: thin
+#          datastore: "LocalDS_0"
+        provision_vm_hardware:
+          hotadd_memory: true
+          memory_mb: "{{ vm_memory_mb | default(omit) }}"
+          hotadd_cpu: true
+          num_cpus: "{{ vm_num_cpus | default(omit) }}"
