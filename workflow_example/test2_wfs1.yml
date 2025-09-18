@@ -22,3 +22,4 @@
         data:
           # This variable 'dynamic_limit_hosts' will be available to downstream nodes
           dynamic_limit_hosts: "{{ limit_string }}"
+      run_once: true
