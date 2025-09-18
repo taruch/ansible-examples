@@ -1,7 +1,7 @@
 ---
 
 - name: get contents of authorized_keys
-  hosts: [aws_rhe8, aws_rhe9]
+  hosts: [aws_rhel8, aws_rhel9]
   become: true
   gather_facts: false
 
