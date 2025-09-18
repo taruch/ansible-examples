@@ -1,7 +1,7 @@
 ---
 
 - name: print contents of authorized_keys
-  hosts: "{{ dynamic_limit_hosts | default('all') }}"
+  hosts: all
   gather_facts: false
 
   tasks:
