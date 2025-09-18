@@ -38,6 +38,7 @@
         data:
           auth_key_results: "{{ auth_keys }}"
           new_limit: "aws_rhel8"
+        per_host: no
 
 
   # - name: per host collection and aggregate false via a workaround
