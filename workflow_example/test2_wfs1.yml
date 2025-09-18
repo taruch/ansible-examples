@@ -1,0 +1,53 @@
+---
+
+- name: get contents of authorized_keys
+  hosts: [aws_rhe8, aws_rhe9]
+  become: true
+  gather_facts: false
+
+  tasks:
+    #- name: Get contents of authorized_keys 
+    #  shell: cat /root/.ssh/authorized_keys
+    #  register: pb1_contents
+
+    - name: Get the motd file
+      ansible.builtin.fetch:
+        src: '/var/log/messages'
+        dest: "/tmp/{{ inventory_hostname }}/"
+        flat: True
+
+    - name: Find out what the remote machine's mounts are
+      ansible.builtin.slurp:
+        src: /home/ec2-user/.ssh/authorized_keys
+      register: program_conf
+
+    - name: Set Fact from returned information
+      ansible.builtin.set_fact:
+        auth_keys:
+          - name: "{{ inventory_hostname }}"
+            content: "{{ (program_conf['content'] | b64decode).split('\n') }}"
+
+
+    - name: Print returned information
+      ansible.builtin.debug:
+        var: auth_keys
+        verbosity: 2
+
+    - name: "Artifact URL of test results to Tower Workflows"
+      set_stats:
+        data:
+          auth_key_results: "{{ auth_keys }}"
+          new_limit: "aws_rhel8"
+
+
+  # - name: per host collection and aggregate false via a workaround
+  #   ansible.builtin.set_stats:
+  #     data:
+  #       dist_ver_per_host_agg_false: "{{ dist_ver_per_host_agg_false | default({}) | combine({ inventory_hostname : { 'ver' : ansible_facts.distribution_version}}) }}"
+  #     aggregate: false
+ 
+  # - name: per host collection and aggregate true via a workaround
+  #   ansible.builtin.set_stats:
+  #     data:
+  #       dist_ver_per_host_agg_true: "{{ dist_ver_per_host_agg_true | default({}) | combine({ inventory_hostname : { 'ver' : ansible_facts.distribution_version}}) }}"
+  #     aggregate: true

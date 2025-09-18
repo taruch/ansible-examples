@@ -1,0 +1,13 @@
+---
+
+- name: print contents of authorized_keys
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: print contents of authorized_keys from PB1
+      debug: msg="pb2 - the value of pb1_contents is {{ auth_key_results }}"
+
+    - name: Cat the motd file
+      delegate_to: localhost
+      ansible.builtin.command: "cat /tmp/{{ inventory_hostname }}/messages"
