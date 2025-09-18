@@ -1,0 +1,10 @@
+---
+
+- name: print contents of authorized_keys
+  hosts: "{{ dynamic_limit_hosts | default('all') }}"
+  gather_facts: false
+
+  tasks:
+    - name: print hostname
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}"
