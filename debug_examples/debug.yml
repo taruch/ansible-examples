@@ -1,0 +1,14 @@
+---
+- name: Print out all variables on ask_limit_on_launch
+  hosts: localhost
+  gather_facts: true
+  tasks:
+
+   - name: Show all variables
+      ansible.builtin.debug:
+        var: vars
+
+    # - name: Show all variables
+    #   ansible.builtin.debug:
+    #     var: hostvars['localhost']
+    #   when: "'ask_limit_on_launch' in hostvars['localhost']"
