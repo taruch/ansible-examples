@@ -1,7 +1,7 @@
 ---
 
 - name: print contents of authorized_keys
-  hosts: all
+  hosts: "{{ _hosts }}"
   gather_facts: false
 
   tasks:
