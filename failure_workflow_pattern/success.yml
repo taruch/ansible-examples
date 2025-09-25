@@ -1,0 +1,8 @@
+---
+- name: Playbook to show success nodes in a failure scenario
+  hosts: "{{ _success_nodes }}"
+  gather_facts: false
+  tasks:
+    - name: Print out inventory_hostname
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} is on the success track"
