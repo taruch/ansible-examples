@@ -1,0 +1,38 @@
+- name: Identify failed hosts
+  hosts: "{{ failed_nodes | default([]) }}"
+  gather_facts: true
+  tasks:
+    - name: Get list of all hosts targeted by the play
+      set_fact:
+        all_targeted_hosts: "{{ ansible_play_hosts_all }}"
+
+    - name: Get list of hosts that successfully ran the current play
+      set_fact:
+        successful_play_hosts: "{{ ansible_play_hosts }}"
+
+    - name: Get the distribution version of the host
+      ansible.builtin.setup:
+        gather_subset:
+          - 'distribution'
+      register: host_facts
+
+    - name: Display the distribution version
+      debug:
+        msg: "Host {{ inventory_hostname }} is running {{ host_facts.ansible_facts.ansible_distribution }} version {{ host_facts.ansible_facts.ansible_distribution_version }}"
+
+    - name: Simulate a task that may fail by assert that ansible_distribution_major_version == 9
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution_major_version == "9"
+        fail_msg: "This task simluates a failure in a playbook that we want to recover from."
+        success_msg: "This host passed the test"
+
+    - name: Calculate failed/unreachable hosts
+      delegate_to: localhost
+      ansible.builtin.set_fact:
+        failed_or_unreachable_hosts: "{{ all_targeted_hosts | difference(successful_play_hosts) }}"
+
+    - name: Display failed/unreachable hosts
+      delegate_to: localhost
+      ansible.builtin.debug:
+        msg: "Failed or unreachable hosts: {{ failed_or_unreachable_hosts }}"

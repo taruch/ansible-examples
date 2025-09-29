@@ -1,0 +1,146 @@
+---
+- name: Patching Rescue Example Playbook
+  hosts: all
+  gather_facts: true
+  vars:
+    success_nodes: []
+    failed_nodes: []
+
+  tasks:
+
+    - name: Task that may fail, with rescue to track success and failure nodes
+      block:
+        - name: Simulate a task that may fail by assert that ansible_distribution_major_version == 9
+          ansible.builtin.assert:
+            that:
+              - ansible_distribution_major_version == "9"
+            fail_msg: "This task simluates a failure in a playbook that we want to recover from."
+            success_msg: "This host passed the test"
+
+        - name: Define successful node
+          ansible.builtin.set_fact:
+            failed_node: "false"
+      rescue:
+        - name: Define failure node
+          ansible.builtin.set_fact:
+            failed_node: "true"
+
+
+    - name: Print out ansible_play_hosts
+      delegate_to: localhost
+      loop: "{{ ansible_play_hosts }}" 
+      run_once: true
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+
+    - name: Print out nodes that failed this play
+      delegate_to: localhost
+      loop: "{{ ansible_play_hosts }}"
+      run_once: true
+      when: hostvars[item].failed_node is true
+      ansible.builtin.debug:
+        msg: "Failure node: {{ hostvars[item].inventory_hostname }}"
+
+    - name: Generate a combined list of successful nodes
+      delegate_to: localhost # Run this task on the control node
+      when: hostvars[item].failed_node is false
+      run_once: true # Ensure the set_fact is executed only once
+      loop: "{{ groups['all'] }}" # Or a specific group
+      ansible.builtin.set_fact:
+        success_nodes: "{{ success_nodes + [hostvars[item].inventory_hostname] }}"
+
+    - name: Debug successful nodes
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.debug:
+        msg: "Successful nodes: {{ success_nodes }}"
+
+    - name: Generate a combined list of failed nodes
+      delegate_to: localhost # Run this task on the control node
+      when: hostvars[item].failed_node is false
+      run_once: true # Ensure the set_fact is executed only once
+      loop: "{{ groups['all'] }}" # Or a specific group
+      ansible.builtin.set_fact:
+        failed_nodes: "{{ failed_nodes + [hostvars[item].inventory_hostname] }}"
+
+    - name: Debug failed nodes
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.debug:
+        msg: "Failed nodes: {{ failed_nodes }}"
+
+    - name: per host collection and aggregate true via a workaround
+      ansible.builtin.set_stats:
+        data:
+          success_nodes: "{{ success_nodes }}"
+          failed_nodes: "{{ failed_nodes }}"
+        # aggregate: true
+
+
+    # - name: Task that may fail, with rescue to track success and failure nodes
+    #   block:
+    #     - name: Simulate a task that may fail by assert that ansible_distribution_major_version == 9
+    #       ansible.builtin.assert:
+    #         that:
+    #           - ansible_distribution_major_version == "9"
+    #         fail_msg: "This task simluates a failure in a playbook that we want to recover from."
+    #         success_msg: "This host passed the test"
+
+    #     - name: Add successful nodes to succes list
+    #       ansible.builtin.set_fact:
+    #         success_nodes: "{{ success_nodes | default([]) + [inventory_hostname] }}"
+    #   rescue:
+    #     - name: Add failure nodes to failure list
+    #       ansible.builtin.set_fact:
+    #         failure_nodes: "{{ failure_nodes | default([]) + [inventory_hostname] }}"
+    #   # always:
+    #   #   - <always_task>
+
+    # - name: Task that may fail, with rescue to track success and failure nodes
+    #   block:
+    #     - name: Simulate a task that may fail by assert that ansible_distribution_major_version == 9
+    #       ansible.builtin.assert:
+    #         that:
+    #           - ansible_distribution_major_version == "9"
+    #         fail_msg: "This task simluates a failure in a playbook that we want to recover from."
+    #         success_msg: "This host passed the test"
+
+    #     - name: Define successful node
+    #       ansible.builtin.set_fact:
+    #         successful_node: "{{ inventory_hostname }}"
+    #   rescue:
+    #     - name: Define failure node
+    #       ansible.builtin.set_fact:
+    #         failure_node: "{{ inventory_hostname }}"
+    #   # always:
+    #   #   - <always_task>
+
+    # - name: Print out ansible_play_hosts
+    #   delegate_to: localhost
+    #   loop: "{{ ansible_play_hosts }}" 
+    #   run_once: true
+    #   ansible.builtin.debug:
+    #     msg: "{{ item }}"
+
+    # - name: print out nodes that failed this play
+    #   delegate_to: localhost
+    #   loop: "{{ ansible_play_hosts }}"
+    #   run_once: true
+    #   when: hostvars[item].failure_node is defined
+    #   ansible.builtin.debug:
+    #     msg: "Failure node: {{ hostvars[item].failure_node }}"
+
+    # - name: generate a combined list of successful nodes
+    #   delegate_to: localhost
+    #   run_once: true
+    #   when: hostvars[item].successful_node is defined
+    #   ansible.builtin.set_fact:
+    #     success_nodes: "{{ successful_node | default([]) + [item] }}"
+    #   loop: "{{ ansible_play_hosts }}"
+
+
+    # - name: Debug successful nodes
+    #   delegate_to: localhost
+    #   ansible.builtin.debug:
+    #     msg: "Successful nodes: {{ success_nodes }}"
+    #   run_once: true
