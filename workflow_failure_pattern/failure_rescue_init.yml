@@ -34,7 +34,6 @@
         msg: "{{ item }}"
 
     - name: Print out nodes that failed this play
-      delegate_to: localhost
       loop: "{{ ansible_play_hosts }}"
       run_once: true
       when: hostvars[item].failed_node is true
@@ -57,7 +56,7 @@
 
     - name: Generate a combined list of failed nodes
       delegate_to: localhost # Run this task on the control node
-      when: hostvars[item].failed_node is false
+      when: hostvars[item].failed_node is true
       run_once: true # Ensure the set_fact is executed only once
       loop: "{{ groups['all'] }}" # Or a specific group
       ansible.builtin.set_fact:
@@ -70,11 +69,13 @@
         msg: "Failed nodes: {{ failed_nodes }}"
 
     - name: per host collection and aggregate true via a workaround
+      delegate_to: localhost
+      run_once: true
       ansible.builtin.set_stats:
         data:
           success_nodes: "{{ success_nodes }}"
           failed_nodes: "{{ failed_nodes }}"
-        # aggregate: true
+        aggregate: true
 
 
     # - name: Task that may fail, with rescue to track success and failure nodes
