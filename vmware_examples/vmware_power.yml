@@ -4,9 +4,9 @@
   gather_facts: false
   environment:
     ANSIBLE_HOST_KEY_CHECKING: false
-    VMWARE_HOST: "vcsnsx-vc.infra.demo.redhat.com"
-    VMWARE_USER: 'sandbox-hczw7@demo'
-    VMWARE_PASSWORD: 'lp,iytCvfcJ2'
+    VMWARE_HOST: "{{ vmware_host }}"
+    VMWARE_USER: "{{ vmware_user }}"
+    VMWARE_PASSWORD: "{{ vmware_password }}"
   vars:
     vm_name: "rhel9test2"
     vmpowerstate: "on"
