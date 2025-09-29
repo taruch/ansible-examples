@@ -1,6 +1,6 @@
 ---
 - name: Playbook to show nodes on the failure recovery track of the workflow
-  hosts: "{{ _failure_nodes }}"
+  hosts: "{{ failure_nodes }}"
   gather_facts: false
   tasks:
     - name: Print out nodes on the recovery track
