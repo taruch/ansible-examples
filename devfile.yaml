@@ -1,0 +1,12 @@
+schemaVersion: 2.3.0
+metadata:
+  name: ansible-development # change this name per workspace
+components:
+  - container:
+      args: ['tail', '-f', '/dev/null']
+      image: 'ghcr.io/ansible/community-ansible-dev-tools:latest' # change for your EE
+      memoryRequest: 256M
+      memoryLimit: 6Gi
+      cpuRequest: 250m
+      cpuLimit: 2000m
+    name: ansible
