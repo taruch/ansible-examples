@@ -25,7 +25,7 @@
         provision_vm_datacenter: "SDDC-Datacenter"
         provision_vm_name: "{{ vm_name }}"
         provision_vm_template: "{{ vm_template }}"
-        provision_vm_datastore: "{{ vcenter_datastore | default(omit) }}"
+        # provision_vm_datastore: "{{ vcenter_datastore | default(omit) }}"
 #        provision_vm_port: "8989"
 #        provision_vm_disk:
 #        - size_gb: 10
