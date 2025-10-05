@@ -16,12 +16,12 @@
       ansible.builtin.import_role:
         name: cloud.vmware_ops.provision_vm
       vars:
-        provision_vm_hostname: "{{ vcenter_hostname }}"
-        provision_vm_username: "{{ vcenter_username }}"
-        provision_vm_password: "{{ vcenter_password }}"
+        provision_vm_hostname: "{{ vcenter_hostname | default(omit) }}"
+        provision_vm_username: "{{ vcenter_username | default(omit) }}"
+        provision_vm_password: "{{ vcenter_password | default(omit) }}"
 #        provision_vm_validate_certs: false
         provision_vm_cluster: "Cluster-1"
-        provision_vm_folder: "{{ vcenter_folder }}"
+        provision_vm_folder: "Workloads/{{ vcenter_folder }}"
         provision_vm_datacenter: "SDDC-Datacenter"
         provision_vm_name: "{{ vm_name }}"
         provision_vm_template: "{{ vm_template }}"
