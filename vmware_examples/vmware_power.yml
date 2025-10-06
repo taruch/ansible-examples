@@ -4,12 +4,12 @@
   gather_facts: false
   environment:
     ANSIBLE_HOST_KEY_CHECKING: false
-    VMWARE_HOST: "{{ vmware_host }}"
-    VMWARE_USER: "{{ vmware_user }}"
-    VMWARE_PASSWORD: "{{ vmware_password }}"
-  vars:
-    vm_name: "rhel9test2"
-    vmpowerstate: "on"
+    VMWARE_HOST: "{{ vmware_host | default(vcenter_hostname) }}"
+    VMWARE_USER: "{{ vmware_user | default(vcenter_username) }}"
+    VMWARE_PASSWORD: "{{ vmware_password | default(vcenter_password) }}"
+  # vars:
+  #   vm_name: "rhel9test2"
+  #   vmpowerstate: "on"
 
   tasks:
     - name: Power off the vm
