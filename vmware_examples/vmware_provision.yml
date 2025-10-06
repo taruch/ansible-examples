@@ -12,9 +12,6 @@
     memsize_MiB: 4096
     # vm_template: 'rhel9-template'
   tasks:
-    - name: Debug vars
-      ansible.builtin.debug:
-        var: vars
 
     - name: Provision a VM
       ansible.builtin.import_role:
