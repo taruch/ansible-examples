@@ -12,7 +12,7 @@
     aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    import_path: "./export_ft7"
+    import_path: "./export_ft6"
 
   pre_tasks:
     - name: "Setup authentication (block)"
@@ -36,8 +36,23 @@
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
 
   tasks:
-    - name: Include configuration info for credential types
-      ansible.builtin.include_vars: "{{ import_path }}/current_credential_types.yaml"
+    # - name: Include configuration info for credential types
+    #   ansible.builtin.include_vars: "{{ import_path }}/current_credential_types.yaml"
+      # ansible.builtin.include_vars: "{{ import_path }}/current_credential_types.yaml"
+
+
+    - name: Include all .yaml files from the import_path
+      ansible.builtin.include_vars:
+        dir: '{{ import_path }}'
+        ignore_files:
+          - 'controller_settings.yaml'
+          - 'current_settings.yaml'
+          - 'controller_settings.yaml'
+          - 'eda_credential_types.yaml'
+          - 'gateway_service_keys.yaml'
+        extensions:
+          - 'yaml'
+        depth: 1
 
     - name: Dispatch the configuration to AAP 2.5
       ansible.builtin.include_role:
