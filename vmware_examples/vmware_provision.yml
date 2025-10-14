@@ -39,5 +39,21 @@
           num_cpus: "{{ vm_cpus | default(omit) }}"
 #        provision_vm_guest_id: "rhel9_64Guest"
         provision_vm_state: poweredon
+      register: vm_provision_result
 
+    - name: Show the result
+      ansible.builtin.debug:
+        var: vm_provision_result
+        verbosity: 2
+      when: vm_provision_result is defined
+
+    - name: Forward build information to next job_templates
+      ansible.builtin.set_stats:
+        data:
+          instance_data: "{{ vm_provision_result.instance }}"
+          vm_name: "{{ vm_name }}"
+          vm_ip: "{{ vm_provision_result.instance.ipv4 }}"
+          vm_cpus: "{{ vm_cpus }}"
+          vm_memory_MiB: "{{ memsize_MiB }}"
+      when: vm_provision_result is defined and vm_provision_result.instance.ipv4 is defined
 ...
