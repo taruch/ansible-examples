@@ -1,0 +1,29 @@
+---
+- name: Copy and Execute a Local Shell Script
+  hosts: all
+  become: true  # Run tasks as root, often needed for meaningful scripts
+
+  tasks:
+    - name: Group the execution and cleanup tasks
+      block:
+        - name: 1. Copy the script to the remote host
+          ansible.builtin.copy:
+            src: my_script.sh  # Ansible automatically looks in the 'files/' directory
+            dest: /tmp/my_script.sh
+            mode: '0755'  # Ensure the script is executable
+
+        - name: 2. Execute the script on the remote host
+          ansible.builtin.shell:
+            cmd: /tmp/my_script.sh
+          register: script_result  # Save the output of the script
+          changed_when: script_result.rc == 0 # Mark as changed only on success
+
+        - name: Display script output
+          ansible.builtin.debug:
+            msg: "{{ script_result.stdout_lines }}"
+
+      always:
+        - name: 3. Clean up the script from the remote host
+          ansible.builtin.file:
+            path: /tmp/my_script.sh
+            state: absent
