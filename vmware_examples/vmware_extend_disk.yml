@@ -1,0 +1,70 @@
+---
+# ----------------------------------------------------------------------
+# PLAY 1: Extend the Virtual Disk at the vSphere Level
+# This part connects to vCenter and increases the size of the .vmdk file.
+# ----------------------------------------------------------------------
+- name: Extend a VMware Virtual Disk
+  hosts: localhost
+  gather_facts: false
+  vars:
+    vm_name: "my-linux-vm"          # The name of the VM to modify
+    disk_label: "Hard disk 1"       # The label of the disk as seen in vSphere
+    new_disk_size_gb: "{{ disk_size | default(omit) }}"            # The new TOTAL size for the disk in GB
+
+  vars_prompt:
+    - name: vcenter_password
+      prompt: "Enter your vCenter password"
+      private: true
+
+  tasks:
+
+
+    - name: "Extend the disk '{{ disk_label }}' on VM '{{ vm_name }}'"
+      community.vmware.vmware_guest_disk:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false  # Set to true if you have valid certs
+        name: "{{ vm_name }}"
+        disk:
+          - label: "{{ disk_label }}"
+            size_gb: "{{ new_disk_size_gb }}"
+            state: present
+      delegate_to: localhost
+
+# ----------------------------------------------------------------------
+# PLAY 2: Extend the Partition and Filesystem Inside the Guest OS
+# This part connects to the VM and tells the OS to use the new space.
+# This example is for a Linux VM with a single disk (/dev/sda).
+# ----------------------------------------------------------------------
+- name: Resize the Partition and Filesystem inside the Linux Guest OS
+  hosts: "{{ vm_name }}"  # The VM name must be in your Ansible inventory
+  become: true           # Requires root privileges to modify disks
+  gather_facts: true     # We need facts to get disk information
+
+  tasks:
+    - name: Extend the partition
+      community.general.parted:
+        device: /dev/sda
+        number: 1  # Assumes we are extending the first partition
+        state: present
+        part_end: 100%
+        resize: true
+      register: partition_result
+
+    - name: Extend the filesystem (ext4/xfs)
+      community.general.filesystem:
+        fstype: "{{ ansible_facts['mounts'][0]['fstype'] }}" # Auto-detects fstype (e.g., ext4, xfs)
+        dev: /dev/sda1 # Assumes the filesystem is on the first partition
+        state: present
+        resizefs: true
+      when: partition_result.changed
+
+    - name: Display the new disk space
+      ansible.builtin.command: df -h /
+      register: df_output
+      changed_when: false
+
+    - name: Show new disk space
+      ansible.builtin.debug:
+        var: df_output.stdout_lines
