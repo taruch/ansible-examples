@@ -36,10 +36,9 @@
         provision_vm_state: poweredon
       register: role_output
 
-    - name: Pause for 60 seconds to allow VM to get IP address
+    - name: Pause for 30 seconds to allow VM to get IP address
       ansible.builtin.pause:
-        seconds: 60
-      when: role_output is changed
+        seconds: 30
 
     # --- STEP 2: Query vCenter for the VM's details ---
     - name: "Get facts for the VM '{{ vm_name }}'"
@@ -50,6 +49,9 @@
         validate_certs: false
         name: "{{ vm_name }}"
       register: vm_facts # Register the output of the INFO module
+      until: vm_facts.instance.ipv4 is defined
+      retries: 10 # Number of retries
+      delay: 15 # Delay between retries in seconds
 
     - name: Debug the gathered facts
       ansible.builtin.debug:
