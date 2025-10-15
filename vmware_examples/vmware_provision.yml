@@ -60,11 +60,11 @@
         msg: "VM '{{ vm_name }}' was found with IP address: {{ vm_facts.instance.ipv4 }}"
       when: vm_facts.instance is defined and vm_facts.instance.ipv4 is defined
 
-    - name: "Add the new VM to our in-memory inventory"
-      ansible.builtin.add_host:
-        name: "{{ vm_facts.instance.ipv4 }}"
-        groups: just_created_vms
-      when: vm_facts.instance is defined and vm_facts.instance.ipv4 is defined
+    # - name: "Add the new VM to our in-memory inventory"
+    #   ansible.builtin.add_host:
+    #     name: "{{ vm_facts.instance.ipv4 }}"
+    #     groups: just_created_vms
+    #   when: vm_facts.instance is defined and vm_facts.instance.ipv4 is defined
 
     - name: Send data to follow-on playbook
       ansible.builtin.set_stats:
