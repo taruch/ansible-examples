@@ -15,18 +15,11 @@
         provision_vm_hostname: "{{ vcenter_hostname | default(omit) }}"
         provision_vm_username: "{{ vcenter_username | default(omit) }}"
         provision_vm_password: "{{ vcenter_password | default(omit) }}"
-#        provision_vm_validate_certs: false
         provision_vm_cluster: "Cluster-1"
         provision_vm_datacenter: "SDDC-Datacenter"
         provision_vm_folder: "Workloads/{{ vcenter_folder }}"
         provision_vm_name: "{{ vm_name }}"
         provision_vm_template: "{{ vm_template }}"
-        # provision_vm_datastore: "{{ vcenter_datastore | default(omit) }}"
-#        provision_vm_port: "8989"
-#        provision_vm_disk:
-#        - size_gb: 10
-#          type: thin
-#          datastore: "LocalDS_0"
         provision_vm_hardware:
           hotadd_memory: true
           memory_mb: "{{ memsize_MiB | default(omit) }}"
