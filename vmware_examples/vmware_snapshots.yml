@@ -9,7 +9,7 @@
 
   # Define variables for your vCenter environment and the target VM
   vars:
-    vm_name: "rhel9test2"
+    # vm_name: "rhel9test2"
     snapshot_description: "Pre-upgrade snapshot taken on {{ ansible_date_time.date }}"
 
   tasks:
