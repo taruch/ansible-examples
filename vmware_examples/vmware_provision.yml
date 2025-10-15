@@ -68,7 +68,8 @@
 
     - name: Send data to follow-on playbook
       ansible.builtin.set_stats:
-        new_vm_info: "{{ vm_facts.instance }}"
+        data:
+          new_vm_info: "{{ vm_facts.instance }}"
       when: vm_facts.instance is defined
 
 ...
