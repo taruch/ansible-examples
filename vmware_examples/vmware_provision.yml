@@ -6,15 +6,10 @@
   vars_files:
     - secrets.yml
 
-  vars:
-    vm_name: rhel9test3
-    vm_cpus: 2
-    memsize_MiB: 4096
-    # vm_template: 'rhel9-template'
   tasks:
-
+    # --- STEP 1: Provision a VM from a template ---
     - name: Provision a VM
-      ansible.builtin.import_role:
+      ansible.builtin.include_role:
         name: cloud.vmware_ops.provision_vm
       vars:
         provision_vm_hostname: "{{ vcenter_hostname | default(omit) }}"
@@ -39,21 +34,36 @@
           num_cpus: "{{ vm_cpus | default(omit) }}"
 #        provision_vm_guest_id: "rhel9_64Guest"
         provision_vm_state: poweredon
-      register: vm_provision_result
+      register: role_output
 
-    - name: Show the result
+    # --- STEP 2: Query vCenter for the VM's details ---
+    - name: "Get facts for the VM '{{ vm_name }}'"
+      community.vmware.vmware_guest_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+        name: "{{ vm_name }}"
+      register: vm_facts # Register the output of the INFO module
+
+    - name: Debug the gathered facts
       ansible.builtin.debug:
-        var: vm_provision_result
-        verbosity: 2
-      when: vm_provision_result is defined
+        var: vm_facts
 
-    - name: Forward build information to next job_templates
+    - name: "Display the IP address of the VM"
+      ansible.builtin.debug:
+        msg: "VM '{{ vm_name }}' was found with IP address: {{ vm_facts.instance.ipv4 }}"
+      when: vm_facts.instance is defined and vm_facts.instance.ipv4 is defined
+
+    - name: "Add the new VM to our in-memory inventory"
+      ansible.builtin.add_host:
+        name: "{{ vm_facts.instance.ipv4 }}"
+        groups: just_created_vms
+      when: vm_facts.instance is defined and vm_facts.instance.ipv4 is defined
+
+    - name: Send data to follow-on playbook
       ansible.builtin.set_stats:
-        data:
-          instance_data: "{{ vm_provision_result.instance }}"
-          vm_name: "{{ vm_name }}"
-          vm_ip: "{{ vm_provision_result.instance.ipv4 }}"
-          vm_cpus: "{{ vm_cpus }}"
-          vm_memory_MiB: "{{ memsize_MiB }}"
-      when: vm_provision_result is defined and vm_provision_result.instance.ipv4 is defined
+        new_vm_info: "{{ vm_facts.instance }}"
+      when: vm_facts.instance is defined
+
 ...
