@@ -36,9 +36,9 @@
         provision_vm_state: poweredon
       register: role_output
 
-    - name: Pause for 30 seconds to allow VM to get IP address
+    - name: Pause for 60 seconds to allow VM to get IP address
       ansible.builtin.pause:
-        seconds: 30
+        seconds: 60
       when: role_output is changed
 
     # --- STEP 2: Query vCenter for the VM's details ---
