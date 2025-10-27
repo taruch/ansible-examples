@@ -12,6 +12,7 @@
     aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+    #ansible_no_log: false
     import_path: "./export_ft7"
 
   pre_tasks:
@@ -44,9 +45,10 @@
         # These variables tell filetree_read where to find your exported configuration
         orgs: ""
         dir_orgs_vars: "{{ import_path }}"
-        # filetree_controller_settings: "{{ import_path }}"
+        filetree_controller_settings: "{{ import_path }}"
         filetree_controller_organizations: "{{ import_path }}"
         filetree_controller_credential_types: "{{ import_path }}"
+        filetree_controller_execution_environments: "{{ import_path }}"
         filetree_controller_credentials: "{{ import_path }}"
         filetree_controller_notification_templates: "{{ import_path }}"
         filetree_controller_projects: "{{ import_path }}"
@@ -61,8 +63,8 @@
         # dir_settings_vars: "{{ dir_settings_vars | default(omit) }}" # Include if you have global settings
         # If your export structure uses an 'env' directory (e.g., orgs/MyOrg/env/dev), specify it:
         # filetree_env: "dev"
-        
-        # controller_configuration_secure_logging: false
+        controller_configuration_filetree_read_secure_logging: false
+        controller_configuration_secure_logging: false
         # controller_configuration_credential_types_secure_logging: true
         controller_configuration_filetree_read_tasks:
           - {name: settings, var: controller_settings, tags: settings}
@@ -96,15 +98,15 @@
     #   vars:
     #     controller_dependency_check: false  # noqa: var-naming[no-role-prefix]
 
-    - name: Dispatch the configuration to AAP 2.5
-      ansible.builtin.include_role:
-        name: infra.aap_configuration.dispatch
-      vars:
-        controller_configuration_filetree_create_secure_logging: false
-        controller_configuration_filetree_read_secure_logging: false
-        aap_configuration_secure_logging: false
-        aap_configuration_collect_logs: false
-        cas_secure_logging: false
+    # - name: Dispatch the configuration to AAP 2.5
+    #   ansible.builtin.include_role:
+    #     name: infra.aap_configuration.dispatch
+    #   vars:
+    #     controller_configuration_filetree_create_secure_logging: false
+    #     controller_configuration_filetree_read_secure_logging: false
+    #     aap_configuration_secure_logging: false
+    #     aap_configuration_collect_logs: false
+    #     cas_secure_logging: false
 
   post_tasks:
     - name: "Delete the Authentication Token used"
