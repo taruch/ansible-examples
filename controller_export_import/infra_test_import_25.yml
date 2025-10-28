@@ -40,19 +40,8 @@
     #   ansible.builtin.include_vars: "{{ import_path }}/current_credential_types.yaml"
       # ansible.builtin.include_vars: "{{ import_path }}/current_credential_types.yaml"
 
-
     - name: Include all .yaml files from the import_path
-      ansible.builtin.include_vars:
-        dir: '{{ import_path }}'
-        ignore_files:
-          - 'controller_settings.yaml'
-          - 'current_settings.yaml'
-          - 'controller_settings.yaml'
-          - 'eda_credential_types.yaml'
-          - 'gateway_service_keys.yaml'
-        extensions:
-          - 'yaml'
-        depth: 1
+      ansible.builtin.include_vars: "{{ import_path }}/Default/credentials/23_Machine_Credential.yaml"
 
     - name: Dispatch the configuration to AAP 2.5
       ansible.builtin.include_role:
