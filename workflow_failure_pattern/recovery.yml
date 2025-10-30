@@ -2,9 +2,6 @@
 - name: Playbook to show nodes on the failure recovery track of the workflow
   hosts: "{{ failed_nodes }}"
   gather_facts: false
-  vars:
-    success_nodes: []
-    failed_nodes: []
 
   tasks:
 
@@ -21,6 +18,14 @@
         - name: Define failure node
           ansible.builtin.set_fact:
             failed_node: "true"
+
+    - name: Print out nodes that were successful in this play
+      loop: "{{ ansible_play_hosts }}"
+      run_once: true
+      when: hostvars[item].failed_node is false
+      ansible.builtin.debug:
+        msg: "Successful node: {{ hostvars[item].inventory_hostname }}"
+        verbosity: 2
 
     - name: Print out nodes that failed this play
       loop: "{{ ansible_play_hosts }}"
