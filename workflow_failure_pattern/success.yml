@@ -1,6 +1,6 @@
 ---
 - name: Playbook to show success nodes in a failure scenario
-  hosts: "{{ success_nodes }}"
+  hosts: "{{ combined_success_nodes }}"
   gather_facts: false
   tasks:
     - name: Print out inventory_hostname
