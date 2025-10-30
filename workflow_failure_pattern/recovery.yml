@@ -2,7 +2,67 @@
 - name: Playbook to show nodes on the failure recovery track of the workflow
   hosts: "{{ failed_nodes }}"
   gather_facts: false
+  vars:
+    success_nodes: []
+    failed_nodes: []
+
   tasks:
-    - name: Print out nodes on the recovery track
+
+    - name: Task that may fail, with rescue to track success and failure nodes
+      block:
+        - name: Print out nodes on the recovery track
+          ansible.builtin.debug:
+            msg: "{{ inventory_hostname }} is on the recovery track"
+
+        - name: Define successful node
+          ansible.builtin.set_fact:
+            failed_node: "false"
+      rescue:
+        - name: Define failure node
+          ansible.builtin.set_fact:
+            failed_node: "true"
+
+    - name: Print out nodes that failed this play
+      loop: "{{ ansible_play_hosts }}"
+      run_once: true
+      when: hostvars[item].failed_node is true
       ansible.builtin.debug:
-        msg: "{{ inventory_hostname }} is on the recovery track"
+        msg: "Failure node: {{ hostvars[item].inventory_hostname }}"
+        verbosity: 2
+
+    - name: Generate a combined list of successful nodes
+      delegate_to: localhost # Run this task on the control node
+      when: hostvars[item].failed_node is false
+      run_once: true # Ensure the set_fact is executed only once
+      loop: "{{ groups['all'] }}" # Or a specific group
+      ansible.builtin.set_fact:
+        success_nodes: "{{ success_nodes + [hostvars[item].inventory_hostname] }}"
+
+    - name: Debug successful nodes
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.debug:
+        msg: "Successful nodes: {{ success_nodes }}"
+        verbosity: 2
+
+    - name: Generate a combined list of failed nodes
+      delegate_to: localhost # Run this task on the control node
+      when: hostvars[item].failed_node is true
+      run_once: true # Ensure the set_fact is executed only once
+      loop: "{{ groups['all'] }}" # Or a specific group
+      ansible.builtin.set_fact:
+        failed_nodes: "{{ failed_nodes + [hostvars[item].inventory_hostname] }}"
+
+    - name: Debug failed nodes
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.debug:
+        msg: "Failed nodes: {{ failed_nodes }}"
+
+    - name: Send success and failure nodes to workflow
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.set_stats:
+        data:
+          success_nodes: "{{ success_nodes }}"
+          failed_nodes: "{{ failed_nodes }}"
