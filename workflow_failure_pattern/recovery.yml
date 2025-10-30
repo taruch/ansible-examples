@@ -9,9 +9,12 @@
 
     - name: Task that may fail, with rescue to track success and failure nodes
       block:
-        - name: Print out nodes on the recovery track
-          ansible.builtin.debug:
-            msg: "{{ inventory_hostname }} is on the recovery track"
+        - name: Simulate a task that may fail by assert that ansible_distribution_major_version == 9
+          ansible.builtin.assert:
+            that:
+              - ansible_distribution_major_version == "10"
+            fail_msg: "This task simluates a failure in a playbook that we want to recover from."
+            success_msg: "This host passed the test"
 
         - name: Define successful node
           ansible.builtin.set_fact:
