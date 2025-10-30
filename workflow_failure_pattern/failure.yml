@@ -1,0 +1,8 @@
+---
+- name: Playbook to show failure nodes in a failure scenario
+  hosts: "{{ recovery_failed_nodes }}"
+  gather_facts: false
+  tasks:
+    - name: Print out inventory_hostname
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} has failed to recover"
