@@ -72,4 +72,4 @@
       ansible.builtin.set_stats:
         data:
           combined_success_nodes: "{{ (recovery_success_nodes + success_nodes) | unique }}"
-          combined_failed_nodes: "{{ (recovery_failed_nodes + failed_nodes) | unique }}"
+          recovery_failed_nodes: "{{ recovery_failed_nodes }}"
