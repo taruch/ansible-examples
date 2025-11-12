@@ -1,7 +1,7 @@
 ---
 - name: Set fact for use in other tasks
   hosts: all
-  gather_facts: true
+  gather_facts: false
 
   tasks:
     - name: "Set a cached fact"
