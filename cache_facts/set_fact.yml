@@ -6,4 +6,10 @@
   tasks:
   - name: "Set a cached fact"
     ansible.builtin.set_fact:
-      my_fact: "This is a cached fact"
+      - my_fact: "This is a cached fact"
+      - my_other_fact: 42
+
+  - name: Update the cached fact
+    ansible.builtin.set_fact:
+      - my_fact: "This cached fact has been updated"
+      - my_other_fact: "{{ my_other_fact + 1 }}"
