@@ -8,25 +8,6 @@
     controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    output_path: "./export_ft7"
-    input_tag:
-      - 'labels'
-      - 'applications'
-      - 'instance_groups'
-      - 'settings'
-      - 'inventory'
-      - 'credentials'
-      - 'credential_types'
-      - 'notification_templates'
-      - 'organizations'
-      - 'teams'
-      - 'projects'
-      - 'execution_environments'
-      - 'job_templates'
-      - 'workflow_job_templates'
-      - 'schedules'
-    flatten_output: false
-    # organization_filter: "Default"  # Specify the organization to filter the export, if needed
 
   pre_tasks:
     - name: "Setup authentication (block)"
@@ -49,7 +30,26 @@
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
 
   roles:
-    - infra.controller_configuration.filetree_create
+    - name: infra.controller_configuration.filetree_create
+      vars:
+        input_tag:
+          - 'labels'
+          - 'applications'
+          - 'instance_groups'
+          - 'settings'
+          - 'inventory'
+          - 'credentials'
+          - 'credential_types'
+          - 'notification_templates'
+          - 'organizations'
+          - 'teams'
+          - 'projects'
+          - 'execution_environments'
+          - 'job_templates'
+          - 'workflow_job_templates'
+          - 'schedules'
+        organization_filter: "Default"  # Specify the organization to filter the export, if needed
+        output_path: "./export_24"
 
   post_tasks:
     - name: "Delete the Authentication Token used"

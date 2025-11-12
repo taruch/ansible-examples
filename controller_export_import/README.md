@@ -6,11 +6,8 @@ export CONTROLLER_HOST=<FQDN of 2.4 controller>
 export CONTROLLER_PASSWORD=<password>
 export CONTROLLER_USERNAME=<username>
 
-You may need to install the relevant collections:
-ansible-galaxy collection install -r collections/requirements.yml -p ./collections --force
-
 Run the playbook:
-ansible-navigator run -mstdout filetree_export_24.yml -vvv --eei=quay.io/acme_corp/product-demos-ee --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
+ansible-navigator run -mstdout filetree_export_24.yml -vvv --eei=quay.io/truch/export24:1.0 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
 
 
 To import to an Automation Platform 2.5 system, export the variables defined in the playbook vars for the AAP 2.5 system.
