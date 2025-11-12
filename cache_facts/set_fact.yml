@@ -1,0 +1,9 @@
+---
+- name: Set fact for use in other tasks
+  hosts: all
+  gather_facts: false
+
+  tasks:
+  - name: "Set a cached fact"
+    ansible.builtin.set_fact:
+      my_fact: "This is a cached fact"
