@@ -8,13 +8,13 @@
       when: my_other_fact is not defined
       ansible.builtin.set_fact:
         my_fact: "This is a cached fact"
-        my_other_fact: 1
+        my_other_fact: "{{ 1 | int }}"
         cacheable: true
 
     - name: Update the cached fact
       ansible.builtin.set_fact:
         my_fact: "This cached fact has been updated"
-        my_other_fact: "{{ my_other_fact + 1 }}"
+        my_other_fact: "{{ ( my_other_fact | int ) + 1 }}"
         cacheable: true
 
 ...
