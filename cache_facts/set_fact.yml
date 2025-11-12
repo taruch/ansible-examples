@@ -1,15 +1,18 @@
 ---
 - name: Set fact for use in other tasks
   hosts: all
-  gather_facts: false
+  gather_facts: true
 
   tasks:
     - name: "Set a cached fact"
+      when: my_fact is not defined AND my_other_fact is not defined
       ansible.builtin.set_fact:
         my_fact: "This is a cached fact"
-        my_other_fact: 42
+        my_other_fact: 1
+      cacheable: true
 
     - name: Update the cached fact
       ansible.builtin.set_fact:
         my_fact: "This cached fact has been updated"
         my_other_fact: "{{ my_other_fact + 1 }}"
+      cacheable: true
