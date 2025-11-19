@@ -3,26 +3,26 @@
   connection: local
   gather_facts: false
   vars:
+    aap_username: "{{ vault_aap_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
     controller_username: "{{ vault_controller_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
     controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    output_path: "./export_aap"
-    # input_tag:  ['labels', 'applications', 'instance_groups', 'settings', 'inventory', 'credentials', 'credential_types', 'notification_templates', 'organizations', 'projects', 'execution_environments', 'job_templates', 'workflow_job_templates', 'schedules']
-    # flatten_output: true
-    # organization_filter: "Default"  # Specify the organization to filter the export, if needed
 
   pre_tasks:
     - name: "Setup authentication (block)"
       block:
         - name: "Get the Authentication Token for the future requests"
           ansible.builtin.uri:
-            url: "https://{{ controller_hostname }}/api/v2/tokens/"
-            user: "{{ controller_username }}"
-            password: "{{ controller_password }}"
+            url: "https://{{ aap_hostname }}/api/gateway/v1/tokens/"
+            user: "{{ aap_username }}"
+            password: "{{ aap_password }}"
             method: POST
             force_basic_auth: true
-            validate_certs: "{{ controller_validate_certs }}"
+            validate_certs: "{{ aap_validate_certs }}"
             status_code: 201
           register: authtoken_res
 
@@ -30,24 +30,85 @@
           ansible.builtin.set_fact:
             controller_oauthtoken: "{{ authtoken_res.json.token }}"
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
-      when: controller_oauthtoken is not defined
+            aap_token: "{{ authtoken_res.json.token }}"
+            aap_oauthtoken: "{{ authtoken_res.json.token }}"
+            aap_oauthtoken_url: "{{ authtoken_res.json.url }}"
+      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
+      when: aap_oauthtoken is not defined
       tags:
         - always
 
-
   roles:
-    - infra.controller_configuration.filetree_create
+    - name: infra.aap_configuration_extended.filetree_create
+      vars:
+        input_tag:
+          # - all
+          # - controller
+          # - controller_settings
+          - controller_credentials
+          - controller_credential_types
+          - controller_execution_environments
+          - controller_groups
+          - controller_hosts
+          - controller_inventories
+          - controller_inventory_sources
+          - controller_job_templates
+          - controller_notification_templates
+          - controller_organizations
+          - controller_projects
+          - controller_roles
+          - controller_teams
+          - controller_users
+          - controller_workflow_job_templates
+          - controller_instance_groups
+          - controller_applications
+          - controller_labels
+          - controller_schedules
+          # - controller_gateway_authenticator
+          # - controller_gateway_authenticator_maps
+          # - gateway
+          # - gateway_applications
+          # - gateway_authenticator_maps
+          # - gateway_authenticators
+          # - gateway_http_ports
+          # - gateway_organizations
+          # - gateway_role_user_assignments
+          # - gateway_routes
+          # - gateway_service_clusters
+          # - gateway_service_keys
+          # - gateway_service_nodes
+          # - gateway_services
+          # - gateway_settings
+          # - gateway_teams
+          # - gateway_users
+          # - eda
+          - eda_credential_types
+          - eda_credentials
+          - eda_decision_environments
+          - eda_event_streams
+          - eda_projects
+          - eda_rulebook_activations
+          # - hub
+          # - hub_namespaces
+          # - hub_collections
+          # - hub_collection_remotes
+          # - hub_collection_repositories
+          # - hub_ee_registries
+          # - hub_ee_repositories
+          # - hub_roles
+        organization_filter: "OrgA"  # Specify the organization to filter the export, if needed
+        secrets_as_variables: true
+        output_path: "./export_25_1"
 
   post_tasks:
     - name: "Delete the Authentication Token used"
       ansible.builtin.uri:
-        url: "https://{{ controller_hostname }}{{ controller_oauthtoken_url }}"
-        user: "{{ controller_username }}"
-        password: "{{ controller_password }}"
+        url: "https://{{ aap_hostname }}{{ aap_oauthtoken_url }}"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
         method: DELETE
         force_basic_auth: true
-        validate_certs: "{{ controller_validate_certs }}"
+        validate_certs: "{{ aap_validate_certs }}"
         status_code: 204
-      when: controller_oauthtoken_url is defined
-
+      when: aap_oauthtoken_url is defined
 ...
