@@ -20,7 +20,7 @@
       delay: 10
 
     - name: Create some users
-      when: ansible_facts['os_product_type'] == 'Domain Controller'
+      when: ansible_facts['ansible_os_product_type'] == 'domain_controller'
       microsoft.ad.user:
         name: "{{ item.name }}"
         groups:
