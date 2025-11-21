@@ -1,0 +1,63 @@
+---
+- name: Update Users and Groups for access management testing
+  hosts: "{{ _hosts | default('os_windows') }}"
+  gather_facts: false
+
+  tasks:
+    - name: Create some groups
+      microsoft.ad.group:
+        name: "{{ item.name }}"
+        scope: global
+      loop:
+        - name: "OrgA_Admins"
+        - name: "OrgB_Admins"
+        - name: "Central_Inventory_Admins"
+        - name: "OrgA_Users"
+        - name: "OrgB_Users"
+        - name: "Central_Inventory_Users"
+      retries: 5
+      delay: 10
+
+    - name: Create some users
+      microsoft.ad.user:
+        name: "{{ item.name }}"
+        groups:
+          set:
+            - "{{ item.group }}"
+        password: 'Ansible!2345!'
+        update_password: on_create
+      loop:
+        - name: "OrgA_Admin"
+          group: "OrgA_Admins"
+        - name: "OrgB_Admin"
+          group: "OrgB_Admins"
+        - name: "OrgA_User"
+          group: "OrgA_Users"
+        - name: "OrgB_User"
+          group: "OrgB_Users"
+      retries: 5
+      delay: 10
+
+
+aap_teams:
+  - name: Org A Users
+    description: !unsafe
+    organization: OrgA
+  - name: Org B Users
+    description: !unsafe
+    organization: OrgB
+  - name: Org A Admin
+    description: !unsafe
+    organization: OrgA
+  - name: Org B Admin
+    description: !unsafe
+    organization: OrgB
+  - name: Default Inventory Org Admin
+    description: !unsafe
+    organization: Central Inventory Org
+  - name: Central Inventory Team
+    description: !unsafe
+    organization: Central Inventory Org
+  - name: Central Inventory Org Admin
+    description: !unsafe
+    organization: Central Inventory Org
