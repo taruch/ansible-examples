@@ -1,12 +1,14 @@
-.*/collections/ansible_collections
+collections/ansible_collections
 collections/ansible_collections
 wordpress-nginx/hosts
 IaC_testing/collections/
 .DS_Store
 *.log
-.*artifact.*
 .gitignore
 controller_export_import/export*
 controller_export_import/collections/ansible_collection/*
 controller_export_import/roles
 IaC_testing/*
+*-artifact-*
+key.pem
+scratch.txt

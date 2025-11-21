@@ -38,26 +38,4 @@
       retries: 5
       delay: 10
 
-
-aap_teams:
-  - name: Org A Users
-    description: !unsafe
-    organization: OrgA
-  - name: Org B Users
-    description: !unsafe
-    organization: OrgB
-  - name: Org A Admin
-    description: !unsafe
-    organization: OrgA
-  - name: Org B Admin
-    description: !unsafe
-    organization: OrgB
-  - name: Default Inventory Org Admin
-    description: !unsafe
-    organization: Central Inventory Org
-  - name: Central Inventory Team
-    description: !unsafe
-    organization: Central Inventory Org
-  - name: Central Inventory Org Admin
-    description: !unsafe
-    organization: Central Inventory Org
+...
