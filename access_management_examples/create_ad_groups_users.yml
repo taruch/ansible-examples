@@ -16,6 +16,7 @@
         - name: "OrgA_Users"
         - name: "OrgB_Users"
         - name: "Central_Inventory_Users"
+        - name: "ansible_admins"
       retries: 5
       delay: 10
 
@@ -37,6 +38,8 @@
           group: "OrgA_Users"
         - name: "OrgB_User"
           group: "OrgB_Users"
+        - name: "superuser"
+          group: "ansible_admins"
       retries: 5
       delay: 10
 
