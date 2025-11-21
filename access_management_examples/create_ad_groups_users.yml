@@ -5,7 +5,7 @@
 
   tasks:
     - name: Create some groups
-      when: ansible_facts['ansible_os_product_type'] == 'domain_controller'
+      when: ansible_facts['os_product_type'] == 'domain_controller'
       microsoft.ad.group:
         name: "{{ item.name }}"
         scope: global
@@ -20,7 +20,7 @@
       delay: 10
 
     - name: Create some users
-      when: ansible_facts['ansible_os_product_type'] == 'domain_controller'
+      when: ansible_facts['os_product_type'] == 'domain_controller'
       microsoft.ad.user:
         name: "{{ item.name }}"
         groups:
