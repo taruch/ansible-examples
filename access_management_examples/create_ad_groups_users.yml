@@ -5,7 +5,7 @@
 
   tasks:
     - name: Create some groups
-      when: ansible_facts['os_product_type'] == 'Domain Controller'
+      when: ansible_facts['ansible_os_product_type'] == 'domain_controller'
       microsoft.ad.group:
         name: "{{ item.name }}"
         scope: global
