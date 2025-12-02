@@ -10,12 +10,12 @@
         name: "{{ item.name }}"
         scope: global
       loop:
-        - name: "OrgA_Admins"
-        - name: "OrgB_Admins"
-        - name: "Central_Inventory_Admins"
-        - name: "OrgA_Users"
-        - name: "OrgB_Users"
-        - name: "Central_Inventory_Users"
+        - name: "orga_admins"
+        - name: "orgb_admins"
+        - name: "central_inventory_admins"
+        - name: "orga_users"
+        - name: "orgb_users"
+        - name: "central_inventory_users"
         - name: "ansible_admins"
       retries: 5
       delay: 10
@@ -30,17 +30,18 @@
         password: 'Ansible!2345!'
         update_password: on_create
       loop:
-        - name: "OrgA_Admin"
-          group: "OrgA_Admins"
-        - name: "OrgB_Admin"
-          group: "OrgB_Admins"
-        - name: "OrgA_User"
-          group: "OrgA_Users"
-        - name: "OrgB_User"
-          group: "OrgB_Users"
+        - name: "orga_admin"
+          group: "orga_admins"
+        - name: "orgb_admin"
+          group: "orgb_admins"
+        - name: "orga_user"
+          group: "orga_users"
+        - name: "orgb_user"
+          group: "orgb_users"
         - name: "superuser"
           group: "ansible_admins"
       retries: 5
       delay: 10
+
 
 ...
