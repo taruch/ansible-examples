@@ -1,0 +1,137 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    aap_username: "{{ vault_aap_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+    github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+    git_username: ansible_automation_platform
+    git_user_email: "{{ lookup('env', 'GIT_USER_EMAIL') | default('ansible_automation_platform@example.com') }}"
+    commit_message: "Updating Configs" 
+
+
+  tasks:
+    - name: "Setup authentication (block)"
+      block:
+        - name: "Get the Authentication Token for the future requests"
+          ansible.builtin.uri:
+            url: "https://{{ aap_hostname }}/api/gateway/v1/tokens/"
+            user: "{{ aap_username }}"
+            password: "{{ aap_password }}"
+            method: POST
+            force_basic_auth: true
+            validate_certs: "{{ aap_validate_certs }}"
+            status_code: 201
+          register: authtoken_res
+
+        - name: "Set the oauth token to be used since now"
+          ansible.builtin.set_fact:
+            aap_oauthtoken: "{{ authtoken_res.json.token }}"
+            aap_oauthtoken_url: "{{ authtoken_res.json.url }}"
+      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
+      when: aap_oauthtoken is not defined
+      tags:
+        - always
+
+
+    - name: Retrieve a repository from a distant location and make it available locally
+      ansible.scm.git_retrieve:
+        origin:
+          url: "http://{{ github_token }}@{{ github_repo_url }}"
+          token: "{{ github_token }}"
+      register: repository
+
+
+    - name: Utilize the filetree create role to export the configuration
+      ansible.builtin.import_role:
+        name: infra.aap_configuration_extended.filetree_create 
+        vars:
+          input_tag:
+            - all
+            # - controller
+            # - controller_settings
+            # - controller_credentials
+            # - controller_credential_types
+            # - controller_execution_environments
+            # - controller_groups
+            # - controller_hosts
+            # - controller_inventories
+            # - controller_inventory_sources
+            # - controller_job_templates
+            # - controller_notification_templates
+            # - controller_organizations
+            # - controller_projects
+            # - controller_roles
+            # - controller_teams
+            # - controller_users
+            # - controller_workflow_job_templates
+            # - controller_instance_groups
+            # - controller_applications
+            # - controller_labels
+            # - controller_schedules
+            # - controller_gateway_authenticator
+            # - controller_gateway_authenticator_maps
+            # - gateway
+            # - gateway_applications
+            # - gateway_authenticator_maps
+            # - gateway_authenticators
+            # - gateway_http_ports
+            # - gateway_organizations
+            # - gateway_role_user_assignments
+            # - gateway_routes
+            # - gateway_service_clusters
+            # - gateway_service_keys
+            # - gateway_service_nodes
+            # - gateway_services
+            # - gateway_settings
+            # - gateway_teams
+            # - gateway_users
+            # - eda
+            # - eda_credential_types
+            # - eda_credentials
+            # - eda_decision_environments
+            # - eda_event_streams
+            # - eda_projects
+            # - eda_rulebook_activations
+            # - hub
+            # - hub_namespaces
+            # - hub_collections
+            # - hub_collection_remotes
+            # - hub_collection_repositories
+            # - hub_ee_registries
+            # - hub_ee_repositories
+            # - hub_roles
+          organization_filter: ""  # Specify the organization to filter the export, if needed
+          secrets_as_variables: true
+          output_path: "{{{{ repository['path'] }}/exported_configs"
+
+    - name: Set date_time variable
+      ansible.builtin.set_fact:
+        date_time: "{{ lookup('pipe', 'date +%Y-%m-%d%H:%M:%S') }}"
+
+    - name: Publish the changes
+      when: result.changed
+      ansible.scm.git_publish:
+        commit:
+          message: "Update at {{ date_time }}"
+        include: "--all"
+        path: "{{ repository['path'] }}"
+        token: "{{ github_token }}"
+        user:
+          name: "{{ username }}"
+          email: "{{ email }}"
+
+
+    - name: "Delete the Authentication Token used"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}{{ aap_oauthtoken_url }}"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 204
+      when: aap_oauthtoken_url is defined
