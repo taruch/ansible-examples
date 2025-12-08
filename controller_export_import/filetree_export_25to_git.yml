@@ -8,6 +8,7 @@
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
     github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+    github_repo_url: "{{ lookup('env', 'GITHUB_REPO_URL') }}"
     git_username: ansible_automation_platform
     git_user_email: "{{ lookup('env', 'GIT_USER_EMAIL') | default('ansible_automation_platform@example.com') }}"
     commit_message: "Updating Configs" 
