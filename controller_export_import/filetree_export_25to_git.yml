@@ -41,17 +41,16 @@
     - name: Retrieve a repository from a distant location and make it available locally
       ansible.scm.git_retrieve:
         origin:
-          url: "http://{{ github_token }}@{{ github_repo_url }}"
+          url: "https://{{ github_repo_url }}"
           token: "{{ github_token }}"
       register: repository
-
 
     - name: Utilize the filetree create role to export the configuration
       ansible.builtin.import_role:
         name: infra.aap_configuration_extended.filetree_create 
       vars:
         input_tag:
-          - all
+          # - all
           # - controller
           # - controller_settings
           # - controller_credentials
@@ -59,7 +58,7 @@
           # - controller_execution_environments
           # - controller_groups
           # - controller_hosts
-          # - controller_inventories
+          - controller_inventories
           # - controller_inventory_sources
           # - controller_job_templates
           # - controller_notification_templates
@@ -107,14 +106,13 @@
           # - hub_roles
         organization_filter: ""  # Specify the organization to filter the export, if needed
         secrets_as_variables: true
-        output_path: "{{{{ repository['path'] }}/exported_configs"
+        output_path: "{{ repository['path'] }}/exported_configs"
 
     - name: Set date_time variable
       ansible.builtin.set_fact:
         date_time: "{{ lookup('pipe', 'date +%Y-%m-%d%H:%M:%S') }}"
 
     - name: Publish the changes
-      when: result.changed
       ansible.scm.git_publish:
         commit:
           message: "Update at {{ date_time }}"
@@ -122,8 +120,8 @@
         path: "{{ repository['path'] }}"
         token: "{{ github_token }}"
         user:
-          name: "{{ username }}"
-          email: "{{ email }}"
+          name: "{{ git_username }}"
+          email: "{{ git_user_email }}"
 
 
     - name: "Delete the Authentication Token used"
