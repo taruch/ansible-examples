@@ -1,8 +1,22 @@
 ---
 - name: Print out all variables on ask_limit_on_launch
-  hosts: all
+  hosts: "{{ all | default('localhost') }}"
   gather_facts: true
   tasks:
+
+    - name: Set facts in sequence
+      ansible.builtin.set_fact:
+        fact_1: "{{ 1 | default(0) | int }}"
+        fact_2: "{{ fact_1 + 1 }}"
+        fact_3: "{{ fact_2 + 1 }}"
+
+    - name: Debug facts
+      ansible.builtin.debug:
+        msg:
+          - "fact_1={{ fact_1 }}"
+          - "fact_2={{ fact_2 }}"
+          - "fact_3={{ fact_3 }}"
+
 
     - name: Show all variables
       ansible.builtin.debug:
