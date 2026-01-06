@@ -13,12 +13,14 @@
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
     ansible_no_log: false
-    import_path: "./export_25_1"
+    import_path: "./export_24_260105-01"
+    any_errors_fatal: true
 
 
   tasks:
-    - name: Import vaulted variables
-      ansible.builtin.include_vars: "{{ import_path }}/vaulted_variables.yml"
+    # - name: Import vaulted variables
+    #   ansible.builtin.include_vars: "{{ import_path }}/vaulted_variables.yml"
+
     - name: "Setup authentication (block)"
       when: controller_oauthtoken is not defined
       block:
@@ -49,7 +51,7 @@
         dir_orgs_vars: "{{ import_path }}"
         filetree_aap_teams: "{{ import_path }}"
         filetree_aap_organizations: "{{ import_path }}"
-        filetree_controller_settings: "{{ import_path }}"
+        # filetree_aap_settings: "{{ import_path }}"
         filetree_controller_organizations: "{{ import_path }}"
         filetree_controller_credential_types: "{{ import_path }}"
         filetree_controller_execution_environments: "{{ import_path }}"
@@ -61,9 +63,9 @@
         filetree_controller_templates: "{{ import_path }}"
         filetree_controller_workflow_job_templates: "{{ import_path }}"
         filetree_controller_roles: "{{ import_path }}"
-        # filetree_controller_schedules: "{{ import_path }}"
-        # filetree_controller_notifications: "{{ import_path }}"
-        # filetree_controller_labels: "{{ import_path }}"
+        filetree_controller_schedules: "{{ import_path }}"
+        filetree_controller_notifications: "{{ import_path }}"
+        filetree_controller_labels: "{{ import_path }}"
         # If you have a specific directory structure for your filetree, you can specify it here
         # dir_settings_vars: "{{ dir_settings_vars | default(omit) }}" # Include if you have global settings
         # If your export structure uses an 'env' directory (e.g., orgs/MyOrg/env/dev), specify it:
