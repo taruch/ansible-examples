@@ -14,7 +14,6 @@
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
     ansible_no_log: false
     import_path: "./export_24_260105-01"
-    any_errors_fatal: true
 
 
   tasks:
@@ -42,11 +41,12 @@
             controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
 
     - name: Read configuration variables from the exported filetree
+      when: file_path is not defined
       ansible.builtin.include_role:
-        # name: infra.controller_configuration.filetree_read
         name: infra.aap_configuration_extended.filetree_read
       vars:
         # These variables tell filetree_read where to find your exported configuration
+        any_errors_fatal: true
         orgs: ""
         dir_orgs_vars: "{{ import_path }}"
         # Gateway Directory Paths
@@ -66,7 +66,6 @@
         filetree_gateway_role_team_assignments: "{{ import_path }}"
         filetree_gateway_role_user_assignments: "{{ import_path }}"
         filetree_gateway_routes: "{{ import_path }}"
-
         # Controller Directory Paths
         filetree_controller_settings: "{{ import_path }}"
         filetree_controller_labels: "{{ import_path }}"
@@ -85,7 +84,6 @@
         filetree_controller_workflow_job_templates: "{{ import_path }}"
         filetree_controller_schedules: "{{ import_path }}"
         filetree_controller_roles: "{{ import_path }}"
-        
         # Logging
         controller_configuration_filetree_read_secure_logging: false
         controller_configuration_secure_logging: false
@@ -94,7 +92,7 @@
 
 
     - name: Include configuration file
-        when: file_path
+      when: file_path is defined
       ansible.builtin.include_vars: "{{ file_path }}"
 
     - name: Dispatch the configuration to AAP 2.5

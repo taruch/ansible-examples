@@ -8,7 +8,7 @@
  - filetree_import_25.yml to import on the command line to an AAP 2.5/2.6 (w/gateway) instance
 
 # Exporting
-To do an export from an Ansible Automation Platform system using the export playbooks, export the variables defined in the playbook vars (at the top)
+To do an export from an Ansible Automation Platform system using the export playbooks, export the variables defined in the playbook vars (at the top):
 ```bash
 export CONTROLLER_VERIFY_SSL=<true or false>
 export CONTROLLER_HOST=<FQDN of 2.4 (or 2.5/2.6 respectively) controller>
@@ -16,13 +16,16 @@ export CONTROLLER_PASSWORD=<password>
 export CONTROLLER_USERNAME=<username>
 ```
 
-**These exports will not export the actual secrets.  The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault.**
+**None of these playbooks will export the actual secrets in the credential export.**\
+**The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault.**
 
 You can do a search for vaulted in the export directory to find all of these variables.
 ```
 grep -R vaulted <export directory>
 ```
 Example: password: "{{ vaulted_controller_credentials_controller_credential_password | default('$encrypted$') }}"
+
+You might also want to keep in mind if you are exporting to import into a different system from the one you are exporting from, you might want to search for your current AAP control node.  Resources like control node credentials and current_instance_groups will have the current system and will need to be updated.
 
 
 ### Run the playbook:
@@ -48,8 +51,14 @@ export CONTROLLER_USERNAME=<username>
 ```
 
 ### Run the playbook:
+```
 ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.1 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
+```
 
+**You can set 'file_path' to have a specific file read in and processed for troubleshooting.  Typically you would do this by adding it as an extra var when running the playbook.**
+```
+ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.1 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e file_path='./Default/projects/13_Template_Demo.yaml'
+```
 
 # Considerations / Issues / Troubleshooting:
 
