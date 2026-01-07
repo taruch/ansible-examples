@@ -29,15 +29,15 @@ You might also want to keep in mind if you are exporting to import into a differ
 
 
 ### Run the playbook:
+```
 ansible-navigator run -mstdout filetree_export_24.yml -vvv --eei=quay.io/truch/export24:1.0 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
-
+```
 or
-
+```
 ansible-navigator run -mstdout filetree_export_25.yml -vvv --eei=quay.io/truch/ee25:1.1 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
+```
+***These exports will not export the actual secrets.  The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault.***
 
-```
-These exports will not export the actual secrets.  The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault.
-```
 
 # Importing to a 2.5/2.6 system
 THIS CAN BE A PROTRACTED PROCESS. If you have any technical debt (and most of us do) in your current instance of AAP you are exporting from, you will have issues you need to work through to import into the new instance. See Issues / Considerations below.
