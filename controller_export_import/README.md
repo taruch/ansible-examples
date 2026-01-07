@@ -1,13 +1,15 @@
 **Read this README to save yourself some headaches**
 
 
-# Playbooks in this repo
+# Directions to use Confirguation as Code to migrate Ansible Automation Platform 2.4/2.5 > 2.5/2.6
+
+Playbooks in this repo:
  - filetree_export_24.yml for exporting on the command line from an AAP 2.4 instance to a local directory
  - filetree_export_25to_git.yml for exporting in AAP from an AAP 2.5 instance to a git repository
  - filetree_export_25.yml for exporting on the command line from an AAP 2.5/2.6 (w/gateway) instance to a local directory
  - filetree_import_25.yml to import on the command line to an AAP 2.5/2.6 (w/gateway) instance
 
-# Exporting
+## Exporting
 To do an export from an Ansible Automation Platform system using the export playbooks, export the variables defined in the playbook vars (at the top):
 ```bash
 export CONTROLLER_VERIFY_SSL=<true or false>
@@ -16,10 +18,9 @@ export CONTROLLER_PASSWORD=<password>
 export CONTROLLER_USERNAME=<username>
 ```
 
-**None of these playbooks will export the actual secrets in the credential export.**\
-**The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault.**
+**None of these playbooks will export the actual secrets in the credential export.**\\
 
-You can do a search for vaulted in the export directory to find all of these variables.
+**The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault. You can do a search for vaulted in the export directory to find all of these variables.**
 ```
 grep -R vaulted <export directory>
 ```
@@ -39,7 +40,7 @@ ansible-navigator run -mstdout filetree_export_25.yml -vvv --eei=quay.io/truch/e
 ***These exports will not export the actual secrets.  The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault.***
 
 
-# Importing to a 2.5/2.6 system
+## Importing to a 2.5/2.6 system
 THIS CAN BE A PROTRACTED PROCESS. If you have any technical debt (and most of us do) in your current instance of AAP you are exporting from, you will have issues you need to work through to import into the new instance. See Issues / Considerations below.
 
 To import to an Automation Platform 2.5 system, export the variables defined in the playbook vars for the AAP 2.5 system.
