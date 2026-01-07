@@ -73,10 +73,11 @@ fatal: [localhost]: FAILED!
 If you had resources in the 2.4 system that were not assigned to an organization, you will run into issues importing those resources into the AAP 2.5 system.  You have a couple choices.
 - Fix them in your 2.4 instance before you do the export **(best)**
 - Change the ORGANIZATIONLESS resources to a viable organization (works): find ./<export directory> -type f -exec sed -i 's/ORGANIZATIONLESS/Default/g' {} +
-- Delete the ORGANIZATIONLESS resources in your export directory **(probably not what you are looking for)**
+- Delete the ORGANIZATIONLESS resources in your export directory
 
+---\
 
-# AAP 2.4 to 2.6 Migration Guide: Authentication & Configuration
+## AAP 2.4 to 2.6 Migration Guide: Authentication & Configuration
 
 This guide outlines how to refactor your **Ansible Automation Platform (AAP) 2.4** Configuration as Code (CaC) for **AAP 2.6**.
 
@@ -84,7 +85,7 @@ In AAP 2.6, the architecture has changed: **Authentication is now handled by the
 
 ---
 
-## 1. Architecture Overview
+### 1. Architecture Overview
 
 In AAP 2.4, the Controller (Django-based) handled LDAP directly. In AAP 2.6, a new Python-based **Gateway service** acts as the central authentication broker for the entire platform.
 
@@ -92,10 +93,10 @@ The Gateway uses a pluggable system. When you configure LDAP in 2.6, you are int
 
 ---
 
-## 2. Refactored Configuration (`vars.yml`)
+### 2. Refactored Configuration (`vars.yml`)
 
 **Organizations and Teams do not transfer gracefully**
-### Teams:
+#### Teams:
 Not all configuration exported from 2.4 will match up for 2.5/2.6:
 find ./<export directory>/ -type f -exec sed -i 's/controller_teams/aap_teams/g' {} +
 
@@ -105,7 +106,7 @@ You can resolve this by adding a variable with an empty dictionary:
 ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.3 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e "gateway_settings={}"
 
 
-### Organizations:
+#### Organizations:
 Add your organizations to a gateway_organizations.yaml file at the root of your export.
 ```yaml
 ---
@@ -118,7 +119,7 @@ aap_organizations:
     description: !unsafe
 ```
 
-### A. Gateway Authenticators (LDAP Connection)
+#### A. Gateway Authenticators (LDAP Connection)
 
 This replaces the old `AUTH_LDAP_SERVER_URI`, `BIND_DN`, and `USER_SEARCH` settings.
 
@@ -151,7 +152,7 @@ gateway_authenticators:
 
 ```
 
-### B. Gateway Authenticator Maps (Group Permissions)
+#### B. Gateway Authenticator Maps (Group Permissions)
 
 This replaces `AUTH_LDAP_ORGANIZATION_MAP` and `AUTH_LDAP_TEAM_MAP`. These maps define which LDAP groups grant specific access levels within the platform.
 
@@ -179,7 +180,7 @@ gateway_authenticator_maps:
 
 ```
 
-### C. Controller Settings (System Behavior)
+#### C. Controller Settings (System Behavior)
 
 These settings remain in the Controller. LDAP-specific keys (`AUTH_LDAP_*`) have been removed from this section.
 
@@ -198,7 +199,7 @@ controller_settings:
 
 ---
 
-## 3. Execution Control
+### 3. Execution Control
 
 To ensure the dispatcher runs only the necessary roles and avoids errors on empty default settings (like `gateway_settings`), define the explicit dispatch list in your `vars.yml`.
 
@@ -213,7 +214,7 @@ gateway_dispatch_roles:
 ```
 
 
-### Important Notes
+#### Important Notes
 
 * **Passwords:** The Gateway requires the `BIND_PASSWORD` in plaintext during the API call. Protect this value using **Ansible Vault**.
 * **Pre-requisites:** The `LDAP_Organization` and `TeamA` objects must exist. It is recommended to include `gateway_organizations` and `gateway_teams` in your dispatch list to create them dynamically before the maps are applied.
