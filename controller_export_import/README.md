@@ -18,7 +18,7 @@ export CONTROLLER_PASSWORD=<password>
 export CONTROLLER_USERNAME=<username>
 ```
 
-**None of these playbooks will export the actual secrets in the credential export.**\\
+**None of these playbooks will export the actual secrets in the credential export.**
 
 **The 2.5 export is configured to change the "secret/encrypted" to a variable that can be imported from a vault. You can do a search for vaulted in the export directory to find all of these variables.**
 ```
@@ -30,10 +30,11 @@ You might also want to keep in mind if you are exporting to import into a differ
 
 
 ### Run the playbook:
+Export from 2.4:
 ```
 ansible-navigator run -mstdout filetree_export_24.yml -vvv --eei=quay.io/truch/export24:1.0 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
 ```
-or
+Export from 2.5/2.6:
 ```
 ansible-navigator run -mstdout filetree_export_25.yml -vvv --eei=quay.io/truch/ee25:1.1 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
 ```
