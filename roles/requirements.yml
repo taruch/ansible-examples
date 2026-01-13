@@ -4,4 +4,4 @@ roles:
   - name: geerlingguy.elasticsearch
   - name: geerlingguy.docker
   # - name: redhatofficial.rhel7-cis
-    version: 0.1.72
+    # version: 0.1.72
