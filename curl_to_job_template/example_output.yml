@@ -1,0 +1,12 @@
+---
+- name: Print extra variables from Job Template
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Print out all variables
+      ansible.builtin.debug:
+        var: vars
+
+...

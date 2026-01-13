@@ -77,7 +77,7 @@ If you had resources in the 2.4 system that were not assigned to an organization
 - Change the ORGANIZATIONLESS resources to a viable organization (works): find ./<export directory> -type f -exec sed -i 's/ORGANIZATIONLESS/Default/g' {} +
 - Delete the ORGANIZATIONLESS resources in your export directory
 
----\
+---
 
 ## AAP 2.4 to 2.6 Migration Guide: Authentication & Configuration
 
@@ -96,18 +96,9 @@ The Gateway uses a pluggable system. When you configure LDAP in 2.6, you are int
 ---
 
 ### 2. Refactored Configuration (`vars.yml`)
+Not all configuration exported from 2.4 will match up for 2.5/2.6:
 
 **Organizations and Teams do not transfer gracefully**
-#### Teams:
-Not all configuration exported from 2.4 will match up for 2.5/2.6:
-find ./<export directory>/ -type f -exec sed -i 's/controller_teams/aap_teams/g' {} +
-
-You will sometimes get an error about gateway_settings:
- TASK [infra.aap_configuration.gateway_settings : Update automation platform gateway Settings] ***
-You can resolve this by adding a variable with an empty dictionary:
-ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.3 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e "gateway_settings={}"
-
-
 #### Organizations:
 Add your organizations to a gateway_organizations.yaml file at the root of your export.
 ```yaml
@@ -121,9 +112,16 @@ aap_organizations:
     description: !unsafe
 ```
 
+#### Teams:
+```
+find ./<export directory>/ -type f -exec sed -i 's/controller_teams/aap_teams/g' {} +
+```
+
+
 #### A. Gateway Authenticators (LDAP Connection)
 
-This replaces the old `AUTH_LDAP_SERVER_URI`, `BIND_DN`, and `USER_SEARCH` settings.
+This replaces the old `AUTH_LDAP_SERVER_URI`, `BIND_DN`, and `USER_SEARCH` settings.\
+I find that importing this as code is easier than doing it in the UI - YMMV.  You can take the contents from the current_settings.yaml exported file and drop them in this format.
 
 ```yaml
 gateway_authenticators:
@@ -203,7 +201,16 @@ controller_settings:
 
 ### 3. Execution Control
 
-To ensure the dispatcher runs only the necessary roles and avoids errors on empty default settings (like `gateway_settings`), define the explicit dispatch list in your `vars.yml`.
+
+You will sometimes get an error about gateway_settings:
+ TASK [infra.aap_configuration.gateway_settings : Update automation platform gateway Settings] ***
+You can resolve this by adding a variable with an empty dictionary:
+
+```
+ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.3 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e "gateway_settings={}"
+```
+
+Alternatively, to ensure the dispatcher runs only the necessary roles and avoids errors on empty default settings (like `gateway_settings`), define the explicit dispatch list in your `vars.yml`.
 
 ```yaml
 gateway_dispatch_roles:
