@@ -3,10 +3,19 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
 
   tasks:
     - name: Print out all variables
       ansible.builtin.debug:
         var: vars
+
+    - name: Create a fact
+      ansible.builtin.set_fact:
+        newfact: "Here is a fact: {{ fact_1 | default('Not Provided') }}"
+
+    - name: Print out specific variable
+      ansible.builtin.debug:
+        msg: "{{ newfact }}"
 
 ...
