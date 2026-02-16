@@ -6,7 +6,7 @@
 
     - name: Set facts in sequence
       ansible.builtin.set_fact:
-        fact_1: "{{ 1 | default(0) | int }}"
+        fact_1: "{{ 1 | int }}"
         fact_2: "{{ fact_1 + 1 }}"
         fact_3: "{{ fact_2 + 1 }}"
 
