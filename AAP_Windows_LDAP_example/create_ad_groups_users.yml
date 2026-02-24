@@ -20,29 +20,6 @@
       retries: 5
       delay: 10
 
-    - name: Create some users
-      when: ansible_facts['os_product_type'] == 'domain_controller'
-      microsoft.ad.user:
-        name: "{{ item.name }}"
-        groups:
-          set:
-            - "{{ item.group }}"
-        password: 'Ansible!2345!'
-        update_password: on_create
-      loop:
-        - name: "orga_admin"
-          group: "orga_admins"
-        - name: "orgb_admin"
-          group: "orgb_admins"
-        - name: "orga_user"
-          group: "orga_users"
-        - name: "orgb_user"
-          group: "orgb_users"
-        - name: "superuser"
-          group: "ansible_admins"
-      retries: 5
-      delay: 10
-
 
     # Create the Child Groups first
     - name: Create Child Group A
@@ -71,5 +48,34 @@
           add:
             - "AAP_Team_A"
             - "AAP_Team_B"
+
+
+    - name: Create some users
+      when: ansible_facts['os_product_type'] == 'domain_controller'
+      microsoft.ad.user:
+        name: "{{ item.name }}"
+        groups:
+          set:
+            - "{{ item.group }}"
+        password: 'Ansible!2345!'
+        update_password: on_create
+      loop:
+        - name: "orga_admin"
+          group: "orga_admins"
+        - name: "orgb_admin"
+          group: "orgb_admins"
+        - name: "orga_user"
+          group: "orga_users"
+        - name: "orgb_user"
+          group: "orgb_users"
+        - name: "superuser"
+          group: "ansible_admins"
+        - name: "aap_team_a_user"
+          group: "AAP_Team_A"
+        - name: "aap_team_b_user"
+          group: "AAP_Team_B"          
+      retries: 5
+      delay: 10
+
 
 ...
