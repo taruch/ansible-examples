@@ -67,8 +67,9 @@
         scope: global
         state: present
         # This is where the nesting happens
-        add_members:
-          - "AAP_Team_A"
-          - "AAP_Team_B"
+        members:
+          add:
+            - "AAP_Team_A"
+            - "AAP_Team_B"
 
 ...
