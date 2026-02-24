@@ -1,0 +1,74 @@
+---
+- name: Update Users and Groups for access management testing
+  hosts: "{{ _hosts | default('os_windows') }}"
+  gather_facts: true
+
+  tasks:
+    - name: Create some groups
+      when: ansible_facts['os_product_type'] == 'domain_controller'
+      microsoft.ad.group:
+        name: "{{ item.name }}"
+        scope: global
+      loop:
+        - name: "orga_admins"
+        - name: "orgb_admins"
+        - name: "central_inventory_admins"
+        - name: "orga_users"
+        - name: "orgb_users"
+        - name: "central_inventory_users"
+        - name: "ansible_admins"
+      retries: 5
+      delay: 10
+
+    - name: Create some users
+      when: ansible_facts['os_product_type'] == 'domain_controller'
+      microsoft.ad.user:
+        name: "{{ item.name }}"
+        groups:
+          set:
+            - "{{ item.group }}"
+        password: 'Ansible!2345!'
+        update_password: on_create
+      loop:
+        - name: "orga_admin"
+          group: "orga_admins"
+        - name: "orgb_admin"
+          group: "orgb_admins"
+        - name: "orga_user"
+          group: "orga_users"
+        - name: "orgb_user"
+          group: "orgb_users"
+        - name: "superuser"
+          group: "ansible_admins"
+      retries: 5
+      delay: 10
+
+
+    # Create the Child Groups first
+    - name: Create Child Group A
+      when: ansible_facts['os_product_type'] == 'domain_controller'
+      microsoft.ad.group:
+        name: "AAP_Team_A"
+        scope: global
+        state: present
+
+    - name: Create Child Group B
+      when: ansible_facts['os_product_type'] == 'domain_controller'
+      microsoft.ad.group:
+        name: "AAP_Team_B"
+        scope: global
+        state: present
+
+    # Create the Parent Group and add Children
+    - name: Create Parent Group (Group of Groups)
+      when: ansible_facts['os_product_type'] == 'domain_controller'
+      microsoft.ad.group:
+        name: "AAP_Master_Access"
+        scope: global
+        state: present
+        # This is where the nesting happens
+        add_members:
+          - "AAP_Team_A"
+          - "AAP_Team_B"
+
+...
