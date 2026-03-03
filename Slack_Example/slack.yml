@@ -5,7 +5,7 @@
   
   vars:
     # Replace with your actual Bot token (xoxb-...)
-    slack_token: "{{ SLACK_API_TOKEN }}" 
+    slack_token: "{{ SLACK_API_KEY  }}" 
     # Replace with your target channel (ensure the bot is invited to the channel!)
     target_channel: "#ansible"
 
