@@ -1,0 +1,29 @@
+---
+- name: Send Notification to Slack
+  hosts: localhost
+  gather_facts: false
+  
+  vars:
+    # Replace with your actual Bot token (xoxb-...)
+    slack_token: "{{ SLACK_API_TOKEN }}" 
+    # Replace with your target channel (ensure the bot is invited to the channel!)
+    target_channel: "#ansible"
+
+  tasks:
+    - name: Send a successful status message to Slack
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ target_channel }}"
+        msg: "✅ *Ansible Update:* The deployment playbook has finished successfully."
+        color: "good" # 'good' = green, 'warning' = yellow, 'danger' = red, or use hex codes
+
+    - name: Send an advanced message with blocks/attachments (Optional)
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ target_channel }}"
+        msg: "Server Patching Report"
+        color: "warning"
+        attachments:
+          - title: "Patching Details"
+            text: "Host: webserver-01\nStatus: Pending Reboot"
+            fallback: "Patching Details for webserver-01"
