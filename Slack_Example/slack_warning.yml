@@ -14,5 +14,5 @@
       community.general.slack:
         token: "{{ slack_token }}"
         channel: "{{ target_channel }}"
-        msg: "{{ payload.eventData.event.description }}"
+        msg: "{{ ansible_eda.event.payload.eventData['event.description'] }}"
         color: "danger" # 'good' = green, 'warning' = yellow, 'danger' = red, or use hex codes
