@@ -1,0 +1,18 @@
+---
+- name: Send Notification to Slack
+  hosts: localhost
+  gather_facts: false
+  
+  vars:
+    # Replace with your actual Bot token (xoxb-...)
+    slack_token: "{{ SLACK_API_KEY  }}" 
+    # Replace with your target channel (ensure the bot is invited to the channel!)
+    target_channel: "#ansible"
+
+  tasks:
+    - name: Send a successful status message to Slack
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ target_channel }}"
+        msg: "{{ payload.eventData.event.description }}"
+        color: "danger" # 'good' = green, 'warning' = yellow, 'danger' = red, or use hex codes
