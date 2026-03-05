@@ -1,0 +1,83 @@
+---
+- name: Configure RHEL 9/10 for VS Code & Ansible Development
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # List of Ansible tools to install via pipx
+    ansible_tools:
+      - ansible-core
+      - ansible-navigator
+      - ansible-builder
+      - ansible-lint
+      - ansible-dev-tools
+
+  tasks:
+    - name: Ensure OpenSSH server is installed and updated
+      ansible.builtin.dnf:
+        name: openssh-server
+        state: present
+
+    - name: Ensure SSH service is running and enabled
+      ansible.builtin.systemd:
+        name: sshd
+        state: started
+        enabled: true
+
+    - name: Install core VS Code and OS utilities
+      ansible.builtin.dnf:
+        name:
+          - tar
+          - gzip
+          - curl
+          - wget
+          - procps-ng
+          - findutils
+          - git
+          - jq
+          - tmux
+          - dnf-plugins-core # Required for the dnf config-manager command below
+        state: present
+
+    - name: Attempt to enable the CRB (CodeReady Builder) repository
+      # CRB is required for many EPEL packages. The 'crb' alias is the most universal
+      # way to enable it across RHEL, CentOS Stream, Alma, and Rocky Linux.
+      ansible.builtin.command:
+        cmd: dnf config-manager --set-enabled crb
+      register: crb_enable
+      failed_when: false # Ignore errors if the repo alias is slightly different on this specific AWS AMI
+      changed_when: crb_enable.rc == 0
+
+    - name: Install the EPEL Repository dynamically based on OS version
+      # Accessing the fact via the ansible_facts dictionary to prevent deprecation warnings
+      ansible.builtin.dnf:
+        name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_facts['distribution_major_version'] }}.noarch.rpm"
+        state: present
+        disable_gpg_check: true
+
+    - name: Install Podman and Python prerequisites
+      ansible.builtin.dnf:
+        name:
+          - podman
+          - podman-docker
+          - python3
+          - python3-pip
+          - pipx
+          - "@Development Tools"
+        state: present
+
+    - name: Install Ansible Development Tools globally via pipx
+      ansible.builtin.command:
+        cmd: "pipx install {{ item }}"
+      loop: "{{ ansible_tools }}"
+      environment:
+        PIPX_HOME: /opt/pipx
+        PIPX_BIN_DIR: /usr/local/bin
+      register: pipx_install
+      changed_when: "'installed successfully' in pipx_install.stdout"
+      failed_when:
+        - pipx_install.rc != 0
+        - "'already seems to be installed' not in pipx_install.stderr"
+
+...
