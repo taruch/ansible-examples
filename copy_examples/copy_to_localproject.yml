@@ -1,0 +1,11 @@
+---
+- name: Copy file to local project directory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+
+    - name: Create some content to the running host project directory
+      ansible.builtin.copy:
+        content: "This is an example file."
+        dest: ./test_file_to_projectdir.txt
