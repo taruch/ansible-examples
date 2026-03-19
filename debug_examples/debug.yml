@@ -30,6 +30,17 @@
       debug:
         var: ansible_inventory_sources
 
+    - name: Show group names for this host
+      debug:
+        var: group_names
+
+    - name: Audit variables for every group this host belongs to
+      ansible.builtin.debug:
+        msg: "Group '{{ item }}' contains these variables: {{ hostvars[groups[item][0]] }}"
+      loop: "{{ group_names }}"
+      loop_control:
+        label: "{{ item }}"
+
     - name: Show all variables
       ansible.builtin.debug:
         var: hostvars['localhost']
