@@ -2,27 +2,35 @@
 - name: Print out all variables on ask_limit_on_launch
   hosts: "{{ all | default('localhost') }}"
   gather_facts: true
+  vars:
+    try_facts: "false"
   tasks:
 
-    # - name: Set facts in sequence
-    #   ansible.builtin.set_fact:
-    #     fact_1: "{{ 1 | int }}"
-    #     fact_2: "{{ fact_1 + 1 }}"
-    #     fact_3: "{{ fact_2 + 1 }}"
+    - name: Set facts in sequence
+      when: try_facts == true
+      ansible.builtin.set_fact:
+        fact_1: "{{ 1 | int }}"
+        fact_2: "{{ fact_1 + 1 }}"
+        fact_3: "{{ fact_2 + 1 }}"
 
-    # - name: Debug facts
-    #   ansible.builtin.debug:
-    #     msg:
-    #       - "fact_1={{ fact_1 }}"
-    #       - "fact_2={{ fact_2 }}"
-    #       - "fact_3={{ fact_3 }}"
+    - name: Debug facts
+      when: try_facts == true
+      ansible.builtin.debug:
+        msg:
+          - "fact_1={{ fact_1 }}"
+          - "fact_2={{ fact_2 }}"
+          - "fact_3={{ fact_3 }}"
 
 
     - name: Show all variables
       ansible.builtin.debug:
         var: vars
 
-    # - name: Show all variables
-    #   ansible.builtin.debug:
-    #     var: hostvars['localhost']
-    #   when: "'ask_limit_on_launch' in hostvars['localhost']"
+    - name: Show inventory sources for this host
+      debug:
+        var: ansible_inventory_sources
+
+    - name: Show all variables
+      ansible.builtin.debug:
+        var: hostvars['localhost']
+      when: "'ask_limit_on_launch' in hostvars['localhost']"
