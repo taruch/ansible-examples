@@ -1,6 +1,6 @@
 ---
 - name: Print out all variables on ask_limit_on_launch
-  hosts: "{{ all | default('localhost') }}"
+  hosts: "{{ _hosts | default('localhost') }}"
   gather_facts: true
   vars:
     try_facts: "false"
