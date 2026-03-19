@@ -4,6 +4,7 @@
   gather_facts: true
   vars:
     try_facts: "false"
+    clear_facts: false
   tasks:
 
     - name: Set facts in sequence
@@ -45,3 +46,7 @@
       ansible.builtin.debug:
         var: hostvars['localhost']
       when: "'ask_limit_on_launch' in hostvars['localhost']"
+
+    - name: Clear the fact cache for this host
+      when: clear_facts is true
+      ansible.builtin.meta: clear_facts
