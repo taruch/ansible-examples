@@ -1,0 +1,47 @@
+---
+controller_roles:
+  - team: Org B Admin
+    job_templates:
+      - Org A Job Template Test
+    role: execute
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: execute
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: project_admin
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: inventory_admin
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: credential_admin
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: workflow_admin
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: job_template_admin
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: execution_environment_admin
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: auditor
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: approval
+  - team: Org B Admin
+    organizations:
+      - OrgB
+    role: notification_admin
+...

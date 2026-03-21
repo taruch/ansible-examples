@@ -1,0 +1,107 @@
+---
+
+- name: Get alerting virtual machines
+  hosts: all
+  gather_facts: false
+  vars:
+    monitor_id: <id>
+
+  tasks:
+    - name: Get hosts with low disk space in Datadog
+      ansible.builtin.uri:
+        url: "https://api.us3.datadoghq.com/api/v1/monitor/groups/search?query=id:{{ monitor_id }}%20group_status:alert&per_page=1000"
+        method: GET
+        headers:
+          DD-API-KEY: "{{ datadog_api_key }}"
+          DD-APPLICATION-KEY: "{{ datadog_app_key }}"
+      delegate_to: localhost
+      register: hosts_in_alert_state
+    
+    - name: Set host list
+      ansible.builtin.set_fact:
+        vm_names: "{{ hosts_in_alert_state['json']['groups'] | map(attribute='group') | map('regex_replace', '^device:c:,host:', '') | list }}"
+
+    - name: Add hosts to in-memory inventory
+      ansible.builtin.add_host:
+        name: '{{ item }}'
+        groups: alerted_hosts
+      loop: "{{ vm_names }}"
+      loop_control:
+        label: "Adding host: {{ item }}"
+      delegate_to: localhost
+        
+- name: Expand disks on virtual machines
+  hosts: alerted_hosts
+  gather_facts: false
+  vars:
+    vcenter_hostname: "<VCENTER>"
+
+  tasks:
+    - name: Find virtual machine and folder
+      community.vmware.vmware_guest_find:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+        name: "{{ inventory_hostname }}"
+      failed_when: false
+      delegate_to: localhost
+      register: vm_folder_info
+    
+    - ansible.builtin.debug:
+        msg: "Unable to find {{ inventory_hostname}} or matched more than one vm guest"
+      when: vm_folder_info['folders'] is not defined or vm_folder_info['folders'] | length > 1
+    
+    - name: Drop host if not found in vCenter or matched more than one vm guest
+      ansible.builtin.meta: end_host
+      when: vm_folder_info['folders'] is not defined or vm_folder_info['folders'] | length > 1
+
+    - name: Set datacenter
+      ansible.builtin.set_fact:
+        vm_datacenter: "{{ (vm_folder_info['folders'] | first | ansible.builtin.split('/'))[1] }}"
+
+    - name: Check virtual machine disk(s)
+      community.vmware.vmware_guest_disk_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+        datacenter: "{{ vm_datacenter }}"
+        name: "{{ inventory_hostname }}"
+      delegate_to: localhost
+      register: vm_disk
+
+    - name: Get first hard disk (GB)
+      ansible.builtin.set_fact:
+        vm_disk_size: >-
+          {{ vm_disk['guest_disk_info'].values() | 
+          selectattr('label', 'equalto', 'Hard disk 1') |
+          map(attribute='capacity_in_bytes') | first | int / 1024**3
+          }}
+    
+    - name: Set new disk size (GB)
+      ansible.builtin.set_fact:
+        new_vm_disk_size: "{{ vm_disk_size | int + 5 | int }}"
+
+    - name: Add disk space to virtual machine
+      community.vmware.vmware_guest_disk:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        datacenter: "{{ datacenter_name }}"
+        name: "{{ vm_name }}"
+        disk:
+          - size_gb: "{{ new_vm_disk_size }}"
+            autoselect_datastore: true
+            state: present
+            scsi_controller: 0
+            unit_number: 0
+      validate_certs: false
+      delegate_to: localhost
+      when: vm_disk_size | int < 100
+
+    - name: Expand the C partition
+      community.windows.win_partition:
+        drive_letter: C
+        partition_size: -1
+      when: vm_disk_size | int < 100

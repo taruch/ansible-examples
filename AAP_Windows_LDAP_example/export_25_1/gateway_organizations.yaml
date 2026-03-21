@@ -1,0 +1,11 @@
+---
+gateway_organizations:
+  - name: Default
+    description: !unsafe The default organization for Ansible Automation Platform
+  - name: OrgA
+    description: !unsafe
+  - name: OrgB
+    description: !unsafe
+  - name: Central Inventory Org
+    description: !unsafe
+...

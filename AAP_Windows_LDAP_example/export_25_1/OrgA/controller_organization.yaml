@@ -1,0 +1,5 @@
+---
+aap_organizations:
+  - name: OrgA
+    description: !unsafe
+...

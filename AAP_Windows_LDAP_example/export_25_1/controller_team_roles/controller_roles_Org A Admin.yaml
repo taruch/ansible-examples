@@ -1,0 +1,43 @@
+---
+controller_roles:
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: execute
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: project_admin
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: inventory_admin
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: credential_admin
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: workflow_admin
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: notification_admin
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: job_template_admin
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: execution_environment_admin
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: auditor
+  - team: Org A Admin
+    organizations:
+      - OrgA
+    role: approval
+...

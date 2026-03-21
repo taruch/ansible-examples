@@ -1,0 +1,68 @@
+---
+controller_settings:
+  - settings:
+      AD_HOC_COMMANDS:
+        - command
+        - shell
+        - yum
+        - apt
+        - apt_key
+        - apt_repository
+        - apt_rpm
+        - service
+        - group
+        - user
+        - mount
+        - ping
+        - selinux
+        - setup
+        - win_ping
+        - win_service
+        - win_updates
+        - win_group
+        - win_user
+      # AUTH_LDAP_SERVER_URI: "ldap://ec2-3-19-243-195.us-east-2.compute.amazonaws.com:389"
+      # AUTH_LDAP_BIND_DN: "CN=ec2-user,CN=Users,DC=ansible,DC=local"
+      # AUTH_LDAP_BIND_PASSWORD: "$encrypted$"
+      # AUTH_LDAP_START_TLS: "false"
+      AUTH_LDAP_USER_SEARCH:
+        - CN=Users,DC=ansible,DC=local
+        - SCOPE_SUBTREE
+        - (cn=%(user)s)
+      AUTH_LDAP_USER_DN_TEMPLATE: "null"
+      AUTH_LDAP_USER_ATTR_MAP:
+        email: mail
+        first_name: givenName
+        last_name: sn
+      AUTH_LDAP_GROUP_SEARCH:
+        - DC=ansible,DC=local
+        - SCOPE_SUBTREE
+        - (objectClass=group)
+      AUTH_LDAP_GROUP_TYPE: "ActiveDirectoryGroupType"
+      AUTH_LDAP_GROUP_TYPE_PARAMS:
+        name_attr: cn
+      AUTH_LDAP_REQUIRE_GROUP: "CN=ansible,CN=Users,DC=ansible,DC=local"
+      AUTH_LDAP_DENY_GROUP: "null"
+      AUTH_LDAP_USER_FLAGS_BY_GROUP:
+        {}
+      AUTH_LDAP_ORGANIZATION_MAP:
+        LDAP_Organization:
+          admins: cn=ansible_admins,cn=groups,dc=ansible,dc=local
+          remove_admins: false
+          remove_users: false
+          users:
+          - cn=ansible,cn=groups,dc=ansible,dc=local
+      AUTH_LDAP_TEAM_MAP:
+        TeamA:
+          organization: LDAP_Organization
+          remove: true
+          users: cn=GroupA,cn=groups,dc=ansible,dc=local
+        TeamB:
+          organization: LDAP_Organization
+          remove: true
+          users: cn=GroupB,cn=groups,dc=ansible,dc=local
+        TeamC:
+          organization: LDAP_Organization
+          remove: true
+          users: cn=GroupC,cn=groups,dc=ansible,dc=local
+...

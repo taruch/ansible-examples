@@ -1,0 +1,22 @@
+---
+controller_schedules:
+  - name: Cleanup Activity Schedule
+    description: !unsafe Automatically Generated Schedule
+    enabled: true
+    unified_job_template: Cleanup Activity Stream
+    dtstart: "2025-10-21T20:51:15Z"
+    dtend: ""
+    timezone: UTC
+    rrule: DTSTART:20251021T205115Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=TU
+    extra_data:
+      days: "355"
+    scm_branch: ""
+    forks: 0
+    job_slice_count: 0
+    timeout: 0
+    job_type: ""
+    job_tags: ""
+    skip_tags: ""
+    limit: ""
+    verbosity: 0
+...

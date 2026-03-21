@@ -1,0 +1,9 @@
+---
+controller_hosts:
+  - name: defaultHost
+    description: !unsafe
+    inventory: Central Inventory
+    variables:
+      account_alias: product_dev
+      state: running
+...

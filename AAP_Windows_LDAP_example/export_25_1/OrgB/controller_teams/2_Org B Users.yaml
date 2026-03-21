@@ -1,0 +1,6 @@
+---
+aap_teams:
+  - name: Org B Users
+    description: !unsafe
+    organization: OrgB
+...

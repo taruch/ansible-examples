@@ -1,0 +1,6 @@
+---
+aap_teams:
+  - name: Central Inventory Team
+    description: !unsafe
+    organization: Central Inventory Org
+...

@@ -1,0 +1,52 @@
+---
+- name: Extend VMware VM Disk by Label
+  hosts: localhost
+  gather_facts: false
+  
+  # -----------------------------------------------------------------
+  # IMPORTANT: Populate these variables
+  # You can pass these in via the command line, a vars file,
+  # or by replacing the placeholders below.
+  # -----------------------------------------------------------------
+  vars:
+    vcenter_hostname: "your_vcenter.example.com"
+    vcenter_username: "your_username"
+    vcenter_password: "your_password"
+    vm_name: "name_of_your_vm"
+    disk_label: "Hard disk 2"  # The label you want to resize
+    new_disk_size_gb: 50        # The final, total size of the disk
+
+  tasks:
+    - name: "Task 1: Get all disk facts for VM '{{ vm_name }}'"
+      community.vmware.vmware_guest_disk_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false  # Set to true if you have valid certs
+        name: "{{ vm_name }}"
+      delegate_to: localhost
+      register: vm_disk_info
+
+    - name: "Task 2: Find the hardware address for disk '{{ disk_label }}'"
+      ansible.builtin.set_fact:
+        target_disk: "{{ vm_disk_info.guest_disk_info | dict2items | json_query(query) | first }}"
+      vars:
+        query: "[?value.label=='{{ disk_label }}'].value"
+      # This check ensures we don't proceed if the disk label isn't found
+      failed_when: target_disk is not defined or target_disk == ""
+      no_log: true # Hides the large fact from the console log
+
+    - name: "Task 3: Extend '{{ disk_label }}' to {{ new_disk_size_gb }}GB"
+      community.vmware.vmware_guest_disk:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+        name: "{{ vm_name }}"
+        disk:
+          - state: present
+            size_gb: "{{ new_disk_size_gb }}"
+            # Use the controller and unit number we found in the previous task
+            controller_number: "{{ target_disk.controller_bus_number }}"
+            unit_number: "{{ target_disk.unit_number }}"
+      delegate_to: localhost

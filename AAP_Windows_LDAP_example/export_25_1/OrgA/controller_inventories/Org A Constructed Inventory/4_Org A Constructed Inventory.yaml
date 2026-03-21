@@ -1,0 +1,19 @@
+---
+controller_inventories:
+  - name: Org A Constructed Inventory
+    description: !unsafe Org A constructed inventory
+    organization: OrgA
+    kind: constructed
+    prevent_instance_group_fallback: False
+    source_vars:
+      plugin: constructed
+      strict: true
+      groups:
+        is_shutdown: state | default("running") == "shutdown"
+        product_dev: account_alias == "product_dev"
+    update_cache_timeout: 0
+    limit: ""
+    verbosity: 0
+    input_inventories:
+      - Central Inventory
+...

@@ -1,0 +1,11 @@
+---
+controller_roles:
+  - team: Central Inventory Team
+    inventories:
+      - Central Inventory
+    role: ad_hoc
+  - team: Central Inventory Team
+    inventories:
+      - Central Inventory
+    role: use
+...

@@ -1,0 +1,82 @@
+---
+- name: Deploy Gitea using Native Podman (RHEL 9/10)
+  hosts: "{{ _hosts }}"
+  become: true
+  vars:
+    # Using GitHub Container Registry to avoid Docker Hub rate limits
+    gitea_image: ghcr.io/go-gitea/gitea
+    gitea_version: latest
+    gitea_data_dir: /var/lib/gitea
+    gitea_ssh_port: 2222
+    gitea_http_port: 3000
+
+  tasks:
+    - name: Install Podman and integration tools
+      dnf:
+        name:
+          - podman
+          - slirp4netns
+          - firewalld
+          - python3-firewall
+        state: present
+
+    - name: Ensure Gitea storage path exists
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        # Note: If running rootless, owner should be the user ID
+        owner: root
+        group: root
+      loop:
+        - "{{ gitea_data_dir }}/data"
+        - "{{ gitea_data_dir }}/config"
+
+    - name: Ensure firewalld is running
+      systemd:
+        name: firewalld
+        state: started
+        enabled: true
+
+    - name: Configure Firewalld for Gitea access
+      firewalld:
+        port: "{{ item }}/tcp"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - "{{ gitea_http_port }}"
+        - "{{ gitea_ssh_port }}"
+
+    - name: Pull Gitea image from Quay
+      containers.podman.podman_image:
+        name: "{{ gitea_image }}:{{ gitea_version }}"
+
+    - name: Run Gitea container
+      containers.podman.podman_container:
+        name: gitea
+        image: "{{ gitea_image }}:{{ gitea_version }}"
+        state: started
+        recreate: true
+        ports:
+          - "{{ gitea_http_port }}:3000"
+          - "{{ gitea_ssh_port }}:22"
+        volumes:
+          - "{{ gitea_data_dir }}/data:/data:Z" # :Z handles SELinux relabeling
+        env:
+          USER_UID: "1000"
+          USER_GID: "1000"
+
+    - name: Create systemd service for Podman container
+      shell: "podman generate systemd --name gitea --files --new"
+      args:
+        chdir: /etc/systemd/system/
+      register: podman_systemd_gen
+      changed_when: podman_systemd_gen.rc == 0
+
+    - name: Enable Gitea via systemd
+      systemd:
+        name: container-gitea
+        enabled: true
+        state: started
+        daemon_reload: true

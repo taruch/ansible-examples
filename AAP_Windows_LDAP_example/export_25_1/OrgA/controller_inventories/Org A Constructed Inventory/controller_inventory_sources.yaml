@@ -1,0 +1,17 @@
+---
+controller_inventory_sources:
+  - name: 'Auto-created source for: Org A Constructed Inventory'
+    description: !unsafe
+    organization: OrgA
+    limit: ""
+    source_path: ""
+    source_vars:
+      plugin: constructed
+      strict: true
+      groups:
+        is_shutdown: state | default("running") == "shutdown"
+        product_dev: account_alias == "product_dev"
+    inventory: Org A Constructed Inventory
+    update_on_launch: "True"
+    overwrite: "True"
+...

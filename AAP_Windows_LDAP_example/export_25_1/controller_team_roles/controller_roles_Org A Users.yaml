@@ -1,0 +1,11 @@
+---
+controller_roles:
+  - team: Org A Users
+    organizations:
+      - OrgA
+    role: execute
+  - team: Org A Users
+    organizations:
+      - OrgA
+    role: auditor
+...

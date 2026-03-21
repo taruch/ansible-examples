@@ -1,0 +1,7 @@
+---
+controller_inventories:
+  - name: Central Inventory
+    description: !unsafe Everyone should be able to see and use this
+    organization: Central Inventory Org
+    prevent_instance_group_fallback: False
+...
