@@ -3,20 +3,25 @@
   hosts: "{{ _hosts | default('localhost') }}"
   become: true
   vars:
+    # Using GitHub Container Registry to avoid Docker Hub rate limits
     gitea_image: 'ghcr.io/go-gitea/gitea'
     gitea_version: latest
     gitea_data_dir: /var/lib/gitea
     gitea_ssh_port: 2222
     gitea_http_port: 3000
+    gitea_ssl_cert: /etc/nginx/ssl/gitea.crt
+    gitea_ssl_key: /etc/nginx/ssl/gitea.key
 
   tasks:
-    - name: Install Podman and integration tools
+    - name: Install Podman, nginx, and integration tools
       ansible.builtin.dnf:
         name:
           - podman
           - slirp4netns
           - firewalld
           - python3-firewall
+          - nginx
+          - openssl
         state: present
 
     - name: Ensure Gitea storage path exists
@@ -24,12 +29,60 @@
         path: "{{ item }}"
         state: directory
         mode: '0755'
-        # Note: If running rootless, owner should be the user ID
         owner: root
         group: root
       loop:
         - "{{ gitea_data_dir }}/data"
         - "{{ gitea_data_dir }}/config"
+
+    - name: Ensure nginx SSL directory exists
+      ansible.builtin.file:
+        path: /etc/nginx/ssl
+        state: directory
+        mode: '0700'
+        owner: root
+        group: root
+
+    - name: Generate self-signed SSL certificate for nginx
+      ansible.builtin.command:
+        cmd: >
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048
+          -keyout {{ gitea_ssl_key }}
+          -out {{ gitea_ssl_cert }}
+          -subj "/CN={{ ansible_hostname }}/O=Gitea/C=US"
+        creates: "{{ gitea_ssl_cert }}"
+
+    - name: Configure nginx reverse proxy for Gitea
+      ansible.builtin.copy:
+        dest: /etc/nginx/conf.d/gitea.conf
+        mode: '0644'
+        content: |
+          server {
+              listen 80;
+              server_name _;
+              return 301 https://$host$request_uri;
+          }
+
+          server {
+              listen 443 ssl;
+              server_name _;
+
+              ssl_certificate     {{ gitea_ssl_cert }};
+              ssl_certificate_key {{ gitea_ssl_key }};
+              ssl_protocols       TLSv1.2 TLSv1.3;
+              ssl_ciphers         HIGH:!aNULL:!MD5;
+
+              client_max_body_size 100m;
+
+              location / {
+                  proxy_pass         http://127.0.0.1:{{ gitea_http_port }};
+                  proxy_set_header   Host              $host;
+                  proxy_set_header   X-Real-IP         $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
+          }
+      notify: Reload nginx
 
     - name: Ensure firewalld is running
       ansible.builtin.systemd:
@@ -37,17 +90,18 @@
         state: started
         enabled: true
 
-    - name: Configure Firewalld for Gitea access
+    - name: Configure firewalld for Gitea SSH, HTTP, and HTTPS
       ansible.posix.firewalld:
         port: "{{ item }}/tcp"
         permanent: true
         state: enabled
         immediate: true
       loop:
-        - "{{ gitea_http_port }}"
         - "{{ gitea_ssh_port }}"
+        - "80"
+        - "443"
 
-    - name: Pull Gitea image from Quay
+    - name: Pull Gitea image
       containers.podman.podman_image:
         name: "{{ gitea_image }}:{{ gitea_version }}"
 
@@ -58,10 +112,10 @@
         state: started
         recreate: true
         ports:
-          - "{{ gitea_http_port }}:3000"
+          - "127.0.0.1:{{ gitea_http_port }}:3000"
           - "{{ gitea_ssh_port }}:22"
         volumes:
-          - "{{ gitea_data_dir }}/data:/data:Z" # :Z handles SELinux relabeling
+          - "{{ gitea_data_dir }}/data:/data:Z"
         env:
           USER_UID: "1000"
           USER_GID: "1000"
@@ -79,5 +133,24 @@
         enabled: true
         state: started
         daemon_reload: true
+
+    - name: Allow nginx to proxy network connections (SELinux)
+      ansible.posix.seboolean:
+        name: httpd_can_network_connect
+        state: true
+        persistent: true
+
+    - name: Enable and start nginx
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
 
 ...
