@@ -1,0 +1,99 @@
+---
+# Update an existing TeamDynamix Incident Ticket
+#
+# Required variables:
+#   tdx_instance      - TDX subdomain, e.g. "myorg"
+#   tdx_app_id        - Ticketing application ID (integer)
+#   tdx_beid          - Service account BEID (GUID)
+#   tdx_wskey         - Service account Web Services Key (GUID)
+#   tdx_ticket_id     - ID of the ticket to update (integer)
+#
+# At least one update variable should be set:
+#   update_status_id     - New StatusID (e.g. "In Process", "Resolved")
+#   update_priority_id   - New PriorityID
+#   update_comment       - Text comment to add to the ticket feed
+#   update_notify        - Whether to notify requestor on comment (true/false, default true)
+#
+# To find status/priority IDs:
+#   Admin > Ticket Applications > [your app] > Statuses / Priorities
+
+- name: Update a TeamDynamix Incident Ticket
+  hosts: localhost
+  gather_facts: false
+  vars:
+    tdx_base_url: "https://{{ tdx_instance }}.teamdynamix.com/TDWebApi/api"
+    update_notify: true
+    update_comment: ""
+
+  tasks:
+    - name: Authenticate with TeamDynamix (service account)
+      ansible.builtin.uri:
+        url: "{{ tdx_base_url }}/auth/loginadmin"
+        method: POST
+        body_format: json
+        body:
+          BEID: "{{ tdx_beid }}"
+          WebServicesKey: "{{ tdx_wskey }}"
+        status_code: 200
+        return_content: true
+      register: tdx_auth
+      no_log: true
+
+    - name: Fetch current ticket state
+      ansible.builtin.uri:
+        url: "{{ tdx_base_url }}/{{ tdx_app_id }}/tickets/{{ tdx_ticket_id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ tdx_auth.json }}"
+        status_code: 200
+      register: current_ticket
+
+    - name: Display current ticket state
+      ansible.builtin.debug:
+        msg:
+          - "Ticket ID : {{ current_ticket.json.ID }}"
+          - "Title     : {{ current_ticket.json.Title }}"
+          - "Status    : {{ current_ticket.json.StatusName }}"
+          - "Priority  : {{ current_ticket.json.PriorityName }}"
+
+    # PATCH updates only the fields you include — omit fields to leave them unchanged.
+    # Merges current ticket fields with any overrides provided.
+    - name: Update ticket fields
+      ansible.builtin.uri:
+        url: "{{ tdx_base_url }}/{{ tdx_app_id }}/tickets/{{ tdx_ticket_id }}?notifyNewResponsible=false"
+        method: PATCH
+        headers:
+          Authorization: "Bearer {{ tdx_auth.json }}"
+        body_format: json
+        body: >-
+          {{
+            {} |
+            combine({'StatusID': update_status_id | int}   if update_status_id   is defined else {}) |
+            combine({'PriorityID': update_priority_id | int} if update_priority_id is defined else {})
+          }}
+        status_code: 200
+      register: patched_ticket
+      when: update_status_id is defined or update_priority_id is defined
+
+    - name: Add comment to ticket feed
+      ansible.builtin.uri:
+        url: "{{ tdx_base_url }}/{{ tdx_app_id }}/tickets/{{ tdx_ticket_id }}/feed"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ tdx_auth.json }}"
+        body_format: json
+        body:
+          Comments: "{{ update_comment }}"
+          IsPrivate: false
+          Notify: "{{ update_notify | bool }}"
+        status_code: 200
+      when: update_comment | length > 0
+
+    - name: Display updated ticket state
+      ansible.builtin.debug:
+        msg:
+          - "Ticket ID : {{ tdx_ticket_id }}"
+          - "Status    : {{ patched_ticket.json.StatusName | default(current_ticket.json.StatusName) }}"
+          - "Priority  : {{ patched_ticket.json.PriorityName | default(current_ticket.json.PriorityName) }}"
+          - "URL       : https://{{ tdx_instance }}.teamdynamix.com/TDNext/Apps/{{ tdx_app_id }}/Tickets/TicketDet?TicketID={{ tdx_ticket_id }}"
+...

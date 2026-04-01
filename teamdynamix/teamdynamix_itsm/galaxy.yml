@@ -1,0 +1,23 @@
+---
+namespace: teamdynamix
+name: itsm
+version: 1.0.0
+readme: README.md
+description: Ansible collection for TeamDynamix ITSM integration — incident management and CMDB inventory
+authors:
+  - Your Name <your.email@example.com>
+license:
+  - GPL-2.0-or-later
+tags:
+  - itsm
+  - teamdynamix
+  - tdx
+  - ticketing
+  - cmdb
+  - inventory
+dependencies: {}
+build_ignore:
+  - "*.tar.gz"
+  - ".git"
+  - ".gitignore"
+  - "tests/output"

@@ -1,0 +1,7 @@
+---
+requires_ansible: ">=2.14"
+
+plugin_routing:
+  inventory:
+    tdx_cmdb:
+      name: teamdynamix.itsm.tdx_cmdb

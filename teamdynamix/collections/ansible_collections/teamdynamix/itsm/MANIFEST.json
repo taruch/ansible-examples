@@ -1,0 +1,37 @@
+{
+ "collection_info": {
+  "namespace": "teamdynamix",
+  "name": "itsm",
+  "version": "1.0.0",
+  "authors": [
+   "Your Name <your.email@example.com>"
+  ],
+  "readme": "README.md",
+  "tags": [
+   "itsm",
+   "teamdynamix",
+   "tdx",
+   "ticketing",
+   "cmdb",
+   "inventory"
+  ],
+  "description": "Ansible collection for TeamDynamix ITSM integration \u2014 incident management and CMDB inventory",
+  "license": [
+   "GPL-2.0-or-later"
+  ],
+  "license_file": null,
+  "dependencies": {},
+  "repository": null,
+  "documentation": null,
+  "homepage": null,
+  "issues": null
+ },
+ "file_manifest_file": {
+  "name": "FILES.json",
+  "ftype": "file",
+  "chksum_type": "sha256",
+  "chksum_sha256": "0bd6c8b8ea09d1a4b6f35c2e7693118943ca8b0a832eaf1685229083c02b107d",
+  "format": 1
+ },
+ "format": 1
+}
