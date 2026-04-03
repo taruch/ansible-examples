@@ -1,0 +1,55 @@
+---
+# vtep_report.yml
+#
+# Collects VTEP information from Arista switches and writes a combined CSV.
+#
+# Output CSV format (one row per switch):
+#   hostname,vtep_ips
+#   switch1,"10.0.0.1,10.0.0.2"
+#
+# Variables:
+#   csv_output_path  - path to write the CSV file (default: ./vtep_report.csv)
+
+- name: Collect VTEP information from Arista switches
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # --- Insert your existing VTEP logic here ---
+    # It should result in a string variable in the format:
+    #   switch1,"10.0.0.1 10.0.0.2"
+    # Replace 'vtep_string' below with your actual variable name.
+
+    - name: Normalize VTEP data as a host fact
+      ansible.builtin.set_fact:
+        vtep_report_entry:
+          hostname: "{{ vtep_string.split(',')[0] }}"
+          ips: "{{ vtep_string.split(',', 1)[1] | replace('\"', '') | trim | split | join(',') }}"
+
+- name: Write VTEP CSV report
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    csv_output_path: "{{ playbook_dir }}/vtep_report.csv"
+
+  tasks:
+    - name: Render VTEP CSV from template
+      ansible.builtin.template:
+        src: vtep_report.csv.j2
+        dest: "{{ csv_output_path }}"
+
+    - name: Assert switch1 and switch2 have matching VTEP IPs
+      ansible.builtin.assert:
+        that:
+          - hostvars['switch1'].vtep_report_entry.ips == hostvars['switch2'].vtep_report_entry.ips
+        fail_msg: >-
+          VTEP IP mismatch:
+          switch1={{ hostvars['switch1'].vtep_report_entry.ips }}
+          switch2={{ hostvars['switch2'].vtep_report_entry.ips }}
+        success_msg: "switch1 and switch2 VTEP IPs match: {{ hostvars['switch1'].vtep_report_entry.ips }}"
+
+    - name: Report output location
+      ansible.builtin.debug:
+        msg: "CSV written to {{ csv_output_path }}"
+...

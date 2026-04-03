@@ -1,0 +1,6 @@
+hostname,vtep_ips
+{% for host in groups['all'] %}
+{% if hostvars[host].vtep_report_entry is defined %}
+{{ hostvars[host].vtep_report_entry.hostname }},"{{ hostvars[host].vtep_report_entry.ips }}"
+{% endif %}
+{% endfor %}
