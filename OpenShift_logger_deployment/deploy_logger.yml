@@ -9,11 +9,23 @@
     splunk_index: "main"
 
   tasks:
+    - name: Verify splunk_url includes a port
+      ansible.builtin.assert:
+        that: splunk_url | regex_search(':\d+$')
+        fail_msg: "splunk_url must include a port (e.g. https://splunk.example.com:8088). Got: {{ splunk_url }}"
+
     - name: Create openshift-logging namespace
       kubernetes.core.k8s:
         name: "{{ logging_namespace }}"
         kind: Namespace
         state: present
+
+    - name: Check for existing OperatorGroup
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1
+        kind: OperatorGroup
+        namespace: "{{ logging_namespace }}"
+      register: existing_operatorgroups
 
     - name: Create Operator Group
       kubernetes.core.k8s:
@@ -27,6 +39,7 @@
           spec:
             targetNamespaces:
               - "{{ logging_namespace }}"
+      when: existing_operatorgroups.resources | length == 0
 
     - name: Subscribe to Cluster Logging Operator (Logging 6.0)
       kubernetes.core.k8s:
@@ -38,7 +51,7 @@
             name: cluster-logging
             namespace: "{{ logging_namespace }}"
           spec:
-            channel: "stable-6.0"
+            channel: "stable-6.5"
             installPlanApproval: Automatic
             name: cluster-logging
             source: redhat-operators
@@ -77,7 +90,7 @@
           apiVersion: rbac.authorization.k8s.io/v1
           kind: ClusterRoleBinding
           metadata:
-            name: log-collector-permissions
+            name: "log-collector-{{ item }}"
           roleRef:
             apiGroup: rbac.authorization.k8s.io
             kind: ClusterRole
@@ -111,10 +124,8 @@
                   url: "{{ splunk_url }}"
                   authentication:
                     token:
-                      from:
-                        secret:
-                          name: splunk-hec-token
-                          key: hec-token
+                      secretName: splunk-hec-token
+                      key: hec-token
                   index: "{{ splunk_index }}"
                 tls:
                   insecureSkipVerify: true

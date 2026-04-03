@@ -32,7 +32,7 @@ The deployment flow is:
 |---|---|---|
 | `logging_namespace` | Namespace to deploy logging into | `openshift-logging` |
 | `hec_token` | Splunk HEC token | `vault_splunk_hec_token` / `SPLUNK_HEC_TOKEN` env var |
-| `splunk_url` | Splunk HEC URL including port | `vault_splunk_url` / `SPLUNK_URL` env var |
+| `splunk_url` | Splunk HEC URL **including port** (e.g. `https://splunk.example.com:8088`) | `vault_splunk_url` / `SPLUNK_URL` env var |
 | `splunk_index` | Splunk index to forward logs to | `main` |
 
 The `hec_token` and `splunk_url` variables should be provided via an Ansible Vault file or environment variables — do not hardcode them.
@@ -42,7 +42,7 @@ The `hec_token` and `splunk_url` variables should be provided via an Ansible Vau
 ```bash
 # Set credentials via environment
 export SPLUNK_HEC_TOKEN=<your-hec-token>
-export SPLUNK_URL=https://<SPLUNK_HOST>:<SPLUNK_HEC_PORT>
+export SPLUNK_URL=https://<SPLUNK_HOST>:8088   # HEC port — do not omit, omitting causes a 302 redirect and dropped events
 
 # Log in to OpenShift
 oc login --token=<OC_LOGIN_TOKEN> --server=https://api.<CLUSTER_NAME>.<DOMAIN>:6443
