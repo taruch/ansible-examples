@@ -1,0 +1,126 @@
+---
+- name: Deploy OpenShift Logging 6.0 and Forward to Splunk
+  hosts: localhost
+  connection: local
+  vars:
+    logging_namespace: "openshift-logging"
+    hec_token: "{{ vault_splunk_hec_token | default(lookup('env', 'SPLUNK_HEC_TOKEN')) }}"
+    splunk_url: "{{ vault_splunk_url | default(lookup('env', 'SPLUNK_URL')) }}"
+    splunk_index: "main"
+
+  tasks:
+    - name: Create openshift-logging namespace
+      kubernetes.core.k8s:
+        name: "{{ logging_namespace }}"
+        kind: Namespace
+        state: present
+
+    - name: Create Operator Group
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: cluster-logging
+            namespace: "{{ logging_namespace }}"
+          spec:
+            targetNamespaces:
+              - "{{ logging_namespace }}"
+
+    - name: Subscribe to Cluster Logging Operator (Logging 6.0)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: cluster-logging
+            namespace: "{{ logging_namespace }}"
+          spec:
+            channel: "stable-6.0"
+            installPlanApproval: Automatic
+            name: cluster-logging
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+
+    - name: Wait for Operator to be ready (approx 1 minute)
+      pause:
+        seconds: 45
+
+    - name: Create Splunk HEC Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: splunk-hec-token
+            namespace: "{{ logging_namespace }}"
+          stringData:
+            hec-token: "{{ hec_token }}"
+
+    - name: Create ServiceAccount for Log Collection
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: log-collector
+            namespace: "{{ logging_namespace }}"
+
+    - name: Grant RBAC Permissions to ServiceAccount
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: log-collector-permissions
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: "{{ item }}"
+          subjects:
+            - kind: ServiceAccount
+              name: log-collector
+              namespace: "{{ logging_namespace }}"
+      loop:
+        - logging-collector-logs-reader
+        - collect-application-logs
+        - collect-infrastructure-logs
+
+    - name: Deploy ClusterLogForwarder (The working 6.0 YAML)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: observability.openshift.io/v1
+          kind: ClusterLogForwarder
+          metadata:
+            name: instance
+            namespace: "{{ logging_namespace }}"
+          spec:
+            managementState: Managed
+            serviceAccount:
+              name: log-collector
+            outputs:
+              - name: splunk-receiver
+                type: splunk
+                splunk:
+                  url: "{{ splunk_url }}"
+                  authentication:
+                    token:
+                      from:
+                        secret:
+                          name: splunk-hec-token
+                          key: hec-token
+                  index: "{{ splunk_index }}"
+                tls:
+                  insecureSkipVerify: true
+            pipelines:
+              - name: aap-gateway-auth
+                inputRefs:
+                  - application
+                outputRefs:
+                  - splunk-receiver
