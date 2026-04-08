@@ -7,12 +7,11 @@
     aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
-    github_repo_url: "{{ lookup('env', 'GIT_REPO_URL') }}"
+    git_token: "{{ lookup('env', 'GIT_TOKEN') }}"
+    git_repo_url: "{{ lookup('env', 'GIT_REPO_URL') }}"
     git_username: ansible_automation_platform
     git_user_email: "{{ lookup('env', 'GIT_USER_EMAIL') | default('ansible_automation_platform@example.com') }}"
     commit_message: "Updating Configs" 
-
 
   tasks:
     - name: "Setup authentication (block)"
@@ -41,72 +40,91 @@
     - name: Retrieve a repository from a distant location and make it available locally
       ansible.scm.git_retrieve:
         origin:
-          url: "https://{{ github_repo_url }}"
-          token: "{{ github_token }}"
+          url: "{{ git_repo_url }}"
+          token: "{{ git_token }}"
       register: repository
 
-    - name: Utilize the filetree create role to export the configuration
-      ansible.builtin.import_role:
-        name: infra.aap_configuration_extended.filetree_create 
-      vars:
-        input_tag:
-          # - all
-          # - controller
-          # - controller_settings
-          # - controller_credentials
-          # - controller_credential_types
-          # - controller_execution_environments
-          # - controller_groups
-          # - controller_hosts
-          - controller_inventories
-          # - controller_inventory_sources
-          # - controller_job_templates
-          # - controller_notification_templates
-          # - controller_organizations
-          # - controller_projects
-          # - controller_roles
-          # - controller_teams
-          # - controller_users
-          # - controller_workflow_job_templates
-          # - controller_instance_groups
-          # - controller_applications
-          # - controller_labels
-          # - controller_schedules
-          # - controller_gateway_authenticator
-          # - controller_gateway_authenticator_maps
-          # - gateway
-          # - gateway_applications
-          # - gateway_authenticator_maps
-          # - gateway_authenticators
-          # - gateway_http_ports
-          # - gateway_organizations
-          # - gateway_role_user_assignments
-          # - gateway_routes
-          # - gateway_service_clusters
-          # - gateway_service_keys
-          # - gateway_service_nodes
-          # - gateway_services
-          # - gateway_settings
-          # - gateway_teams
-          # - gateway_users
-          # - eda
-          # - eda_credential_types
-          # - eda_credentials
-          # - eda_decision_environments
-          # - eda_event_streams
-          # - eda_projects
-          # - eda_rulebook_activations
-          # - hub
-          # - hub_namespaces
-          # - hub_collections
-          # - hub_collection_remotes
-          # - hub_collection_repositories
-          # - hub_ee_registries
-          # - hub_ee_repositories
-          # - hub_roles
-        organization_filter: ""  # Specify the organization to filter the export, if needed
-        secrets_as_variables: true
-        output_path: "{{ repository['path'] }}/exported_configs"
+    - name: Block to export the config and catch any issues
+      block:
+        - name: Utilize the filetree create role to export the configuration
+          ansible.builtin.import_role:
+            name: infra.aap_configuration_extended.filetree_create
+          vars:
+            input_tag:
+              # - all
+              # - controller
+              # - controller_settings
+              # - controller_credentials
+              # - controller_credential_types
+              # - controller_execution_environments
+              # - controller_groups
+              # - controller_hosts
+              # - controller_inventories
+              # - controller_inventory_sources
+              - controller_job_templates
+              # - controller_notification_templates
+              # - controller_organizations
+              # - controller_projects
+              # - controller_roles
+              # - controller_teams
+              # - controller_users
+              # - controller_workflow_job_templates
+              # - controller_instance_groups
+              # - controller_applications
+              # - controller_labels
+              # - controller_schedules
+              # - controller_gateway_authenticator
+              # - controller_gateway_authenticator_maps
+              # - gateway
+              # - gateway_applications
+              # - gateway_authenticator_maps
+              # - gateway_authenticators
+              # - gateway_http_ports
+              # - gateway_organizations
+              # - gateway_role_user_assignments
+              # - gateway_routes
+              # - gateway_service_clusters
+              # - gateway_service_keys
+              # - gateway_service_nodes
+              # - gateway_services
+              # - gateway_settings
+              # - gateway_teams
+              # - gateway_users
+              # - eda
+              # - eda_credential_types
+              # - eda_credentials
+              # - eda_decision_environments
+              # - eda_event_streams
+              # - eda_projects
+              # - eda_rulebook_activations
+              # - hub
+              # - hub_namespaces
+              # - hub_collections
+              # - hub_collection_remotes
+              # - hub_collection_repositories
+              # - hub_ee_registries
+              # - hub_ee_repositories
+              # - hub_roles
+            organization_filter: ""  # Specify the organization to filter the export, if needed
+            secrets_as_variables: true
+            output_path: "{{ repository['path'] }}/exported_configs"
+      rescue:
+        - name: Find all generated YAML files in the temp dir
+          ansible.builtin.find:
+            # We use the variable the role uses internally
+            paths: "{{ controller_configs_dir }}"
+            patterns: "*.yaml,*.yml"
+            recurse: true
+          register: found_files
+
+        - name: Read and Print the broken file content
+          ansible.builtin.debug:
+            msg: |
+              FILE: {{ item.path }}
+              CONTENT:
+              {{ lookup('ansible.builtin.file', item.path) }}
+          loop: "{{ found_files.files }}"
+
 
     - name: Set date_time variable
       ansible.builtin.set_fact:
@@ -118,7 +136,7 @@
           message: "Update at {{ date_time }}"
         include: "--all"
         path: "{{ repository['path'] }}"
-        token: "{{ github_token }}"
+        token: "{{ git_token }}"
         user:
           name: "{{ git_username }}"
           email: "{{ git_user_email }}"
