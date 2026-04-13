@@ -7,6 +7,8 @@
     hec_token: "{{ vault_splunk_hec_token | default(lookup('env', 'SPLUNK_HEC_TOKEN')) }}"
     splunk_url: "{{ vault_splunk_url | default(lookup('env', 'SPLUNK_URL')) }}"
     splunk_index: "main"
+    aap_namespaces:
+      - aap
 
   tasks:
     - name: Verify splunk_url includes a port
@@ -117,6 +119,10 @@
             managementState: Managed
             serviceAccount:
               name: log-collector
+            inputs:
+              - name: aap-only-input
+                application:
+                  namespaces: "{{ aap_namespaces }}"
             outputs:
               - name: splunk-receiver
                 type: splunk
@@ -132,6 +138,6 @@
             pipelines:
               - name: aap-gateway-auth
                 inputRefs:
-                  - application
+                  - aap-only-input
                 outputRefs:
                   - splunk-receiver
