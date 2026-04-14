@@ -1,0 +1,33 @@
+---
+# Enrich a ServiceNow incident with Splunk log results.
+# Designed to run as a downstream job in an AAP workflow after splunk_query.yml.
+# splunk_results, splunk_result_count, and splunk_search_host are injected
+# automatically via set_stats from the upstream Splunk query job.
+
+- name: Enrich ServiceNow incident with Splunk log data
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    _work_note: |
+      *Splunk Log Query Results*
+      Host queried: {{ splunk_search_host | default('unknown') }}
+      Results returned: {{ splunk_result_count | default(0) }}
+      ----------------------------------------
+      {% for entry in splunk_results | default([]) %}
+      {{ entry._time | default('N/A') }} | {{ entry.host | default('N/A') }} | {{ entry.source | default('N/A') }} | {{ entry._raw | default('(no raw event)') }}
+      {% endfor %}
+      {% if (splunk_results | default([])) | length == 0 %}
+      No log entries found.
+      {% endif %}
+
+  tasks:
+    - name: "Add Splunk results to incident {{ snow_incident_number }}"
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ snow_instance }}"
+          username: "{{ snow_username }}"
+          password: "{{ snow_password }}"
+        number: "{{ snow_incident_number }}"
+        other:
+          work_notes: "{{ _work_note }}"

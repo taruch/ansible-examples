@@ -1,0 +1,99 @@
+---
+# Query a Splunk instance for logs related to a specific host.
+# Uses the Splunk REST API directly via ansible.builtin.uri — no extra collection required.
+#
+# Supports two auth methods (set via the Splunk credential type):
+#   - Basic auth:  splunk_username + splunk_password
+#   - Token auth:  splunk_token (Bearer token — leave username/password blank)
+
+- name: Query Splunk for host logs
+  hosts: localhost
+  gather_facts: false
+
+  module_defaults:
+    ansible.builtin.uri:
+      validate_certs: "{{ splunk_validate_certs | default(false) }}"
+      # Basic auth — ignored when splunk_token is set
+      url_username: "{{ splunk_username | default(omit) }}"
+      url_password: "{{ splunk_password | default(omit) }}"
+      force_basic_auth: "{{ (splunk_token is not defined or splunk_token == '') | bool }}"
+
+  vars:
+    # Inject Bearer token header when a token is provided; empty dict otherwise
+    _auth_header: >-
+      {{
+        {'Authorization': 'Bearer ' + splunk_token}
+        if (splunk_token is defined and splunk_token | length > 0)
+        else {}
+      }}
+    _splunk_base_url: "https://{{ splunk_host }}:{{ splunk_port | default('8089') }}"
+
+  tasks:
+    # --- STEP 1: Submit the Splunk search job ---
+    - name: "Submit Splunk search job for host '{{ search_host }}'"
+      ansible.builtin.uri:
+        url: "{{ _splunk_base_url }}/services/search/jobs"
+        method: POST
+        headers: "{{ _auth_header }}"
+        body: >-
+          search=search index={{ search_index | default('*') }}
+          host={{ search_host }}
+          earliest={{ search_earliest | default('-24h') }}
+          latest={{ search_latest | default('now') }}
+          | head {{ result_count | default(50) }}
+          &output_mode=json
+        status_code: 201
+      register: search_job
+
+    - name: Set search job SID
+      ansible.builtin.set_fact:
+        splunk_sid: "{{ search_job.json.sid }}"
+
+    - name: "Search job submitted — SID: {{ splunk_sid }}"
+      ansible.builtin.debug:
+        msg: "Splunk search job SID: {{ splunk_sid }}"
+
+    # --- STEP 2: Poll until the search job is complete ---
+    - name: Wait for Splunk search job to complete
+      ansible.builtin.uri:
+        url: "{{ _splunk_base_url }}/services/search/jobs/{{ splunk_sid }}?output_mode=json"
+        method: GET
+        headers: "{{ _auth_header }}"
+      register: job_status
+      until: job_status.json.entry[0].content.dispatchState == "DONE"
+      retries: 30
+      delay: 10
+
+    # --- STEP 3: Retrieve search results ---
+    - name: Fetch search results
+      ansible.builtin.uri:
+        url: "{{ _splunk_base_url }}/services/search/jobs/{{ splunk_sid }}/results?output_mode=json&count={{ result_count | default(50) }}"
+        method: GET
+        headers: "{{ _auth_header }}"
+      register: search_results
+
+    # --- STEP 4: Display results ---
+    - name: "Result count for host '{{ search_host }}'"
+      ansible.builtin.debug:
+        msg: "Found {{ search_results.json.results | length }} log entries for host '{{ search_host }}'"
+
+    - name: Display log entries
+      ansible.builtin.debug:
+        msg: "{{ item._time | default('N/A') }} | {{ item.host | default('N/A') }} | {{ item.source | default('N/A') }} | {{ item._raw | default(item) }}"
+      loop: "{{ search_results.json.results }}"
+      loop_control:
+        label: "{{ item._time | default(loop.index) }}"
+      when: search_results.json.results | length > 0
+
+    - name: No results found
+      ansible.builtin.debug:
+        msg: "No log entries found for host '{{ search_host }}' in index '{{ search_index | default('*') }}' over the past {{ search_earliest | default('-24h') }}."
+      when: search_results.json.results | length == 0
+
+    # Pass results to follow-on playbooks (e.g. ServiceNow incident creation)
+    - name: Pass results to follow-on playbooks
+      ansible.builtin.set_stats:
+        data:
+          splunk_results: "{{ search_results.json.results }}"
+          splunk_result_count: "{{ search_results.json.results | length }}"
+          splunk_search_host: "{{ search_host }}"

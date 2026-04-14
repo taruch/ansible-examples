@@ -1,0 +1,267 @@
+---
+controller_credential_types:
+  - name: "ServiceNow"
+    description: "ServiceNow REST API credentials"
+    kind: "cloud"
+    inputs:
+      fields:
+        - id: snow_instance
+          type: string
+          label: "ServiceNow Instance"
+          help_text: "Hostname of the ServiceNow instance (e.g. mycompany.service-now.com)"
+        - id: snow_username
+          type: string
+          label: "Username"
+        - id: snow_password
+          type: string
+          label: "Password"
+          secret: true
+      required:
+        - snow_instance
+        - snow_username
+        - snow_password
+    injectors:
+      extra_vars:
+        snow_instance: !unsafe '{{ snow_instance }}'
+        snow_username: !unsafe '{{ snow_username }}'
+        snow_password: !unsafe '{{ snow_password }}'
+  - name: "Splunk"
+    description: "Splunk REST API credentials"
+    kind: "cloud"
+    inputs:
+      fields:
+        - id: splunk_host
+          type: string
+          label: "Splunk Host"
+          help_text: "Hostname or IP of the Splunk instance (e.g. splunk.example.com)"
+        - id: splunk_port
+          type: string
+          label: "Splunk API Port"
+          help_text: "Default: 8089"
+        - id: splunk_username
+          type: string
+          label: "Username"
+          help_text: "Leave blank if using an API token"
+        - id: splunk_password
+          type: string
+          label: "Password"
+          secret: true
+          help_text: "Leave blank if using an API token"
+        - id: splunk_token
+          type: string
+          label: "API Token"
+          secret: true
+          help_text: "Bearer token — use instead of username/password if preferred"
+      required:
+        - splunk_host
+    injectors:
+      extra_vars:
+        splunk_host: !unsafe '{{ splunk_host }}'
+        splunk_port: !unsafe '{{ splunk_port }}'
+        splunk_username: !unsafe '{{ splunk_username }}'
+        splunk_password: !unsafe '{{ splunk_password }}'
+        splunk_token: !unsafe '{{ splunk_token }}'
+
+controller_credentials:
+  - name: "ServiceNow Demo Credential"
+    description: !unsafe ''
+    credential_type: "ServiceNow"
+    organization: "Default"
+    inputs:
+      snow_instance: "mycompany.service-now.com"
+      snow_username: "admin"
+      snow_password: ''
+
+  - name: "Splunk Demo Credential"
+    description: !unsafe ''
+    credential_type: "Splunk"
+    organization: "Default"
+    inputs:
+      splunk_host: "splunk.example.com"
+      splunk_port: "8089"
+      splunk_username: "admin"
+      splunk_password: ''
+      splunk_token: ''
+
+controller_templates:
+  - name: "SPLUNK / Query Logs for Host"
+    description: !unsafe 'Query a Splunk instance for log entries related to a specific host'
+    organization: "Default"
+    project: "Ansible Examples"
+    inventory: "Demo Inventory"
+    playbook: "Splunk_Query_Example/splunk_query.yml"
+    scm_branch: ""
+    forks: 0
+    limit: ""
+    verbosity: 1
+    job_type: "run"
+    job_slice_count: 1
+    use_fact_cache: false
+    credentials:
+      - "Splunk Demo Credential"
+    allow_simultaneous: false
+    ask_scm_branch_on_launch: false
+    ask_diff_mode_on_launch: false
+    ask_tags_on_launch: false
+    ask_skip_tags_on_launch: false
+    ask_job_type_on_launch: false
+    ask_verbosity_on_launch: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_credential_on_launch: false
+    ask_execution_environment_on_launch: false
+    ask_labels_on_launch: false
+    ask_forks_on_launch: false
+    ask_job_slice_count_on_launch: false
+    ask_timeout_on_launch: false
+    ask_instance_groups_on_launch: false
+    extra_vars: ""
+    job_tags: ""
+    force_handlers: false
+    skip_tags: ""
+    start_at_task: ""
+    timeout: 0
+    custom_virtualenv: ""
+    host_config_key: ""
+    labels:
+      - "Splunk"
+    become_enabled: false
+    diff_mode: false
+    webhook_service: ""
+    prevent_instance_group_fallback: false
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: search_host
+          question_name: !unsafe "What host do you want to query logs for?"
+          question_description: !unsafe "Hostname as it appears in Splunk (e.g. webserver-01)"
+          type: text
+          required: true
+          min: 0
+          max: 1024
+          new_question: true
+        - variable: search_index
+          question_name: !unsafe "Which Splunk index should be searched?"
+          question_description: !unsafe "Use * to search all indexes"
+          type: text
+          required: false
+          default: !unsafe "*"
+          min: 0
+          max: 1024
+          new_question: false
+        - variable: search_earliest
+          question_name: !unsafe "How far back should the search go?"
+          question_description: !unsafe "Splunk time modifier, e.g. -24h, -7d, -1h"
+          type: text
+          required: false
+          default: !unsafe "-24h"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: result_count
+          question_name: !unsafe "How many results should be returned?"
+          type: text
+          required: false
+          default: !unsafe "50"
+          min: 0
+          max: 8
+          new_question: false
+
+  - name: "SPLUNK / Enrich ServiceNow Incident"
+    description: !unsafe 'Add Splunk log results to a ServiceNow incident work notes'
+    organization: "Default"
+    project: "Ansible Examples"
+    inventory: "Demo Inventory"
+    playbook: "Splunk_Query_Example/enrich_incident.yml"
+    scm_branch: ""
+    forks: 0
+    limit: ""
+    verbosity: 1
+    job_type: "run"
+    job_slice_count: 1
+    use_fact_cache: false
+    credentials:
+      - "ServiceNow Demo Credential"
+    allow_simultaneous: false
+    ask_scm_branch_on_launch: false
+    ask_diff_mode_on_launch: false
+    ask_tags_on_launch: false
+    ask_skip_tags_on_launch: false
+    ask_job_type_on_launch: false
+    ask_verbosity_on_launch: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_credential_on_launch: false
+    ask_execution_environment_on_launch: false
+    ask_labels_on_launch: false
+    ask_forks_on_launch: false
+    ask_job_slice_count_on_launch: false
+    ask_timeout_on_launch: false
+    ask_instance_groups_on_launch: false
+    extra_vars: ""
+    job_tags: ""
+    force_handlers: false
+    skip_tags: ""
+    start_at_task: ""
+    timeout: 0
+    custom_virtualenv: ""
+    host_config_key: ""
+    labels:
+      - "Splunk"
+      - "ServiceNow"
+    become_enabled: false
+    diff_mode: false
+    webhook_service: ""
+    prevent_instance_group_fallback: false
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: snow_incident_number
+          question_name: !unsafe "ServiceNow incident number to enrich?"
+          question_description: !unsafe "e.g. INC0010001"
+          type: text
+          required: true
+          min: 0
+          max: 64
+          new_question: true
+
+controller_workflows:
+  - name: "SPLUNK / Enrich ServiceNow Incident from Rulebook"
+    description: !unsafe 'Query Splunk for host logs and add results to a ServiceNow incident'
+    organization: "Default"
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: search_host
+          question_name: !unsafe "What host do you want to query logs for?"
+          question_description: !unsafe "Hostname as it appears in Splunk (e.g. webserver-01)"
+          type: text
+          required: true
+          min: 0
+          max: 1024
+          new_question: true
+        - variable: snow_incident_number
+          question_name: !unsafe "ServiceNow incident number to enrich?"
+          question_description: !unsafe "e.g. INC0010001"
+          type: text
+          required: true
+          min: 0
+          max: 64
+          new_question: false
+    simplified_workflow_nodes:
+      - identifier: "Query Splunk"
+        unified_job_template: "SPLUNK / Query Logs for Host"
+        success_nodes:
+          - "Enrich Incident"
+      - identifier: "Enrich Incident"
+        unified_job_template: "SPLUNK / Enrich ServiceNow Incident"
+
+...
