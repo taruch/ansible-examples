@@ -1,8 +1,11 @@
 ---
 
 - name: Update MOTD
-  template:
+  ansible.builtin.template:
     src: motd.j2
     dest: /etc/motd
-  tags:
-    - motd_config
+    owner: root
+    group: root
+    mode: '0644'
+
+...
