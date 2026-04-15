@@ -1,0 +1,32 @@
+---
+
+# Provisions a new host via Red Hat Satellite and triggers base configuration
+# via the AAP provisioning callback defined on the "Host Base Config" job template.
+# The Kickstart finish script on the new host calls back to AAP automatically
+# after the OS build completes — no polling or chaining required here.
+
+- name: Provision host via Satellite
+  collections:
+    - redhat.satellite
+  hosts: "localhost"
+
+  tasks:
+  - name: Create host in Satellite
+    redhat.satellite.host:
+      username: "{{ Username }}"
+      password: "{{ Password }}"
+      server_url: "{{ Satellite_6_URL }}"
+      validate_certs: no
+      name: "{{ vm_fqdn }}"
+      location: "Default Location"
+      organization: "Default Organization"
+      hostgroup: "Default_Libvirt"
+      build: yes
+      compute_attributes:
+        start: "1"
+      state: present
+    register: create_out
+
+  - name: Show host details
+    ansible.builtin.debug:
+      msg: "Host {{ vm_fqdn }} created with IP {{ create_out.diff.after.hosts[0].ip }}"

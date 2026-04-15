@@ -1,0 +1,131 @@
+---
+
+# Configuration as Code: sets up the Host Provision workflow in AAP.
+#
+# Creates:
+#   - Project pointing to this git repo
+#   - Inventory for provisioning (localhost for Satellite API calls)
+#   - Satellite credential
+#   - Machine credential for SSH access to new hosts
+#   - "Host Provision" job template  - runs host_provision_config.yml
+#   - "Host Base Config" job template - runs host_base_config.yml with
+#     provisioning callback enabled so Satellite-built hosts call back
+#     to AAP and trigger base configuration automatically
+#
+# Usage:
+#   ansible-playbook setup.yml
+#
+# Required variables (pass via -e or AAP credential/survey):
+#   controller_hostname, controller_username, controller_password
+#   satellite_url, satellite_username, satellite_password
+#   scm_url (git repo URL for this project)
+#   host_config_key (shared secret used by hosts in the callback URL)
+
+- name: Configure Host Provision workflow in AAP
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections:
+    - ansible.controller
+  environment:
+    CONTROLLER_HOST: "{{ controller_hostname }}"
+    CONTROLLER_USERNAME: "{{ controller_username }}"
+    CONTROLLER_PASSWORD: "{{ controller_password }}"
+    CONTROLLER_VERIFY_SSL: "{{ controller_verify_ssl | default('false') }}"
+
+  tasks:
+
+    - name: Create project
+      ansible.controller.project:
+        name: "Host Provision"
+        description: "Host provisioning and base configuration playbooks"
+        organization: "Default"
+        scm_type: git
+        scm_url: "{{ scm_url }}"
+        scm_branch: main
+        scm_clean: true
+        scm_update_on_launch: true
+        state: present
+
+    - name: Create localhost inventory
+      ansible.controller.inventory:
+        name: "Host Provision Inventory"
+        description: "Localhost inventory for Satellite API calls"
+        organization: "Default"
+        state: present
+
+    - name: Add localhost to inventory
+      ansible.controller.host:
+        name: localhost
+        inventory: "Host Provision Inventory"
+        variables:
+          ansible_connection: local
+        state: present
+
+    - name: Create Satellite credential
+      ansible.controller.credential:
+        name: "Satellite Credential"
+        description: "Red Hat Satellite admin credentials"
+        organization: "Default"
+        credential_type: "Red Hat Satellite 6"
+        inputs:
+          host: "{{ satellite_url }}"
+          username: "{{ satellite_username }}"
+          password: "{{ satellite_password }}"
+        state: present
+
+    - name: Create machine credential
+      ansible.controller.credential:
+        name: "Host Provision Machine Credential"
+        description: "SSH credential for newly provisioned hosts"
+        organization: "Default"
+        credential_type: Machine
+        inputs:
+          username: root
+          ssh_key_data: "{{ ssh_private_key }}"
+        state: present
+
+    - name: Create Host Provision job template
+      ansible.controller.job_template:
+        name: "Host Provision"
+        description: "Creates a new host in Satellite and triggers PXE/Kickstart build"
+        organization: "Default"
+        project: "Host Provision"
+        playbook: "host_provision/host_provision_config.yml"
+        inventory: "Host Provision Inventory"
+        credentials:
+          - "Satellite Credential"
+        ask_variables_on_launch: true
+        extra_vars:
+          Satellite_6_URL: "{{ satellite_url }}"
+        survey_enabled: true
+        survey_spec:
+          name: ''
+          description: ''
+          spec:
+            - question_name: "VM FQDN"
+              question_description: "Fully qualified domain name for the new host"
+              variable: vm_fqdn
+              type: text
+              required: true
+        state: present
+
+    - name: Create Host Base Config job template
+      ansible.controller.job_template:
+        name: "Host Base Config"
+        description: "Applies base configuration to newly provisioned hosts via Satellite callback"
+        organization: "Default"
+        project: "Host Provision"
+        playbook: "host_provision/host_base_config.yml"
+        inventory: "Host Provision Inventory"
+        credentials:
+          - "Host Provision Machine Credential"
+        # allow_simultaneous lets multiple hosts call back and run concurrently
+        allow_simultaneous: true
+        # host_config_key is the shared secret embedded in the callback URL
+        # Kickstart finish script calls:
+        #   curl -k -f -i -H 'Content-Type:application/json' \
+        #     -XPOST https://<aap_host>/api/controller/v2/job_templates/<id>/callback/ \
+        #     --data '{"host_config_key":"<host_config_key>"}'
+        host_config_key: "{{ host_config_key }}"
+        state: present
