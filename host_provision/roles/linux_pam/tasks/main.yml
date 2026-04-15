@@ -26,23 +26,24 @@
 
 - name: Check current authselect profile
   ansible.builtin.command: authselect current --raw
-  register: authselect_current
+  register: linux_pam_authselect_current
   changed_when: false
   failed_when: false
 
 - name: Apply authselect profile with faillock feature
   ansible.builtin.command: >
-    authselect select {{ pam_authselect_profile }}
-    {{ pam_authselect_features | join(' ') }}
+    authselect select {{ linux_pam_authselect_profile }}
+    {{ linux_pam_authselect_features | join(' ') }}
     --force
   when: >
-    authselect_current.rc != 0 or
-    pam_authselect_profile not in authselect_current.stdout or
-    pam_authselect_features | difference(authselect_current.stdout.split()) | length > 0
+    linux_pam_authselect_current.rc != 0 or
+    linux_pam_authselect_profile not in linux_pam_authselect_current.stdout or
+    linux_pam_authselect_features | difference(linux_pam_authselect_current.stdout.split()) | length > 0
+  changed_when: true
   notify: Reset faillock state
 
 - name: Verify faillock is active in PAM configuration
   ansible.builtin.command: grep -q pam_faillock /etc/pam.d/system-auth
-  register: faillock_check
+  register: linux_pam_faillock_check
   changed_when: false
-  failed_when: faillock_check.rc != 0
+  failed_when: linux_pam_faillock_check.rc != 0

@@ -2,26 +2,26 @@
 
 # pam_faillock — account lockout policy
 # Locks accounts after repeated failed login attempts (CIS RHEL benchmark aligned)
-pam_faillock_deny: 5               # lock after this many consecutive failures
-pam_faillock_unlock_time: 900      # seconds before auto-unlock (900 = 15 min)
-pam_faillock_fail_interval: 900    # window in seconds in which failures are counted
-pam_faillock_even_deny_root: true  # also apply lockout to the root account
-pam_faillock_root_unlock_time: 60  # shorter unlock time for root (seconds)
-pam_faillock_silent: false         # log failed attempts to syslog
+linux_pam_faillock_deny: 5               # lock after this many consecutive failures
+linux_pam_faillock_unlock_time: 900      # seconds before auto-unlock (900 = 15 min)
+linux_pam_faillock_fail_interval: 900    # window in seconds in which failures are counted
+linux_pam_faillock_even_deny_root: true  # also apply lockout to the root account
+linux_pam_faillock_root_unlock_time: 60  # shorter unlock time for root (seconds)
+linux_pam_faillock_silent: false         # log failed attempts to syslog
 
 # pam_pwquality — password complexity requirements
 # Enforces a strong password policy on local account changes
-pam_pwquality_minlen: 14      # minimum password length
-pam_pwquality_dcredit: -1     # require at least 1 digit
-pam_pwquality_ucredit: -1     # require at least 1 uppercase letter
-pam_pwquality_lcredit: -1     # require at least 1 lowercase letter
-pam_pwquality_ocredit: -1     # require at least 1 special character
-pam_pwquality_minclass: 3     # require characters from at least 3 classes
-pam_pwquality_maxrepeat: 3    # reject passwords with more than 3 consecutive identical chars
-pam_pwquality_retry: 3        # number of attempts before returning an error
-pam_pwquality_enforce_for_root: true  # enforce policy even when root changes passwords
+linux_pam_pwquality_minlen: 14      # minimum password length
+linux_pam_pwquality_dcredit: -1     # require at least 1 digit
+linux_pam_pwquality_ucredit: -1     # require at least 1 uppercase letter
+linux_pam_pwquality_lcredit: -1     # require at least 1 lowercase letter
+linux_pam_pwquality_ocredit: -1     # require at least 1 special character
+linux_pam_pwquality_minclass: 3     # require characters from at least 3 classes
+linux_pam_pwquality_maxrepeat: 3    # reject passwords with more than 3 consecutive identical chars
+linux_pam_pwquality_retry: 3        # number of attempts before returning an error
+linux_pam_pwquality_enforce_for_root: true  # enforce policy even when root changes passwords
 
 # authselect profile to use — "sssd" if joined to IdM/AD, "minimal" for local-only
-pam_authselect_profile: sssd
-pam_authselect_features:
+linux_pam_authselect_profile: sssd
+linux_pam_authselect_features:
   - with-faillock

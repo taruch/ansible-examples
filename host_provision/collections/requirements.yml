@@ -3,8 +3,8 @@
 collections:
   - name: ansible.utils
     source: https://aaphub.local/api/automation-hub/
-  #- name: redhat.satellite
-  #  source: https://aaphub.local/api/automation-hub/
+  - name: ansible.controller
+    source: https://aaphub.local/api/automation-hub/
   - name: satellite_operations
     source: https://aaphub.local/api/galaxy/content/rh-certified/
   - name: redhat.satellite
