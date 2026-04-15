@@ -1,0 +1,25 @@
+# /etc/security/pwquality.conf
+# Managed by Ansible — do not edit manually
+
+# Minimum acceptable password length
+minlen = {{ pam_pwquality_minlen }}
+
+# Character class credits (negative = minimum required, positive = maximum credit)
+dcredit = {{ pam_pwquality_dcredit }}
+ucredit = {{ pam_pwquality_ucredit }}
+lcredit = {{ pam_pwquality_lcredit }}
+ocredit = {{ pam_pwquality_ocredit }}
+
+# Minimum number of character classes required
+minclass = {{ pam_pwquality_minclass }}
+
+# Maximum consecutive identical characters
+maxrepeat = {{ pam_pwquality_maxrepeat }}
+
+# Number of retries before returning error to the application
+retry = {{ pam_pwquality_retry }}
+
+{% if pam_pwquality_enforce_for_root %}
+# Enforce policy when root sets a password
+enforce_for_root
+{% endif %}

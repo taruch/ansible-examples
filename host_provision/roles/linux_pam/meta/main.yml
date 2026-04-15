@@ -1,0 +1,20 @@
+---
+
+galaxy_info:
+  author: your_name
+  description: Configures Linux PAM account lockout and password quality policy on RHEL-based hosts
+  company: your_company
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+  galaxy_tags:
+    - pam
+    - security
+    - hardening
+    - linux
+
+dependencies: []

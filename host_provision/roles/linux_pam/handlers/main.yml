@@ -1,0 +1,5 @@
+---
+
+- name: Reset faillock state
+  ansible.builtin.command: faillock --reset
+  become: true

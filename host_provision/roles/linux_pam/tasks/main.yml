@@ -1,0 +1,48 @@
+---
+
+- name: Ensure pam_pwquality and authselect are installed
+  ansible.builtin.package:
+    name:
+      - libpwquality
+      - authselect
+    state: present
+
+- name: Deploy pwquality.conf
+  ansible.builtin.template:
+    src: pwquality.conf.j2
+    dest: /etc/security/pwquality.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Deploy faillock.conf
+  ansible.builtin.template:
+    src: faillock.conf.j2
+    dest: /etc/security/faillock.conf
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Reset faillock state
+
+- name: Check current authselect profile
+  ansible.builtin.command: authselect current --raw
+  register: authselect_current
+  changed_when: false
+  failed_when: false
+
+- name: Apply authselect profile with faillock feature
+  ansible.builtin.command: >
+    authselect select {{ pam_authselect_profile }}
+    {{ pam_authselect_features | join(' ') }}
+    --force
+  when: >
+    authselect_current.rc != 0 or
+    pam_authselect_profile not in authselect_current.stdout or
+    pam_authselect_features | difference(authselect_current.stdout.split()) | length > 0
+  notify: Reset faillock state
+
+- name: Verify faillock is active in PAM configuration
+  ansible.builtin.command: grep -q pam_faillock /etc/pam.d/system-auth
+  register: faillock_check
+  changed_when: false
+  failed_when: faillock_check.rc != 0

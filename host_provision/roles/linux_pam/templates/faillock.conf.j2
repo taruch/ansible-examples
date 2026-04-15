@@ -1,0 +1,23 @@
+# /etc/security/faillock.conf
+# Managed by Ansible — do not edit manually
+
+# Number of consecutive authentication failures before locking the account
+deny = {{ pam_faillock_deny }}
+
+# Time window (seconds) in which failures are counted
+fail_interval = {{ pam_faillock_fail_interval }}
+
+# Time (seconds) before a locked account is automatically unlocked
+unlock_time = {{ pam_faillock_unlock_time }}
+
+{% if pam_faillock_even_deny_root %}
+# Apply lockout policy to the root account as well
+even_deny_root
+# Shorter unlock time for root to avoid complete lockout of the system
+root_unlock_time = {{ pam_faillock_root_unlock_time }}
+{% endif %}
+
+{% if not pam_faillock_silent %}
+# Log failed attempts and lockout events to syslog
+audit
+{% endif %}
