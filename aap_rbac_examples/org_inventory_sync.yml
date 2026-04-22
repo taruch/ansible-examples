@@ -1,0 +1,137 @@
+---
+# =============================================================================
+# Grant project_update and inventory_update roles to teams for all
+# projects and inventories within a given AAP organization.
+#
+# Compatible with: AAP 2.5 / 2.6 (gateway RBAC model)
+# Collections:     ansible.controller, infra.aap_configuration
+#
+# Usage:
+#   ansible-playbook org_inventory_sync.yml \
+#     -e target_org="My Org" \
+#     -e '{"target_teams": ["Ops Team", "Dev Team"]}' \
+#     -e @vault.yml --vault-password-file ~/.vault_pass
+#
+# Extra vars:
+#   target_org                  - Organization to scope discovery (default: Default)
+#   target_teams                - List of team names to receive roles
+#   project_update_role_name    - Role definition name (default: "Project Update")
+#   inventory_update_role_name  - Role definition name (default: "Inventory Update")
+# =============================================================================
+
+- name: Grant project_update and inventory_update roles for all org resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    aap_username: "{{ vault_aap_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+
+    # Keep controller_* aliases so ansible.controller lookup plugin resolves them
+    controller_username: "{{ aap_username }}"
+    controller_password: "{{ aap_password }}"
+    controller_host: "{{ aap_hostname }}"
+    controller_validate_certs: "{{ aap_validate_certs }}"
+
+    target_org: "Default"
+    target_teams: []
+
+
+  pre_tasks:
+    - name: Validate that at least one team is specified
+      ansible.builtin.assert:
+        that:
+          - target_teams | length > 0
+        fail_msg: "Set target_teams before running this playbook."
+
+  tasks:
+
+    # ---- Discover projects and inventories -----------------------------------
+
+    - name: Get all projects in organization '{{ target_org }}'
+      ansible.builtin.set_fact:
+        _org_projects: >-
+          {{ lookup(
+               'ansible.controller.controller_api',
+               'projects',
+               query_params={'organization__name': target_org},
+               host=controller_host,
+               username=controller_username,
+               password=controller_password,
+               verify_ssl=controller_validate_certs
+             ) }}
+
+    - name: Display projects found
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ _org_projects | length }} project(s) in '{{ target_org }}':
+          {{ _org_projects | map(attribute='name') | list }}
+
+    - name: Get all inventories in organization '{{ target_org }}'
+      ansible.builtin.set_fact:
+        _org_inventories: >-
+          {{ lookup(
+               'ansible.controller.controller_api',
+               'inventories',
+               query_params={'organization__name': target_org},
+               host=controller_host,
+               username=controller_username,
+               password=controller_password,
+               verify_ssl=controller_validate_certs
+             ) }}
+
+    - name: Display inventories found
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ _org_inventories | length }} inventor(ies) in '{{ target_org }}':
+          {{ _org_inventories | map(attribute='name') | list }}
+
+    # ---- Apply role assignments via ansible.controller.role -----------------
+    # ansible.platform.role_team_assignment only handles Organization/Team
+    # prefixed roles; resource-level roles (Project Update, Inventory Update)
+    # must be assigned through the controller API instead.
+
+    - name: Grant Project Update to each team for each project
+      ansible.controller.role:
+        role: update
+        teams: "{{ target_teams }}"
+        projects:
+          - "{{ item.name }}"
+        state: present
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+      loop: "{{ _org_projects }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Grant Inventory Update to each team for each inventory
+      ansible.controller.role:
+        role: update
+        teams: "{{ target_teams }}"
+        inventories:
+          - "{{ item.name }}"
+        state: present
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+      loop: "{{ _org_inventories }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # ---- Summary -------------------------------------------------------------
+
+    - name: Display role assignment summary
+      ansible.builtin.debug:
+        msg:
+          - "Organization : {{ target_org }}"
+          - "Projects     : {{ _org_projects | map(attribute='name') | list }}"
+          - "Inventories  : {{ _org_inventories | map(attribute='name') | list }}"
+          - "Teams        : {{ target_teams }}"
+          - "Roles applied: 'update' (projects and inventories)"
+
+...
