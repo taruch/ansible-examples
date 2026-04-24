@@ -1,0 +1,47 @@
+---
+# Gathers IP address information from each host and generates a CSV report
+# on the Ansible controller using a Jinja2 template.
+#
+# The template loops through ansible_play_hosts (only hosts that responded)
+# and for each host iterates over ansible_interfaces to produce one CSV row
+# per interface that has an IPv4 address assigned.
+#
+# Usage:
+#   ansible-playbook ip_address_report.yml -i <inventory>
+#   ansible-playbook ip_address_report.yml -i <inventory> \
+#     -e "_hosts=webservers" \
+#     -e "report_path=/tmp/webservers_ips.csv"
+
+- name: Gather network facts from target hosts
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: true
+
+- name: Generate IP address CSV report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    report_path: "/tmp/ip_address_report.csv"
+
+  tasks:
+
+    - name: Generate CSV from template
+      ansible.builtin.template:
+        src: ip_address_report.csv.j2
+        dest: "{{ report_path }}"
+        mode: '0644'
+
+    - name: Display report location
+      ansible.builtin.debug:
+        msg: "Report written to {{ report_path }}"
+
+    - name: Show report contents
+      ansible.builtin.command: cat "{{ report_path }}"
+      register: report_contents
+      changed_when: false
+
+    - name: Print report
+      ansible.builtin.debug:
+        msg: "{{ report_contents.stdout_lines }}"
+...

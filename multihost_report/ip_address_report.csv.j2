@@ -1,0 +1,10 @@
+hostname,interface,ip_address,netmask,mac_address
+{% for host in ansible_play_hosts | sort %}
+{% set hv = hostvars[host] %}
+{% for iface in hv.ansible_interfaces | default([]) | sort %}
+{% set iface_key = 'ansible_' ~ iface | replace('-', '_') %}
+{% if hv[iface_key] is defined and hv[iface_key].ipv4 is defined %}
+{{ host }},{{ iface }},{{ hv[iface_key].ipv4.address }},{{ hv[iface_key].ipv4.netmask }},{{ hv[iface_key].macaddress | default('N/A') }}
+{% endif %}
+{% endfor %}
+{% endfor %}
