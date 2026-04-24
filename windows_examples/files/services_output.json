@@ -1,0 +1,285 @@
+{
+
+  "service_info.results": [
+
+    {
+
+      "changed": false,
+
+      "invocation": {
+
+        "module_args": {
+
+          "name": "Spooler"
+
+        }
+
+      },
+
+      "exists": true,
+
+      "services": [
+
+        {
+
+          "checkpoint": 0,
+
+          "controls_accepted": [],
+
+          "dependencies": [
+
+            "RPCSS",
+
+            "http"
+
+          ],
+
+          "dependency_of": [],
+
+          "description": "This service spools print jobs and handles interaction with the printer.  If you turn off this service, you won’t be able to print or see your printers.",
+
+          "desktop_interact": true,
+
+          "display_name": "Print Spooler",
+
+          "error_control": "normal",
+
+          "failure_actions": [
+
+            {
+
+              "type": "restart",
+
+              "delay_ms": 5000
+
+            },
+
+            {
+
+              "type": "restart",
+
+              "delay_ms": 5000
+
+            },
+
+            {
+
+              "type": "none",
+
+              "delay_ms": 0
+
+            }
+
+          ],
+
+          "failure_actions_on_non_crash_failure": false,
+
+          "failure_command": null,
+
+          "failure_reboot_msg": null,
+
+          "failure_reset_period_sec": 3600,
+
+          "launch_protection": "none",
+
+          "load_order_group": "SpoolerGroup",
+
+          "name": "Spooler",
+
+          "path": "C:\\WINDOWS\\System32\\spoolsv.exe",
+
+          "pre_shutdown_timeout_ms": 180000,
+
+          "preferred_node": null,
+
+          "process_id": 5632,
+
+          "required_privileges": [
+
+            "SeTcbPrivilege",
+
+            "SeImpersonatePrivilege",
+
+            "SeAuditPrivilege",
+
+            "SeChangeNotifyPrivilege",
+
+            "SeAssignPrimaryTokenPrivilege",
+
+            "SeLoadDriverPrivilege"
+
+          ],
+
+          "service_exit_code": 0,
+
+          "service_flags": [],
+
+          "service_type": "win32_own_process",
+
+          "sid_info": "unrestricted",
+
+          "start_mode": "auto",
+
+          "state": "started",
+
+          "triggers": [],
+
+          "username": "NT AUTHORITY\\SYSTEM",
+
+          "wait_hint_ms": 0,
+
+          "win32_exit_code": 0
+
+        }
+
+      ],
+
+      "failed": false,
+
+      "item": "Spooler",
+
+      "ansible_loop_var": "item"
+
+    },
+
+    {
+
+      "changed": false,
+
+      "invocation": {
+
+        "module_args": {
+
+          "name": "Audiosrv"
+
+        }
+
+      },
+
+      "exists": true,
+
+      "services": [
+
+        {
+
+          "checkpoint": 0,
+
+          "controls_accepted": [],
+
+          "dependencies": [
+
+            "AudioEndpointBuilder",
+
+            "RpcSs"
+
+          ],
+
+          "dependency_of": [],
+
+          "description": "Manages audio for Windows-based programs.  If this service is stopped, audio devices and effects will not function properly.  If this service is disabled, any services that explicitly depend on it will fail to start",
+
+          "desktop_interact": false,
+
+          "display_name": "Windows Audio",
+
+          "error_control": "normal",
+
+          "failure_actions": [
+
+            {
+
+              "type": "restart",
+
+              "delay_ms": 60000
+
+            },
+
+            {
+
+              "type": "restart",
+
+              "delay_ms": 120000
+
+            },
+
+            {
+
+              "type": "none",
+
+              "delay_ms": 0
+
+            }
+
+          ],
+
+          "failure_actions_on_non_crash_failure": false,
+
+          "failure_command": null,
+
+          "failure_reboot_msg": null,
+
+          "failure_reset_period_sec": 86400,
+
+          "launch_protection": "none",
+
+          "load_order_group": "AudioGroup",
+
+          "name": "Audiosrv",
+
+          "path": "C:\\WINDOWS\\System32\\svchost.exe -k LocalServiceNetworkRestricted",
+
+          "pre_shutdown_timeout_ms": 180000,
+
+          "preferred_node": null,
+
+          "process_id": 0,
+
+          "required_privileges": [
+
+            "SeChangeNotifyPrivilege",
+
+            "SeImpersonatePrivilege",
+
+            "SeIncreaseWorkingSetPrivilege"
+
+          ],
+
+          "service_exit_code": 0,
+
+          "service_flags": [],
+
+          "service_type": "win32_own_process",
+
+          "sid_info": "unrestricted",
+
+          "start_mode": "manual",
+
+          "state": "stopped",
+
+          "triggers": [],
+
+          "username": "NT AUTHORITY\\LocalService",
+
+          "wait_hint_ms": 0,
+
+          "win32_exit_code": 0
+
+        }
+
+      ],
+
+      "failed": false,
+
+      "item": "Audiosrv",
+
+      "ansible_loop_var": "item"
+
+    }
+  ],
+
+  "_ansible_verbose_always": true,
+
+  "_ansible_no_log": false,
+
+  "changed": false
+}
