@@ -1,0 +1,145 @@
+---
+# Demonstrates Jinja2 regex filters using log lines, hostnames, and config strings.
+
+- name: Jinja2 regex filter examples
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    log_line: "2026-04-15T14:32:07Z ERROR [web-01] Connection to 10.10.1.5:5432 timed out after 30s"
+
+    log_lines:
+      - "2026-04-15T14:31:55Z INFO  [web-01] Request processed in 142ms"
+      - "2026-04-15T14:32:07Z ERROR [web-01] Connection to 10.10.1.5:5432 timed out after 30s"
+      - "2026-04-15T14:32:08Z WARN  [db-01]  Slow query detected: 3200ms"
+      - "2026-04-15T14:32:10Z INFO  [web-02] Request processed in 98ms"
+      - "2026-04-15T14:32:15Z ERROR [api-01] 500 Internal Server Error on /api/v2/users"
+      - "2026-04-15T14:32:20Z ERROR [web-01] Disk usage at 91% on /var/log"
+      - "2026-04-15T14:32:25Z INFO  [cache-01] Cache hit rate: 94.7%"
+
+    hostnames:
+      - "web-server-01.prod.example.com"
+      - "db-server-02.prod.example.com"
+      - "cache-server-01.dev.example.com"
+      - "api-gateway.staging.example.com"
+      - "worker-node-03.prod.example.com"
+      - "bastion-01.mgmt.example.com"
+
+    config_block: |
+      # Server configuration
+      bind_address = 0.0.0.0
+      port = 8080
+      max_connections = 500
+      log_level = debug
+      tls_cert = /etc/ssl/certs/server.crt
+      tls_key  = /etc/ssl/private/server.key
+
+    version_string: "ansible-core 2.17.3"
+
+    ip_list_raw: "10.10.1.5, 192.168.0.1,10.20.30.40, 172.16.0.254"
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # regex_search — find first match, return it (or a capture group)
+    # ------------------------------------------------------------------
+
+    - name: "regex_search | Extract timestamp from log line"
+      debug:
+        msg: "{{ log_line | regex_search('^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)', '\\1') | first }}"
+
+    - name: "regex_search | Extract log level from log line"
+      debug:
+        msg: "{{ log_line | regex_search('(INFO|WARN|ERROR|DEBUG)', '\\1') | first }}"
+
+    - name: "regex_search | Extract IP address from log line"
+      debug:
+        msg: "{{ log_line | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})', '\\1') | first }}"
+
+    - name: "regex_search | Extract version number"
+      debug:
+        msg: "{{ version_string | regex_search('(\\d+\\.\\d+\\.\\d+)', '\\1') | first }}"
+
+    - name: "regex_search | Extract environment from FQDN"
+      debug:
+        msg: "{{ 'web-server-01.prod.example.com' | regex_search('\\.([a-z]+)\\.example\\.com', '\\1') | first }}"
+
+    - name: "regex_search | Returns empty list when no match (falsy check)"
+      vars:
+        result: "{{ 'no-ip-here' | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})') }}"
+      debug:
+        msg: "Found: {{ result | default('no match') }}"
+
+    # ------------------------------------------------------------------
+    # regex_findall — return ALL matches as a list
+    # ------------------------------------------------------------------
+
+    - name: "regex_findall | Extract all IP addresses from a string"
+      debug:
+        msg: "{{ ip_list_raw | regex_findall('\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}') }}"
+
+    - name: "regex_findall | Extract all port numbers from log line"
+      debug:
+        msg: "{{ log_line | regex_findall(':(\\d{2,5})') }}"
+
+    - name: "regex_findall | Extract all key names from config block"
+      debug:
+        msg: "{{ config_block | regex_findall('^([a-z_]+)\\s*=', multiline=True) }}"
+
+    - name: "regex_findall | Find all latency values from log lines"
+      debug:
+        msg: "{{ log_lines | map('regex_findall', '(\\d+)ms') | flatten | list }}"
+
+    # ------------------------------------------------------------------
+    # regex_replace — substitute patterns
+    # ------------------------------------------------------------------
+
+    - name: "regex_replace | Redact IP addresses in a log line"
+      debug:
+        msg: "{{ log_line | regex_replace('\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}', 'x.x.x.x') }}"
+
+    - name: "regex_replace | Normalize hostname to remove numeric suffix"
+      debug:
+        msg: "{{ 'web-server-01' | regex_replace('-\\d+$', '') }}"
+
+    - name: "regex_replace | Convert kebab-case to snake_case"
+      debug:
+        msg: "{{ 'web-server-node-01' | regex_replace('-', '_') }}"
+
+    - name: "regex_replace | Strip comments from config block"
+      debug:
+        msg: "{{ config_block | regex_replace('(?m)^#.*\\n?', '') }}"
+
+    - name: "regex_replace | Back-reference: swap user and domain in email"
+      debug:
+        msg: "{{ 'alice@example.com' | regex_replace('^(\\w+)@([\\w.]+)$', '\\2/\\1') }}"
+
+    - name: "regex_replace | Redact passwords in connection strings"
+      debug:
+        msg: "{{ 'postgresql://app:S3cr3t@db-01:5432/appdb' | regex_replace(':[^:@]+@', ':REDACTED@') }}"
+
+    # ------------------------------------------------------------------
+    # Combining with list filters
+    # ------------------------------------------------------------------
+
+    - name: "select + search | Filter only ERROR log lines"
+      debug:
+        msg: "{{ log_lines | select('search', ' ERROR ') | list }}"
+
+    - name: "select + match | Filter prod hostnames only"
+      debug:
+        msg: "{{ hostnames | select('match', '.*\\.prod\\..*') | list }}"
+
+    - name: "reject + search | Exclude INFO log lines"
+      debug:
+        msg: "{{ log_lines | reject('search', ' INFO ') | list }}"
+
+    - name: "map + regex_replace | Redact IPs across all log lines"
+      debug:
+        msg: "{{ log_lines | map('regex_replace', '\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}', 'x.x.x.x') | list }}"
+
+    - name: "map + regex_replace | Strip environment suffix from all hostnames"
+      debug:
+        msg: "{{ hostnames | map('regex_replace', '\\.(prod|staging|dev|mgmt)\\.example\\.com$', '') | list }}"
+...

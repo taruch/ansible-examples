@@ -1,0 +1,197 @@
+---
+# Demonstrates Jinja2 default, ternary, omit, and type-test filters
+# for safe variable handling and conditional value selection.
+
+- name: Jinja2 default, ternary, and type-test filter examples
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Intentionally sparse — some keys missing to showcase default behavior
+    server_a:
+      name: "web-01"
+      env: "prod"
+      port: 8080
+      tls_enabled: true
+      max_connections: 500
+
+    server_b:
+      name: "dev-box"
+      env: "dev"
+      # port, tls_enabled, max_connections intentionally absent
+
+    servers:
+      - name: "web-01"
+        env: "prod"
+        backup: true
+        monitored: true
+        port: 443
+      - name: "db-01"
+        env: "prod"
+        backup: true
+        monitored: false
+        port: 5432
+      - name: "cache-01"
+        env: "staging"
+        backup: false
+        monitored: true
+        port: 6379
+      - name: "worker-01"
+        env: "dev"
+        backup: false
+        monitored: false
+        port: 0
+
+    empty_string: ""
+    zero_value: 0
+    false_value: false
+    null_value: ~
+    defined_value: "hello"
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # default — fallback when variable is undefined or empty
+    # ------------------------------------------------------------------
+
+    - name: "default | Use fallback port when key is missing"
+      debug:
+        msg: "Port: {{ server_b.port | default(80) }}"
+
+    - name: "default | Use fallback for missing tls_enabled"
+      debug:
+        msg: "TLS: {{ server_b.tls_enabled | default(false) }}"
+
+    - name: "default | Fallback for missing max_connections"
+      debug:
+        msg: "Max connections: {{ server_b.max_connections | default(100) }}"
+
+    - name: "default | Empty string is falsy — default triggers"
+      debug:
+        msg: "Value: {{ empty_string | default('(not set)') }}"
+
+    - name: "default(boolean=true) | Only trigger on undefined, not falsy"
+      debug:
+        msg:
+          - "zero with boolean=true : {{ zero_value  | default('fallback', boolean=True) }}"
+          - "false with boolean=true: {{ false_value | default('fallback', boolean=True) }}"
+          - "empty with boolean=true: {{ empty_string | default('fallback', boolean=True) }}"
+          - "zero without boolean   : {{ zero_value  | default('fallback') }}"
+      # boolean=True makes default behave like Python `or` — triggers on any falsy value
+
+    - name: "default | Defined value passes through unchanged"
+      debug:
+        msg: "{{ defined_value | default('fallback') }}"
+
+    # ------------------------------------------------------------------
+    # ternary — inline if/else
+    # ------------------------------------------------------------------
+
+    - name: "ternary | Select protocol based on tls_enabled"
+      debug:
+        msg: "{{ 'https' if server_a.tls_enabled else 'http' }}"
+      # Jinja2 inline conditional — identical result to ternary filter:
+
+    - name: "ternary filter | Select protocol (filter form)"
+      debug:
+        msg: "{{ server_a.tls_enabled | ternary('https', 'http') }}"
+
+    - name: "ternary | Build URL from server config"
+      debug:
+        msg: >-
+          {{
+            (server_a.tls_enabled | default(false)) | ternary('https', 'http')
+            ~ '://' ~ server_a.name ~ ':' ~ server_a.port
+          }}
+
+    - name: "ternary | Status label for each server"
+      debug:
+        msg: "{{ servers | map(attribute='monitored') | map('ternary', 'monitored', 'unmonitored') | list }}"
+
+    - name: "ternary | Assign log level based on environment"
+      debug:
+        msg: "{{ servers | map(attribute='env') | map('equalto', 'prod') | map('ternary', 'warn', 'debug') | list }}"
+
+    # ------------------------------------------------------------------
+    # omit — skip optional module parameters cleanly
+    # ------------------------------------------------------------------
+
+    - name: "omit | Create a user, only set password if defined"
+      vars:
+        new_user: "deploy"
+        new_password: ""   # empty — should be omitted
+      ansible.builtin.user:
+        name: "{{ new_user }}"
+        password: "{{ new_password | default(omit) }}"
+        shell: /bin/bash
+      # 'password' parameter is omitted entirely when new_password is falsy
+      when: false   # skipped — shown for reference only
+
+    - name: "omit | Conditionally include optional config keys"
+      vars:
+        backup_server: ""   # not configured
+      debug:
+        msg: "backup_target would be: {{ backup_server | default(omit) }}"
+
+    # ------------------------------------------------------------------
+    # Type-test filters
+    # ------------------------------------------------------------------
+
+    - name: "bool | Convert string 'true'/'yes'/'1' to boolean"
+      debug:
+        msg:
+          - "{{ 'true'  | bool }}"
+          - "{{ 'yes'   | bool }}"
+          - "{{ '1'     | bool }}"
+          - "{{ 'false' | bool }}"
+          - "{{ 'no'    | bool }}"
+
+    - name: "int | Ensure numeric string is treated as integer"
+      debug:
+        msg: "{{ '42' | int + 8 }}"
+
+    - name: "string | Convert integer to string for concatenation"
+      debug:
+        msg: "Server port: {{ server_a.port | string }}"
+
+    - name: "list | Wrap a scalar in a list when needed"
+      vars:
+        single_host: "web-01"
+      debug:
+        msg: "{{ single_host | list }}"
+      # Wraps a string into a list of characters — use [single_host] instead for a 1-item list
+
+    # ------------------------------------------------------------------
+    # Practical combinations
+    # ------------------------------------------------------------------
+
+    - name: "Safely build config from sparse server dict"
+      debug:
+        msg:
+          - "name   : {{ server_b.name }}"
+          - "port   : {{ server_b.port | default(80) }}"
+          - "tls    : {{ server_b.tls_enabled | default(false) }}"
+          - "scheme : {{ (server_b.tls_enabled | default(false)) | ternary('https', 'http') }}"
+          - "max_con: {{ server_b.max_connections | default(100) }}"
+
+    - name: "Per-server backup status labels"
+      debug:
+        msg: >-
+          {{
+            servers
+            | map(attribute='backup')
+            | map('ternary', 'backup-enabled', 'no-backup')
+            | list
+          }}
+
+    - name: "Flag servers missing monitoring"
+      debug:
+        msg: >-
+          {{
+            servers
+            | rejectattr('monitored')
+            | map(attribute='name')
+            | list
+          }} are NOT monitored
+...

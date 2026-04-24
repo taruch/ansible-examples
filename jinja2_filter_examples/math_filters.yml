@@ -1,0 +1,147 @@
+---
+# Demonstrates Jinja2 math/numeric filters using infrastructure capacity datasets.
+
+- name: Jinja2 math filter examples
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    cpu_usage_pct: 73.867
+    raw_bytes: 1503238553      # ~1.4 GB
+    disk_free_pct: 12.3
+    latency_ms: -4.7           # occasionally negative from clock skew
+
+    server_ram_gb: [32, 128, 64, 16, 8, 4, 256, 32, 64, 128]
+    cpu_readings:  [72.4, 45.1, 91.8, 38.3, 88.6, 61.0, 77.2, 53.9, 95.1, 29.4]
+
+    instance_count: 7
+    total_requests: 1_000_000   # Ansible parses _ as part of int literals (Jinja2 does not, use int)
+
+    replication_factor: 3
+    shard_count: 12
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # abs — absolute value
+    # ------------------------------------------------------------------
+
+    - name: "abs | Correct negative latency reading"
+      debug:
+        msg: "Corrected latency: {{ latency_ms | abs }} ms"
+
+    - name: "abs | Absolute difference between two CPU readings"
+      debug:
+        msg: "Delta: {{ (91.8 - 45.1) | abs | round(1) }} %"
+
+    # ------------------------------------------------------------------
+    # round — rounding control
+    # ------------------------------------------------------------------
+
+    - name: "round | Round CPU usage to 1 decimal place"
+      debug:
+        msg: "CPU: {{ cpu_usage_pct | round(1) }} %"
+
+    - name: "round(0, 'ceil') | Round disk usage UP (conservative capacity estimate)"
+      debug:
+        msg: "Disk used (ceiling): {{ (100 - disk_free_pct) | round(0, 'ceil') | int }} %"
+
+    - name: "round(0, 'floor') | Round RAM down to nearest GB"
+      debug:
+        msg: "Usable RAM floor: {{ (raw_bytes / 1073741824) | round(2) }} GB"
+
+    # ------------------------------------------------------------------
+    # int / float — type conversion
+    # ------------------------------------------------------------------
+
+    - name: "int | Convert float CPU reading to integer for alerting threshold"
+      debug:
+        msg: "CPU (int): {{ cpu_usage_pct | int }}"
+
+    - name: "float | Convert a string percentage from a fact"
+      debug:
+        msg: "{{ '88.5' | float }}"
+
+    - name: "int(base=16) | Hex string to integer (VLAN or port conversion)"
+      debug:
+        msg: "{{ 'FF' | int(base=16) }}"
+
+    # ------------------------------------------------------------------
+    # log / pow / sqrt — advanced math
+    # ------------------------------------------------------------------
+
+    - name: "log | Log2 of shard count (bits needed to address all shards)"
+      debug:
+        msg: "Bits needed: {{ shard_count | log(2) | round(2) }}"
+
+    - name: "pow | Calculate exponential growth (3x replication over 4 generations)"
+      debug:
+        msg: "Copies after 4 generations: {{ replication_factor | pow(4) | int }}"
+
+    - name: "sqrt | Standard deviation approximation from variance"
+      vars:
+        variance: 450.75
+      debug:
+        msg: "Std deviation: {{ variance | sqrt | round(2) }}"
+
+    # ------------------------------------------------------------------
+    # Aggregation on lists
+    # ------------------------------------------------------------------
+
+    - name: "sum | Total RAM across fleet (GB)"
+      debug:
+        msg: "Total fleet RAM: {{ server_ram_gb | sum }} GB"
+
+    - name: "max | Largest RAM instance"
+      debug:
+        msg: "Largest instance: {{ server_ram_gb | max }} GB"
+
+    - name: "min | Smallest RAM instance"
+      debug:
+        msg: "Smallest instance: {{ server_ram_gb | min }} GB"
+
+    - name: "Average CPU reading (sum / count)"
+      debug:
+        msg: "Average CPU: {{ (cpu_readings | sum / cpu_readings | length) | round(1) }} %"
+
+    - name: "Average RAM per server"
+      debug:
+        msg: "Average RAM: {{ (server_ram_gb | sum / server_ram_gb | length) | round(1) }} GB"
+
+    # ------------------------------------------------------------------
+    # Capacity planning calculations
+    # ------------------------------------------------------------------
+
+    - name: "Bytes to GB conversion"
+      debug:
+        msg: "{{ raw_bytes }} bytes = {{ (raw_bytes / 1073741824) | round(2) }} GB"
+
+    - name: "Bytes to MB conversion"
+      debug:
+        msg: "{{ raw_bytes }} bytes = {{ (raw_bytes / 1048576) | round(1) }} MB"
+
+    - name: "Headroom: how many more instances before hitting 80% of total RAM?"
+      vars:
+        total_ram_gb: 1024
+        current_used_gb: 384
+        per_instance_gb: 32
+      debug:
+        msg: >-
+          {{
+            (((total_ram_gb * 0.8) - current_used_gb) / per_instance_gb) | int
+          }} more instances before 80% threshold
+
+    - name: "Percentage used"
+      vars:
+        used: 384
+        total: 1024
+      debug:
+        msg: "Used: {{ ((used / total) * 100) | round(1) }} %"
+
+    - name: "Distribute work: requests per instance"
+      vars:
+        requests: 1000000
+      debug:
+        msg: "{{ (requests / instance_count) | round | int }} requests per instance"
+...

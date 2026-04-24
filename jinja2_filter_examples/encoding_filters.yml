@@ -1,0 +1,148 @@
+---
+# Demonstrates Jinja2 encoding, hashing, and serialization filters.
+
+- name: Jinja2 encoding and serialization filter examples
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    plain_password: "S3cr3tP@ssw0rd!"
+    api_user: "deploy-svc"
+    api_token: "ghp_exampleTokenForDemoPurposes12345"
+
+    server_config:
+      host: "db-01.prod.example.com"
+      port: 5432
+      database: "appdb"
+      ssl: true
+      pool_size: 20
+
+    json_string: '{"host": "web-01", "port": 8080, "healthy": true, "tags": ["prod", "web"]}'
+
+    yaml_string: |
+      host: web-01
+      port: 8080
+      healthy: true
+      tags:
+        - prod
+        - web
+
+    binary_data: "SGVsbG8gZnJvbSBBbnNpYmxlIQ=="   # base64 encoded
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # Base64 encoding / decoding
+    # ------------------------------------------------------------------
+
+    - name: "b64encode | Encode credentials for HTTP Basic Auth header"
+      debug:
+        msg: "Authorization: Basic {{ (api_user ~ ':' ~ api_token) | b64encode }}"
+
+    - name: "b64encode | Encode a config blob for embedding in a secret"
+      debug:
+        msg: "{{ server_config | to_json | b64encode }}"
+
+    - name: "b64decode | Decode incoming base64 data"
+      debug:
+        msg: "{{ binary_data | b64decode }}"
+
+    - name: "b64decode | Decode and parse a base64-encoded JSON secret"
+      vars:
+        encoded_secret: "{{ server_config | to_json | b64encode }}"
+      debug:
+        msg: "{{ encoded_secret | b64decode | from_json }}"
+
+    # ------------------------------------------------------------------
+    # Hashing
+    # ------------------------------------------------------------------
+
+    - name: "hash('sha1') | SHA-1 hash of a string"
+      debug:
+        msg: "{{ plain_password | hash('sha1') }}"
+
+    - name: "hash('sha256') | SHA-256 hash (preferred for integrity checks)"
+      debug:
+        msg: "{{ plain_password | hash('sha256') }}"
+
+    - name: "hash('md5') | MD5 hash (legacy — do not use for security)"
+      debug:
+        msg: "{{ plain_password | hash('md5') }}"
+
+    - name: "hash | Generate a deterministic deploy ID from config content"
+      debug:
+        msg: "deploy-{{ server_config | to_json | hash('sha256') | truncate(12, true, '') }}"
+
+    - name: "password_hash | Bcrypt-style password hash for /etc/shadow"
+      debug:
+        msg: "{{ plain_password | password_hash('sha512') }}"
+
+    # ------------------------------------------------------------------
+    # JSON serialization
+    # ------------------------------------------------------------------
+
+    - name: "to_json | Serialize config dict to compact JSON"
+      debug:
+        msg: "{{ server_config | to_json }}"
+
+    - name: "to_nice_json | Serialize config dict to pretty-printed JSON"
+      debug:
+        msg: "{{ server_config | to_nice_json }}"
+
+    - name: "to_nice_json(indent=2) | Control indentation"
+      debug:
+        msg: "{{ server_config | to_nice_json(indent=2) }}"
+
+    - name: "from_json | Parse JSON string back to a dict"
+      debug:
+        msg: "{{ json_string | from_json }}"
+
+    - name: "from_json + attribute | Access a parsed field directly"
+      debug:
+        msg: "Host is: {{ (json_string | from_json).host }}"
+
+    # ------------------------------------------------------------------
+    # YAML serialization
+    # ------------------------------------------------------------------
+
+    - name: "to_yaml | Serialize config dict to YAML"
+      debug:
+        msg: "{{ server_config | to_yaml }}"
+
+    - name: "to_nice_yaml | Pretty-printed YAML output"
+      debug:
+        msg: "{{ server_config | to_nice_yaml }}"
+
+    - name: "from_yaml | Parse YAML string back to a dict"
+      debug:
+        msg: "{{ yaml_string | from_yaml }}"
+
+    - name: "from_yaml + attribute | Access a parsed field"
+      debug:
+        msg: "Tags: {{ (yaml_string | from_yaml).tags }}"
+
+    # ------------------------------------------------------------------
+    # URL encoding
+    # ------------------------------------------------------------------
+
+    - name: "urlencode | Encode a query string value"
+      debug:
+        msg: "https://api.example.com/search?q={{ 'web server prod' | urlencode }}"
+
+    # ------------------------------------------------------------------
+    # Practical combinations
+    # ------------------------------------------------------------------
+
+    - name: "Round-trip | dict → JSON → base64 → base64decode → from_json"
+      vars:
+        encoded: "{{ server_config | to_json | b64encode }}"
+      debug:
+        msg: "{{ encoded | b64decode | from_json }}"
+
+    - name: "Generate checksum for config drift detection"
+      debug:
+        msg:
+          - "Config hash: {{ server_config | to_json | hash('sha256') }}"
+          - "Use this to detect if config changed between runs"
+...

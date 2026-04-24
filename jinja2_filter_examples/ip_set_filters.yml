@@ -1,0 +1,187 @@
+---
+# Demonstrates Jinja2 set filters (difference, intersect, union,
+# symmetric_difference) using realistic IP address datasets.
+
+- name: Jinja2 set filter examples with IP addresses
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Full address pool for a /24 data-center segment
+    all_addresses:
+      - "10.10.1.1"
+      - "10.10.1.2"
+      - "10.10.1.3"
+      - "10.10.1.4"
+      - "10.10.1.5"
+      - "10.10.1.6"
+      - "10.10.1.7"
+      - "10.10.1.8"
+      - "10.10.1.9"
+      - "10.10.1.10"
+      - "10.10.1.11"
+      - "10.10.1.12"
+      - "10.10.1.13"
+      - "10.10.1.14"
+      - "10.10.1.15"
+      - "10.10.1.16"
+      - "10.10.1.17"
+      - "10.10.1.18"
+      - "10.10.1.19"
+      - "10.10.1.20"
+
+    # Addresses currently assigned to production servers
+    production_addresses:
+      - "10.10.1.1"
+      - "10.10.1.2"
+      - "10.10.1.3"
+      - "10.10.1.4"
+      - "10.10.1.5"
+      - "10.10.1.10"
+      - "10.10.1.11"
+      - "10.10.1.12"
+
+    # Addresses flagged by the security team (known bad actors / blocked)
+    blocked_addresses:
+      - "10.10.1.5"
+      - "10.10.1.6"
+      - "10.10.1.13"
+      - "10.10.1.14"
+      - "10.10.1.19"
+      - "10.10.1.20"
+
+    # Addresses reserved for infrastructure (gateways, DNS, NTP, etc.)
+    reserved_addresses:
+      - "10.10.1.1"
+      - "10.10.1.2"
+      - "10.10.1.18"
+      - "10.10.1.19"
+      - "10.10.1.20"
+
+    # Addresses currently in a firewall allowlist
+    firewall_allowlist:
+      - "10.10.1.1"
+      - "10.10.1.3"
+      - "10.10.1.5"
+      - "10.10.1.7"
+      - "10.10.1.9"
+      - "10.10.1.11"
+      - "10.10.1.13"
+      - "10.10.1.15"
+      - "10.10.1.17"
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # difference — addresses in A that are NOT in B
+    # ------------------------------------------------------------------
+
+    - name: "difference | Available addresses (all minus production)"
+      debug:
+        msg: "{{ all_addresses | difference(production_addresses) | sort }}"
+      # Which IPs can still be assigned?
+
+    - name: "difference | Production servers NOT blocked"
+      debug:
+        msg: "{{ production_addresses | difference(blocked_addresses) | sort }}"
+      # Safe production hosts — remove any that security flagged
+
+    - name: "difference | Blocked addresses NOT yet in production (rogue IPs)"
+      debug:
+        msg: "{{ blocked_addresses | difference(production_addresses) | sort }}"
+      # These are blocked but also not assigned — unknown/rogue activity
+
+    - name: "difference | Addresses allowed by firewall but NOT in production"
+      debug:
+        msg: "{{ firewall_allowlist | difference(production_addresses) | sort }}"
+      # Firewall rules that may be stale — no prod host behind them
+
+    # ------------------------------------------------------------------
+    # intersect — addresses present in BOTH lists
+    # ------------------------------------------------------------------
+
+    - name: "intersect | Production servers that are also blocked (critical)"
+      debug:
+        msg: "{{ production_addresses | intersect(blocked_addresses) | sort }}"
+      # These need immediate attention — active servers on the block list
+
+    - name: "intersect | Production servers also in the firewall allowlist"
+      debug:
+        msg: "{{ production_addresses | intersect(firewall_allowlist) | sort }}"
+      # Production hosts with confirmed firewall access
+
+    - name: "intersect | Blocked addresses that are also reserved (conflict)"
+      debug:
+        msg: "{{ blocked_addresses | intersect(reserved_addresses) | sort }}"
+      # Reserved infra IPs that got flagged — investigate immediately
+
+    # ------------------------------------------------------------------
+    # union — all unique addresses across both lists
+    # ------------------------------------------------------------------
+
+    - name: "union | All addresses requiring attention (production + blocked)"
+      debug:
+        msg: "{{ production_addresses | union(blocked_addresses) | sort }}"
+
+    - name: "union | Full managed address space (production + reserved)"
+      debug:
+        msg: "{{ production_addresses | union(reserved_addresses) | sort }}"
+
+    # ------------------------------------------------------------------
+    # symmetric_difference — addresses in EITHER list but NOT both
+    # ------------------------------------------------------------------
+
+    - name: "symmetric_difference | Addresses in allowlist XOR production (mismatches)"
+      debug:
+        msg: "{{ firewall_allowlist | symmetric_difference(production_addresses) | sort }}"
+      # Hosts in one list but not the other — likely misconfigured rules
+
+    - name: "symmetric_difference | Blocked XOR reserved (non-overlapping flagged IPs)"
+      debug:
+        msg: "{{ blocked_addresses | symmetric_difference(reserved_addresses) | sort }}"
+
+    # ------------------------------------------------------------------
+    # Chained filters — combining multiple operations
+    # ------------------------------------------------------------------
+
+    - name: "chained | Assignable addresses (all minus production minus reserved minus blocked)"
+      debug:
+        msg: >-
+          {{
+            all_addresses
+            | difference(production_addresses)
+            | difference(reserved_addresses)
+            | difference(blocked_addresses)
+            | sort
+          }}
+      # The true pool of free, safe, non-reserved IPs
+
+    - name: "chained | Production servers needing firewall rule review (in prod, not in allowlist, not blocked)"
+      debug:
+        msg: >-
+          {{
+            production_addresses
+            | difference(firewall_allowlist)
+            | difference(blocked_addresses)
+            | sort
+          }}
+      # Active servers with no firewall allowlist entry and not blocked — gap in rules
+
+    # ------------------------------------------------------------------
+    # Summary report
+    # ------------------------------------------------------------------
+
+    - name: Summary
+      debug:
+        msg:
+          - "Total pool size       : {{ all_addresses | length }}"
+          - "Production assigned   : {{ production_addresses | length }}"
+          - "Blocked               : {{ blocked_addresses | length }}"
+          - "Reserved              : {{ reserved_addresses | length }}"
+          - "Firewall allowlist    : {{ firewall_allowlist | length }}"
+          - "---"
+          - "Available to assign   : {{ all_addresses | difference(production_addresses) | difference(reserved_addresses) | difference(blocked_addresses) | length }}"
+          - "Production + blocked  : {{ production_addresses | intersect(blocked_addresses) | sort }}"
+          - "Reserved + blocked    : {{ reserved_addresses | intersect(blocked_addresses) | sort }}"
+...

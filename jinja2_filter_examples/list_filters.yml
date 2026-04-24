@@ -1,0 +1,214 @@
+---
+# Demonstrates Jinja2 list/sequence filters using server inventory and metric datasets.
+
+- name: Jinja2 list filter examples
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    servers:
+      - name: "web-01"
+        env: "prod"
+        cpu_cores: 8
+        ram_gb: 32
+        tags: ["web", "load-balanced", "monitored"]
+      - name: "web-02"
+        env: "prod"
+        cpu_cores: 8
+        ram_gb: 32
+        tags: ["web", "load-balanced"]
+      - name: "db-01"
+        env: "prod"
+        cpu_cores: 16
+        ram_gb: 128
+        tags: ["database", "monitored"]
+      - name: "db-02"
+        env: "prod"
+        cpu_cores: 16
+        ram_gb: 64
+        tags: ["database"]
+      - name: "cache-01"
+        env: "staging"
+        cpu_cores: 4
+        ram_gb: 16
+        tags: ["cache", "monitored"]
+      - name: "api-01"
+        env: "staging"
+        cpu_cores: 4
+        ram_gb: 8
+        tags: ["api"]
+      - name: "worker-01"
+        env: "dev"
+        cpu_cores: 2
+        ram_gb: 4
+        tags: ["worker"]
+      - name: "worker-02"
+        env: "dev"
+        cpu_cores: 2
+        ram_gb: 4
+        tags: ["worker"]
+
+    cpu_readings: [72, 45, 91, 38, 88, 61, 77, 53, 95, 29, 84, 66]
+
+    nested_groups:
+      - ["web-01", "web-02"]
+      - ["db-01", "db-02"]
+      - ["cache-01"]
+      - ["api-01", "worker-01", "worker-02"]
+
+    mixed_list: ["web-01", "db-01", "web-01", "api-01", "db-01", "cache-01", "web-01"]
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # Extracting values — map
+    # ------------------------------------------------------------------
+
+    - name: "map(attribute) | Extract all server names"
+      debug:
+        msg: "{{ servers | map(attribute='name') | list }}"
+
+    - name: "map(attribute) | Extract RAM values for capacity planning"
+      debug:
+        msg: "{{ servers | map(attribute='ram_gb') | list }}"
+
+    - name: "map('upper') | Uppercase all server names"
+      debug:
+        msg: "{{ servers | map(attribute='name') | map('upper') | list }}"
+
+    # ------------------------------------------------------------------
+    # Filtering — select / reject / selectattr / rejectattr
+    # ------------------------------------------------------------------
+
+    - name: "selectattr | Prod servers only"
+      debug:
+        msg: "{{ servers | selectattr('env', 'equalto', 'prod') | map(attribute='name') | list }}"
+
+    - name: "rejectattr | Exclude dev servers"
+      debug:
+        msg: "{{ servers | rejectattr('env', 'equalto', 'dev') | map(attribute='name') | list }}"
+
+    - name: "selectattr | Servers with 16+ CPU cores"
+      debug:
+        msg: "{{ servers | selectattr('cpu_cores', 'ge', 16) | map(attribute='name') | list }}"
+
+    - name: "selectattr | Servers with more than 32 GB RAM"
+      debug:
+        msg: "{{ servers | selectattr('ram_gb', 'gt', 32) | map(attribute='name') | list }}"
+
+    - name: "select | CPU readings above 80% (high load)"
+      debug:
+        msg: "{{ cpu_readings | select('gt', 80) | list }}"
+
+    - name: "reject | CPU readings below 50% (filter out idle)"
+      debug:
+        msg: "{{ cpu_readings | reject('lt', 50) | list }}"
+
+    # ------------------------------------------------------------------
+    # Sorting
+    # ------------------------------------------------------------------
+
+    - name: "sort | Sort CPU readings ascending"
+      debug:
+        msg: "{{ cpu_readings | sort }}"
+
+    - name: "sort(reverse=true) | Sort CPU readings descending"
+      debug:
+        msg: "{{ cpu_readings | sort(reverse=true) }}"
+
+    - name: "sort(attribute) | Sort servers by RAM (ascending)"
+      debug:
+        msg: "{{ servers | sort(attribute='ram_gb') | map(attribute='name') | list }}"
+
+    - name: "sort(attribute, reverse) | Sort servers by CPU (descending)"
+      debug:
+        msg: "{{ servers | sort(attribute='cpu_cores', reverse=true) | map(attribute='name') | list }}"
+
+    # ------------------------------------------------------------------
+    # Aggregation
+    # ------------------------------------------------------------------
+
+    - name: "min | Lowest CPU reading"
+      debug:
+        msg: "{{ cpu_readings | min }}"
+
+    - name: "max | Highest CPU reading"
+      debug:
+        msg: "{{ cpu_readings | max }}"
+
+    - name: "sum | Total RAM across all servers (GB)"
+      debug:
+        msg: "{{ servers | map(attribute='ram_gb') | sum }} GB"
+
+    - name: "sum | Total CPU cores across prod servers"
+      debug:
+        msg: "{{ servers | selectattr('env', 'equalto', 'prod') | map(attribute='cpu_cores') | sum }} cores"
+
+    # ------------------------------------------------------------------
+    # Deduplication and flattening
+    # ------------------------------------------------------------------
+
+    - name: "unique | Remove duplicate entries from mixed list"
+      debug:
+        msg: "{{ mixed_list | unique | list }}"
+
+    - name: "flatten | Flatten nested group lists into one list"
+      debug:
+        msg: "{{ nested_groups | flatten }}"
+
+    - name: "flatten(levels=1) | Flatten one level only"
+      debug:
+        msg: "{{ nested_groups | flatten(levels=1) }}"
+
+    # ------------------------------------------------------------------
+    # Slicing and chunking
+    # ------------------------------------------------------------------
+
+    - name: "first | First server in the list"
+      debug:
+        msg: "{{ servers | map(attribute='name') | first }}"
+
+    - name: "last | Last server in the list"
+      debug:
+        msg: "{{ servers | map(attribute='name') | last }}"
+
+    - name: "batch | Group servers into batches of 3 for rolling updates"
+      debug:
+        msg: "{{ servers | map(attribute='name') | list | batch(3) | list }}"
+
+    - name: "slice | Split server list into 3 equal columns for a report"
+      debug:
+        msg: "{{ servers | map(attribute='name') | list | slice(3) | list }}"
+
+    # ------------------------------------------------------------------
+    # Counting and testing
+    # ------------------------------------------------------------------
+
+    - name: "length | Total number of servers"
+      debug:
+        msg: "{{ servers | length }} servers"
+
+    - name: "count per env | Prod vs staging vs dev"
+      debug:
+        msg:
+          - "prod   : {{ servers | selectattr('env', 'equalto', 'prod')    | list | length }}"
+          - "staging: {{ servers | selectattr('env', 'equalto', 'staging') | list | length }}"
+          - "dev    : {{ servers | selectattr('env', 'equalto', 'dev')     | list | length }}"
+
+    - name: "map + flatten | All unique tags across all servers"
+      debug:
+        msg: "{{ servers | map(attribute='tags') | flatten | unique | sort | list }}"
+
+    # ------------------------------------------------------------------
+    # Reversing and randomizing
+    # ------------------------------------------------------------------
+
+    - name: "reverse | Reverse the server list"
+      debug:
+        msg: "{{ servers | map(attribute='name') | list | reverse | list }}"
+
+    - name: "shuffle | Randomize server order (e.g. for canary selection)"
+      debug:
+        msg: "{{ servers | map(attribute='name') | list | shuffle }}"
+...

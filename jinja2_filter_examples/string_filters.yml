@@ -1,0 +1,153 @@
+---
+# Demonstrates Jinja2 string filters using server/host name and log message datasets.
+
+- name: Jinja2 string filter examples
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    server_name: "  web-Server-01.PROD.example.com  "
+
+    hostnames:
+      - "web-server-01.prod.example.com"
+      - "db-server-02.prod.example.com"
+      - "cache-server-01.dev.example.com"
+      - "api-gateway.staging.example.com"
+      - "worker-node-03.prod.example.com"
+
+    log_message: "ERROR: Connection to 10.10.1.5 timed out after 30 seconds. Retrying..."
+
+    description: "This is a very long description of a server role that goes into great detail about what the server does and why it exists in the environment."
+
+    csv_tags: "web,load-balanced,monitored,prod,tier1"
+
+    template_string: "Hello, my name is NAME and I work in DEPARTMENT."
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # Case filters
+    # ------------------------------------------------------------------
+
+    - name: "upper | Uppercase hostname"
+      debug:
+        msg: "{{ server_name | trim | upper }}"
+
+    - name: "lower | Lowercase hostname"
+      debug:
+        msg: "{{ server_name | trim | lower }}"
+
+    - name: "title | Title-case hostname"
+      debug:
+        msg: "{{ server_name | trim | title }}"
+
+    - name: "capitalize | Capitalize first letter only"
+      debug:
+        msg: "{{ log_message | lower | capitalize }}"
+
+    - name: "swapcase | Swap case of every character"
+      debug:
+        msg: "{{ 'WebServer01' | swapcase }}"
+
+    # ------------------------------------------------------------------
+    # Whitespace and padding filters
+    # ------------------------------------------------------------------
+
+    - name: "trim | Strip leading and trailing whitespace"
+      debug:
+        msg: "'{{ server_name | trim }}'"
+
+    - name: "center | Center a string in a fixed width field"
+      debug:
+        msg: "{{ server_name | trim | center(60) }}"
+
+    - name: "ljust | Left-justify with padding"
+      debug:
+        msg: "{{ server_name | trim | ljust(50, '.') }}"
+
+    - name: "rjust | Right-justify with padding"
+      debug:
+        msg: "{{ server_name | trim | rjust(50, '.') }}"
+
+    # ------------------------------------------------------------------
+    # Search and replace filters
+    # ------------------------------------------------------------------
+
+    - name: "replace | Replace 'prod' with 'dr' in all hostnames"
+      debug:
+        msg: "{{ hostnames | map('replace', 'prod', 'dr') | list }}"
+
+    - name: "replace | Substitute placeholders in template string"
+      debug:
+        msg: "{{ template_string | replace('NAME', 'Alice') | replace('DEPARTMENT', 'Platform Engineering') }}"
+
+    # ------------------------------------------------------------------
+    # Splitting and joining
+    # ------------------------------------------------------------------
+
+    - name: "split | Split FQDN into parts"
+      debug:
+        msg: "{{ 'web-server-01.prod.example.com' | split('.') }}"
+
+    - name: "join | Rebuild FQDN from parts"
+      debug:
+        msg: "{{ ['web-server-01', 'prod', 'example', 'com'] | join('.') }}"
+
+    - name: "split + join | Extract environment from FQDN"
+      debug:
+        msg: "{{ 'web-server-01.prod.example.com' | split('.') | first | split('-') | last }}"
+      # Extracts '01' — combine with index for the environment field instead:
+
+    - name: "split | Extract environment segment from FQDN"
+      debug:
+        msg: "{{ 'web-server-01.prod.example.com' | split('.') | list }}"
+
+    - name: "split CSV tags into a list"
+      debug:
+        msg: "{{ csv_tags | split(',') }}"
+
+    # ------------------------------------------------------------------
+    # Substring and truncation
+    # ------------------------------------------------------------------
+
+    - name: "truncate | Shorten long description for a report column"
+      debug:
+        msg: "{{ description | truncate(60) }}"
+
+    - name: "truncate | No ellipsis, word boundary"
+      debug:
+        msg: "{{ description | truncate(60, True, '') }}"
+
+    - name: "wordwrap | Wrap description at 40 characters"
+      debug:
+        msg: "{{ description | wordwrap(40) }}"
+
+    # ------------------------------------------------------------------
+    # Testing / inspection
+    # ------------------------------------------------------------------
+
+    - name: "startswith check via match (prod servers only)"
+      debug:
+        msg: "{{ hostnames | select('match', '.*\\.prod\\..*') | list }}"
+
+    - name: "length | Count characters in server name"
+      debug:
+        msg: "{{ server_name | trim | length }}"
+
+    - name: "count | Count occurrences of 'server' in hostnames"
+      debug:
+        msg: "{{ hostnames | select('search', 'server') | list | length }} hostnames contain 'server'"
+
+    # ------------------------------------------------------------------
+    # Format and indent
+    # ------------------------------------------------------------------
+
+    - name: "format | Build a connection string"
+      debug:
+        msg: "{{ 'postgresql://%s:%s@%s:%d/%s' | format('admin', 'secret', 'db-server-02.prod.example.com', 5432, 'appdb') }}"
+
+    - name: "indent | Indent multiline output for embedding in config"
+      debug:
+        msg: "{{ description | wordwrap(40) | indent(4) }}"
+...

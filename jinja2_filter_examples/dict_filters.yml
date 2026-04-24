@@ -1,0 +1,198 @@
+---
+# Demonstrates Jinja2 dict filters using server configuration and variable datasets.
+
+- name: Jinja2 dict filter examples
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    server_defaults:
+      ntp_server: "ntp.prod.example.com"
+      dns_server: "10.10.1.2"
+      log_level: "info"
+      max_connections: 100
+      timeout: 30
+
+    server_overrides:
+      log_level: "debug"
+      max_connections: 500
+      backup_enabled: true
+
+    db_config:
+      host: "db-01.prod.example.com"
+      port: 5432
+      name: "appdb"
+      user: "app_user"
+      ssl_mode: "require"
+
+    server_inventory:
+      web-01:
+        env: prod
+        role: web
+        ram_gb: 32
+      db-01:
+        env: prod
+        role: database
+        ram_gb: 128
+      cache-01:
+        env: staging
+        role: cache
+        ram_gb: 16
+
+    # Already in items format (list of {key, value} dicts)
+    extra_vars_list:
+      - key: "deploy_version"
+        value: "2.4.1"
+      - key: "feature_flag"
+        value: "enabled"
+      - key: "region"
+        value: "us-east-1"
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # combine — merge dicts (overrides win)
+    # ------------------------------------------------------------------
+
+    - name: "combine | Merge server defaults with per-host overrides"
+      debug:
+        msg: "{{ server_defaults | combine(server_overrides) }}"
+      # server_overrides values take precedence
+
+    - name: "combine | Build final DB connection string from parts"
+      debug:
+        msg: >-
+          {{
+            db_config | combine({
+              'password': 'REDACTED',
+              'connect_timeout': 10
+            })
+          }}
+
+    - name: "combine(recursive=true) | Deep merge nested dicts"
+      vars:
+        base:
+          app:
+            port: 8080
+            workers: 4
+          logging:
+            level: info
+        override:
+          app:
+            workers: 16
+          logging:
+            level: debug
+            file: /var/log/app.log
+      debug:
+        msg: "{{ base | combine(override, recursive=True) }}"
+
+    # ------------------------------------------------------------------
+    # dict2items — convert dict to list of {key, value} pairs
+    # ------------------------------------------------------------------
+
+    - name: "dict2items | Iterate over DB config key/value pairs"
+      debug:
+        msg: "{{ db_config | dict2items }}"
+
+    - name: "dict2items | Custom key/value field names"
+      debug:
+        msg: "{{ db_config | dict2items(key_name='param', value_name='setting') }}"
+
+    - name: "dict2items + selectattr | Filter config keys that contain 'server'"
+      debug:
+        msg: >-
+          {{
+            server_defaults
+            | dict2items
+            | selectattr('key', 'search', 'server')
+            | list
+          }}
+
+    - name: "dict2items + map | Extract just the keys"
+      debug:
+        msg: "{{ db_config | dict2items | map(attribute='key') | list }}"
+
+    - name: "dict2items + rejectattr | Remove sensitive keys before logging"
+      debug:
+        msg: >-
+          {{
+            db_config
+            | dict2items
+            | rejectattr('key', 'in', ['user', 'ssl_mode'])
+            | list
+          }}
+
+    # ------------------------------------------------------------------
+    # items2dict — convert list of {key, value} pairs back to a dict
+    # ------------------------------------------------------------------
+
+    - name: "items2dict | Rebuild dict from key/value list"
+      debug:
+        msg: "{{ extra_vars_list | items2dict }}"
+
+    - name: "items2dict | Round-trip: dict → items → filter → dict"
+      debug:
+        msg: >-
+          {{
+            server_defaults
+            | dict2items
+            | rejectattr('key', 'equalto', 'timeout')
+            | list
+            | items2dict
+          }}
+      # Removes 'timeout' key from the dict
+
+    # ------------------------------------------------------------------
+    # keys / values
+    # ------------------------------------------------------------------
+
+    - name: "keys | List all DB config parameter names"
+      debug:
+        msg: "{{ db_config | dict2items | map(attribute='key') | list }}"
+
+    - name: "values | List all DB config values"
+      debug:
+        msg: "{{ db_config | dict2items | map(attribute='value') | list }}"
+
+    # ------------------------------------------------------------------
+    # Working with nested dicts (server_inventory)
+    # ------------------------------------------------------------------
+
+    - name: "dict2items | List all servers with their configs"
+      debug:
+        msg: "{{ server_inventory | dict2items(key_name='hostname', value_name='config') }}"
+
+    - name: "dict2items + selectattr | Prod servers only"
+      debug:
+        msg: >-
+          {{
+            server_inventory
+            | dict2items(key_name='hostname', value_name='config')
+            | selectattr('config.env', 'equalto', 'prod')
+            | map(attribute='hostname')
+            | list
+          }}
+
+    - name: "dict2items | Total RAM across all servers"
+      debug:
+        msg: >-
+          {{
+            server_inventory
+            | dict2items(key_name='hostname', value_name='config')
+            | map(attribute='config')
+            | map(attribute='ram_gb')
+            | sum
+          }} GB total
+
+    # ------------------------------------------------------------------
+    # Building dicts dynamically
+    # ------------------------------------------------------------------
+
+    - name: "zip_longest trick | Build dict from two parallel lists"
+      vars:
+        keys: ["host", "port", "db"]
+        values: ["db-01.prod.example.com", 5432, "appdb"]
+      debug:
+        msg: "{{ dict(keys | zip(values)) }}"
+...
