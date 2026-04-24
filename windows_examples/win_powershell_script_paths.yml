@@ -1,0 +1,222 @@
+---
+# Demonstrates the different ways to run PowerShell scripts on Windows hosts
+# using ansible.windows.win_powershell, ansible.windows.win_shell, and
+# ansible.builtin.script — and explains how each resolves script paths.
+#
+# win_powershell has TWO mutually exclusive parameters for referencing a script:
+#
+#   script (string)
+#     - Inline PowerShell code, OR a path to a file.
+#     - If the path exists on the CONTROLLER, Ansible reads it and sends it
+#       inline. The remote host never sees the path.
+#     - If the path does NOT exist on the controller, Ansible treats it as a
+#       path on the REMOTE host.
+#     - No remote_src support — controller vs remote is auto-detected.
+#
+#   path (string) — added in ansible.windows 3.1.0
+#     - Always a path to a script file (never inline code).
+#     - remote_src=False (default): path is resolved on the CONTROLLER.
+#     - remote_src=True:           path is resolved on the REMOTE host.
+#     - Mutually exclusive with script.
+#
+# RELATIVE PATHS with path + remote_src=True + chdir:
+#   Despite the docs stating "if relative paths are used then set this option",
+#   testing confirms chdir does NOT help resolve the path parameter — the module
+#   fails to locate the script before chdir is applied. Use an absolute path
+#   with the path parameter, or the inline & invocation workaround (Option 7b).
+#
+# TEST RESULTS (tested against Windows Server 2019 Datacenter, AWS EC2,
+#               ansible.windows collection in apd-ee-25:latest EE):
+#
+#   Option 1  — PASS   Inline script block
+#   Option 2  — PASS   Controller file via script parameter
+#   Option 3  — FAIL   Controller file via path + remote_src=False
+#                       Bug: DataLoader has no attribute get_text_file_contents
+#                       (collection bug in EE — use Option 2 instead)
+#   Option 4  — PASS   ansible.builtin.script
+#   Option 5  — PASS   Remote absolute path via path + remote_src=True
+#   Option 6  — FAIL   Remote relative path via path + chdir
+#                       "Could not find or access '.\report.ps1' on Windows host"
+#                       chdir does NOT resolve the path parameter despite docs
+#   Option 7  — PASS   Remote absolute path with chdir (chdir affects execution)
+#   Option 7b — PASS   Relative path via inline & invocation + chdir (workaround)
+#   Option 8  — PASS   win_shell with absolute path
+#   Output    — PASS   Structured output captured via result.output[0]
+#
+# Requirements:
+#   - WinRM configured on target Windows hosts
+#   - ansible.windows >= 1.0.0 (>= 3.1.0 for the path parameter)
+#   - secrets.yml with ansible_user / ansible_password (see secrets.yml)
+#   - C:\scripts\report.ps1 deployed on the remote host for options 5-8
+#     (run setup_test_env.yml to deploy it)
+
+- name: win_powershell script path examples
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars:
+    scripts_dir: 'C:\scripts'
+    script_name: 'report.ps1'
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # Option 1: Inline script block (script parameter)
+    # ------------------------------------------------------------------
+    # Write PowerShell directly in the task. No file required anywhere.
+    # Best for: short scripts, scripts built dynamically from variables.
+    # TEST RESULT: PASS
+
+    - name: "Option 1 | Inline script block"
+      ansible.windows.win_powershell:
+        script: |
+          $hostname = $env:COMPUTERNAME
+          Write-Output "Running on: $hostname"
+          Write-Output "Current directory: $(Get-Location)"
+
+    # ------------------------------------------------------------------
+    # Option 2: Controller-side file — script parameter (auto-detected)
+    # ------------------------------------------------------------------
+    # Ansible checks if the path exists on the controller. If it does,
+    # it reads the file and sends its contents inline — the remote host
+    # never sees the file path, just the script content.
+    # Best for: scripts maintained in your playbook project repo.
+    # TEST RESULT: PASS
+
+    - name: "Option 2 | Controller-side file via script parameter"
+      ansible.windows.win_powershell:
+        script: files/helloworld.ps1
+      # Path resolved relative to the playbook directory on the controller.
+
+    # ------------------------------------------------------------------
+    # Option 3: Controller-side file — path parameter (explicit)
+    # ------------------------------------------------------------------
+    # path + remote_src=False (default) explicitly states the file lives
+    # on the controller. Equivalent to Option 2 but more readable intent.
+    # Added in ansible.windows 3.1.0.
+    # TEST RESULT: FAIL — collection bug in apd-ee-25:latest
+    #   "DataLoader has no attribute get_text_file_contents"
+    #   Use Option 2 (script parameter) until the collection is updated.
+
+    - name: "Option 3 | Controller-side file via path parameter (remote_src=False)"
+      ansible.windows.win_powershell:
+        path: files/helloworld.ps1
+        remote_src: false
+      ignore_errors: true
+
+    # ------------------------------------------------------------------
+    # Option 4: ansible.builtin.script (always copies from controller)
+    # ------------------------------------------------------------------
+    # Explicitly copies the file from the controller to the remote host,
+    # executes it, then removes it. More explicit than win_powershell's
+    # auto-detection, but doesn't return structured output objects.
+    # Best for: when you want clear copy-and-run semantics.
+    # TEST RESULT: PASS
+
+    - name: "Option 4 | ansible.builtin.script (explicit copy from controller)"
+      ansible.builtin.script:
+        cmd: files/helloworld.ps1
+        chdir: 'C:\Windows\Temp'
+
+    # ------------------------------------------------------------------
+    # Option 5: Remote script — path parameter, absolute path
+    # ------------------------------------------------------------------
+    # path + remote_src=True tells Ansible the script is already on the
+    # remote host. Absolute paths are unambiguous and always reliable.
+    # Best for: scripts deployed separately (by an installer, GPO, etc.)
+    # TEST RESULT: PASS
+
+    - name: "Option 5 | Remote script — path + remote_src=True, absolute path"
+      ansible.windows.win_powershell:
+        path: 'C:\scripts\report.ps1'
+        remote_src: true
+
+    # ------------------------------------------------------------------
+    # Option 6: Remote script — path parameter with relative path + chdir
+    # ------------------------------------------------------------------
+    # The docs state chdir should resolve relative paths: "if relative
+    # paths are used then set this option." Testing shows this does NOT
+    # work — the module cannot locate the script before chdir is applied.
+    # TEST RESULT: FAIL — "Could not find or access '.\report.ps1' on Windows host"
+    #   Use Option 5 (absolute path) or Option 7b (inline & invocation) instead.
+
+    - name: "Option 6 | Remote script — relative path with chdir"
+      ansible.windows.win_powershell:
+        path: '.\report.ps1'
+        remote_src: true
+        chdir: 'C:\scripts'
+      ignore_errors: true
+
+    # ------------------------------------------------------------------
+    # Option 7: Remote script — absolute path with chdir
+    # ------------------------------------------------------------------
+    # chdir does NOT help locate the script, but it does set the working
+    # directory during execution — useful if the script itself uses
+    # relative paths internally.
+    # TEST RESULT: PASS
+
+    - name: "Option 7 | Remote script — absolute path with chdir"
+      ansible.windows.win_powershell:
+        path: 'C:\scripts\report.ps1'
+        remote_src: true
+        chdir: 'C:\scripts'
+
+    # ------------------------------------------------------------------
+    # Option 7b: Relative path workaround — inline & invocation
+    # ------------------------------------------------------------------
+    # Use an inline script block that invokes the script with &. By the
+    # time & executes, chdir has set the working directory, so the
+    # relative path resolves correctly. This is the correct workaround
+    # when an absolute path is not practical.
+    # TEST RESULT: PASS
+
+    - name: "Option 7b | Remote script — relative path via inline & invocation"
+      ansible.windows.win_powershell:
+        chdir: 'C:\scripts'
+        script: |
+          & ".\report.ps1" -OutputPath "C:\reports" -Verbose
+
+    # ------------------------------------------------------------------
+    # Option 8: win_shell with absolute path
+    # ------------------------------------------------------------------
+    # Simpler than win_powershell but only returns stdout/stderr strings
+    # and rc — no structured PowerShell output objects.
+    # TEST RESULT: PASS
+
+    - name: "Option 8 | win_shell with absolute path"
+      ansible.windows.win_shell: 'C:\scripts\report.ps1'
+      args:
+        chdir: 'C:\scripts'
+        executable: powershell.exe
+
+    # ------------------------------------------------------------------
+    # Capturing and using output
+    # ------------------------------------------------------------------
+    # win_powershell returns structured output alongside string output.
+    # TEST RESULT: PASS — output[0].Hostname and output[0].OS populated
+    #   correctly from PSCustomObject pipeline output.
+    #
+    # win_powershell result keys:
+    #   output    — PowerShell pipeline objects (PSCustomObject, etc.)
+    #   host_out  — Write-Output / Write-Host string output
+    #   host_err  — Write-Error string output
+    #   error     — terminating error objects
+    # NOTE: stdout_lines is a win_shell/command attribute — does not exist here
+
+    - name: "Capture structured output from inline script"
+      ansible.windows.win_powershell:
+        script: |
+          [PSCustomObject]@{
+            Hostname = $env:COMPUTERNAME
+            OS       = (Get-WmiObject Win32_OperatingSystem).Caption
+            Uptime   = (Get-Date) - (gcim Win32_OperatingSystem).LastBootUpTime
+          }
+      register: system_info
+
+    - name: "Display captured output"
+      ansible.builtin.debug:
+        msg:
+          - "Hostname : {{ system_info.output[0].Hostname }}"
+          - "OS       : {{ system_info.output[0].OS }}"
+          - "host_out : {{ system_info.host_out }}"
+...

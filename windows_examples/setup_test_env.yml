@@ -1,0 +1,24 @@
+---
+- name: Set up remote test environment for win_powershell_script_paths tests
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+  tasks:
+    - name: Create C:\scripts directory
+      ansible.windows.win_file:
+        path: 'C:\scripts'
+        state: directory
+
+    - name: Copy report.ps1 to remote
+      ansible.windows.win_copy:
+        src: files/report.ps1
+        dest: 'C:\scripts\report.ps1'
+
+    - name: Verify script is in place
+      ansible.windows.win_stat:
+        path: 'C:\scripts\report.ps1'
+      register: stat
+
+    - name: Confirm
+      ansible.builtin.debug:
+        msg: "C:\\scripts\\report.ps1 exists: {{ stat.stat.exists }}"
+...
