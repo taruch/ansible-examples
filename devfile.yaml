@@ -1,12 +1,17 @@
 schemaVersion: 2.3.0
 metadata:
   name: ansible-development # change this name per workspace
+attributes:
+  # This tells Dev Spaces to configure the pod for nested container support
+  container-runtime: podman
 components:
-  - container:
+  - name: ansible-tooling
+    container:
       args: ['tail', '-f', '/dev/null']
-      image: 'ghcr.io/ansible/community-ansible-dev-tools:latest' # change for your EE
-      memoryRequest: 256M
+      # image: 'ghcr.io/ansible/community-ansible-dev-tools:latest' # change for your EE
+      image: registry.redhat.io/ansible-automation-platform-25/ansible-devspaces-rhel9:latest
+      memoryRequest: 512M
       memoryLimit: 6Gi
       cpuRequest: 250m
       cpuLimit: 2000m
-    name: ansible
+
