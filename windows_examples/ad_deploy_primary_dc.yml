@@ -1,0 +1,81 @@
+---
+- name: Deploy Active Directory forest and primary domain controller
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars_files:
+    - secrets.yml
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+  tasks:
+    # --- STEP 1: Install required Windows features ---
+    - name: Install AD Domain Services and DNS Server features
+      ansible.windows.win_feature:
+        name:
+          - AD-Domain-Services
+          - DNS
+        state: present
+        include_management_tools: true
+        include_sub_features: true
+
+    # --- STEP 2: Promote server to domain controller and create new forest ---
+    - name: Promote server to domain controller
+      microsoft.ad.domain:
+        dns_domain_name: "{{ domain_name }}"
+        domain_netbios_name: "{{ domain_netbios_name }}"
+        safe_mode_password: "{{ safe_mode_password }}"
+        state: domain_controller
+      register: ad_promotion
+
+    # --- STEP 3: Reboot after DC promotion ---
+    # AD promotion always requires a reboot; post_reboot_delay gives LSASS and
+    # ADWS time to fully initialize before Ansible attempts to reconnect.
+    - name: Reboot the server after DC promotion
+      ansible.windows.win_reboot:
+        reboot_timeout: 900   # DC promotion reboots can be slow
+        connect_timeout: 60
+        post_reboot_delay: 60 # Wait for AD services to start before reconnecting
+
+    # --- STEP 4: Wait for AD services to become available ---
+    # Port 9389 (ADWS) is a more reliable readiness signal than LDAP (389)
+    # because it confirms the ActiveDirectory PowerShell module can connect.
+    - name: Wait for AD Web Services (port 9389) to become available
+      ansible.builtin.wait_for:
+        host: "{{ inventory_hostname }}"
+        port: 9389
+        timeout: 300
+        delay: 30
+      delegate_to: localhost
+
+    - name: Wait for LDAP (port 389) to become available
+      ansible.builtin.wait_for:
+        host: "{{ inventory_hostname }}"
+        port: 389
+        timeout: 120
+        delay: 10
+      delegate_to: localhost
+
+    # --- STEP 5: Verify the domain is healthy ---
+    - name: Verify AD domain is healthy
+      ansible.windows.win_shell: |
+        Import-Module ActiveDirectory
+        $domain = Get-ADDomain -Identity "{{ domain_name }}"
+        Write-Output "Domain: $($domain.DNSRoot)  PDC: $($domain.PDCEmulator)"
+      register: ad_domain_info
+      changed_when: false
+
+    - name: Display domain info
+      ansible.builtin.debug:
+        var: ad_domain_info.stdout_lines
+
+    - name: Assert domain is responding
+      ansible.builtin.assert:
+        that: ad_domain_info.rc == 0
+        success_msg: "Domain '{{ domain_name }}' is healthy and responding."
+        fail_msg: "AD domain verification failed. Check the output above."

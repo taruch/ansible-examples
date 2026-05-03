@@ -1,0 +1,54 @@
+---
+- name: Join a Windows server to an Active Directory domain
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars_files:
+    - secrets.yml
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+  tasks:
+    # --- STEP 1: Join the server to the existing AD domain ---
+    # domain_controller must be passed as a survey/runtime variable — no default.
+    # Specifying domain_server directs the join request to the known DC rather than
+    # relying on DNS discovery, which avoids race conditions immediately after DC promotion.
+    - name: "Join '{{ inventory_hostname }}' to domain '{{ domain_name }}'"
+      microsoft.ad.membership:
+        dns_domain_name: "{{ domain_name }}"
+        domain_admin_user: "{{ domain_admin_user }}@{{ domain_name }}"
+        domain_admin_password: "{{ domain_admin_password }}"
+        domain_server: "{{ domain_controller }}"
+        state: domain
+      register: domain_join
+
+    # --- STEP 2: Reboot if required by the domain join ---
+    - name: Reboot the server after domain join
+      ansible.windows.win_reboot:
+        reboot_timeout: 600
+        connect_timeout: 60
+        post_reboot_delay: 30
+      when: domain_join.reboot_required
+
+    # --- STEP 3: Wait for WinRM to recover after reboot ---
+    - name: Wait for WinRM to become available
+      ansible.builtin.wait_for_connection:
+        delay: 15
+        timeout: 300
+
+    # --- STEP 4: Verify domain membership ---
+    - name: Verify domain membership via WMI
+      ansible.windows.win_shell: (Get-WmiObject Win32_ComputerSystem).Domain
+      register: domain_verify
+      changed_when: false
+
+    - name: Assert the server is a member of the domain
+      ansible.builtin.assert:
+        that: domain_name in domain_verify.stdout
+        success_msg: "'{{ inventory_hostname }}' is confirmed a member of '{{ domain_name }}'."
+        fail_msg: "Domain join verification failed for '{{ inventory_hostname }}'. Output: {{ domain_verify.stdout }}"
