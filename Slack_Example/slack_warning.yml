@@ -2,10 +2,10 @@
 - name: Send Notification to Slack
   hosts: localhost
   gather_facts: false
-  
+
   vars:
     # Replace with your actual Bot token (xoxb-...)
-    slack_token: "{{ SLACK_API_KEY  }}" 
+    slack_token: "{{ SLACK_API_KEY  }}"
     # Replace with your target channel (ensure the bot is invited to the channel!)
     target_channel: "#ansible"
 
