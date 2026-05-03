@@ -14,3 +14,4 @@ IaC_testing/*
 key.pem
 scratch.txt
 secrets.yml
+set_*
