@@ -1,0 +1,53 @@
+---
+# Demonstrates the "run until first success" pattern using throttle: 1
+# instead of serial: 1. throttle limits concurrency at the task level only —
+# other tasks in the play can still run in parallel across all hosts.
+#
+# Uses 'result is succeeded' (Ansible test) rather than checking rc or
+# error strings directly — the idiomatic way to evaluate task outcome.
+#
+# Usage (quick local demo):
+#   ansible-playbook run_until_one_succeeds_throttle.yml \
+#     -i "host1,host2,host3,host4," \
+#     -e "_hosts=all" \
+#     -e '{"simulated_failure_hosts": ["host1", "host2"]}'
+#
+# Usage (real inventory):
+#   ansible-playbook run_until_one_succeeds_throttle.yml \
+#     -i inventory/ -e "_hosts=script_runners"
+
+- name: Run task until it succeeds on at least one host (throttle variant)
+  hosts: "{{ _hosts | default('localhost') }}"
+  gather_facts: false
+
+  vars:
+    simulated_failure_hosts: []
+
+  tasks:
+
+    - name: Simulate script execution
+      ansible.builtin.command:
+        cmd: "{{ 'false' if inventory_hostname in simulated_failure_hosts else 'true' }}"
+      register: script_result
+      ignore_errors: true   # required — prevents a failure aborting the play before the next host runs
+      throttle: 1           # only one host runs this task at a time
+
+    - name: Report outcome for this host
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'SUCCESS' if script_result is succeeded else 'FAILED — trying next host' }}
+
+    # 'result is succeeded' is the Ansible-native test for task success.
+    # Equivalent tests and when to prefer each:
+    #   script_result is succeeded       — task completed with rc == 0 (preferred)
+    #   script_result is failed          — task failed (rc != 0 or module error)
+    #   script_result is changed         — task reported a change
+    #   script_result is skipped         — task was skipped by a when condition
+    #   script_result.rc == 0            — explicit rc check (fine, but less readable)
+    #   not script_result.failed         — equivalent to 'is succeeded' (more verbose)
+    - name: Stop play after first successful host
+      ansible.builtin.meta: end_play
+      when: script_result is succeeded
+      throttle: 1           # must also throttle the meta task to preserve ordering
+...

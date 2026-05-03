@@ -1,0 +1,2 @@
+[gitea]
+gitea ansible_host=192.168.122.17 ansible_user=ansible

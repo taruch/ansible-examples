@@ -1,0 +1,174 @@
+---
+- name: Install Gitea in a Container on the Ansible Control Node
+  hosts: "{{ _hosts }}"
+  gather_facts: False
+  vars:
+    user: gitea
+    repo: network-demos-repo
+    password: gitea
+
+  tasks:
+    - name: Install Podman
+      ansible.builtin.dnf:
+        name: podman
+        state: installed
+      become: true
+
+    - name: Create the directory for Gitea
+      ansible.builtin.file:
+        path: /home/student/gitea_data
+        state: directory
+        mode: '0755'
+      become: true
+      become_user: student
+
+    - name: Run gitea container
+      containers.podman.podman_container:
+        name: gitea
+        image: docker.io/gitea/gitea:1.14.2
+        volumes:
+          - /home/student/gitea_data:/data:z
+        state: started
+        ports:
+          - "3000:3000"
+      timeout: 10
+      ignore_errors: true
+      become: true
+      become_user: student
+
+    - name: Create gitea database
+      ansible.builtin.shell:
+        cmd: podman exec --user git gitea touch /data/gitea/gitea.db
+      become: true
+      become_user: student
+      ignore_errors: true
+  
+    - name: Set the ROOT_URL
+      ansible.builtin.shell:
+        cmd: podman exec --user git gitea sed -i -e "s/^ROOT_URL *= $/ROOT_URL = https:\/\/{{ ansible_host }}\/gitea\//" /data/gitea/conf/app.ini
+      become: true
+      become_user: student
+
+    - name: Include Allowed Domains for Migration
+      ansible.builtin.shell:
+        cmd: podman exec --user git gitea sed -i '$ a\\n[migrations]\nALLOWED_DOMAINS = gitlab.com' /data/gitea/conf/app.ini
+      become: true
+      become_user: student
+
+    - name: Lock app.ini
+      ansible.builtin.shell:
+        cmd: podman exec --user git gitea sed -i -e "s/^INSTALL_LOCK.*/INSTALL_LOCK=true/" /data/gitea/conf/app.ini
+      become: true
+      become_user: student
+
+    - name: Restart gitea
+      ansible.builtin.shell:
+        cmd: podman restart gitea
+      become: true
+      become_user: student
+
+    - name: Add gitea user
+      ansible.builtin.shell:
+        cmd: "podman exec gitea gitea admin user create --admin --username gitea --password {{ password }} --email admin@example.com"
+      ignore_errors: true
+      no_log: yes
+      become: true
+      become_user: student
+
+    - name: Create gitea repo "network-demos-repo"
+      ansible.builtin.uri:
+        url: "http://ansible-1:3000/api/v1/user/repos/"
+        user: "{{ user }}"
+        password: "{{ password }}"
+        force_basic_auth: true
+        force: false
+        method: POST
+        body_format: json
+        body:
+          name: "{{ repo }}"
+        status_code:
+          - 200
+          - 201
+      ignore_errors: true
+
+    - name: Clone current network_demos repo
+      ansible.builtin.shell:
+        cmd: git clone https://gitlab.com/redhatautomation/network_demos.git /home/student/network_demos
+      become: true
+      become_user: student
+      ignore_errors: true
+
+    - name: Remove .git from network_demos
+      ansible.builtin.shell:
+        cmd: rm -rf .git
+        chdir: /home/student/network_demos
+      become: true
+
+    - name: Clone network-demos-repo on Gitea server
+      ansible.builtin.shell:
+        cmd: git clone http://gitea:gitea@ansible-1:3000/gitea/network-demos-repo.git /home/student/network-demos-repo
+      become: true
+      become_user: student
+      ignore_errors: true
+    
+    - name: Copy files from network_demos to network-demos-repo/
+      ansible.posix.synchronize:
+        src: /home/student/network_demos/
+        dest: /home/student/network-demos-repo/
+      become: true
+      become_user: student
+    
+    - name: Update Git on network-demos-repo
+      ansible.builtin.shell:
+        cmd: "{{ item }}"
+        chdir: /home/student/network-demos-repo
+      loop:
+        - git config --global user.email admin@example.com
+        - git config --global user.name gitea
+        - git init
+        - git remote set-url origin http://gitea:gitea@ansible-1:3000/gitea/network-demos-repo.git
+        - git add --all 
+        - git commit --allow-empty -m 'setup'
+        - git push --set-upstream origin master
+        - git push 
+      become: true
+      become_user: student
+
+    - name: Delete the original workshop directory
+      ansible.builtin.file:
+        path: /home/student/network_demos
+        state: absent
+      become: true
+      become_user: student
+
+    #### Update NGINX configuration to support Gitea
+    - name: Update NGINX and Restart Service
+      block:   
+      - name: Update NGINX to allow for Gitea url
+        ansible.builtin.blockinfile:
+          # dest: /etc/nginx/nginx.conf
+          dest: /home/ec2-user/aap/controller/nginx/etc/controller.conf
+          insertafter: '        location /static { alias /var/lib/awx/public/static; }'
+          backup: true
+          block: |
+
+              location /gitea/ {
+                  client_max_body_size 512M;
+                  # make nginx use unescaped URI, keep "%2F" as is
+                  rewrite ^ $request_uri;
+                  rewrite ^/gitea(/.*) $1 break;
+                  proxy_pass http://127.0.0.1:3000$uri;
+                  proxy_set_header Connection $http_connection;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+        register: result
+        become: true
+
+      - name: Re-create the web container
+        vars:
+          ansible_user: ec2-user
+        ansible.builtin.command: podman restart automation-controller-web

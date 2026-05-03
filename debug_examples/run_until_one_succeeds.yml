@@ -1,0 +1,50 @@
+---
+# Demonstrates the "run until first success" pattern across a group of hosts.
+#
+# Uses serial: 1 so the task runs on one host at a time. After the first
+# host succeeds, meta: end_play stops the play immediately — remaining
+# hosts are never attempted.
+#
+# The simulated_failure_hosts list lets you control which hosts fail so
+# you can observe the playbook skipping past failures and stopping on success.
+#
+# Usage (against a real group):
+#   ansible-playbook run_until_one_succeeds.yml -i inventory/ -e "_hosts=script_runners"
+#
+# Usage (quick local demo — all hosts are localhost):
+#   ansible-playbook run_until_one_succeeds.yml -i "host1,host2,host3,host4," \
+#     -e "_hosts=all" \
+#     -e '{"simulated_failure_hosts": ["host1", "host2"]}'
+
+- name: Run task until it succeeds on at least one host
+  hosts: "{{ _hosts | default('localhost') }}"
+  serial: 1           # run one host at a time — essential for this pattern
+  gather_facts: false
+
+  vars:
+    # Hosts listed here will simulate a script failure (rc=1).
+    # All other hosts will simulate success (rc=0).
+    simulated_failure_hosts: []
+
+  tasks:
+
+    - name: Simulate script execution (fails on hosts in simulated_failure_hosts)
+      ansible.builtin.command:
+        cmd: >-
+          {{ 'false' if inventory_hostname in simulated_failure_hosts else 'true' }}
+      register: script_result
+      ignore_errors: true   # required: prevents one failure from aborting the whole play
+
+    - name: Report outcome for this host
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'SUCCESS — script completed normally' if script_result is succeeded
+             else 'FAILED (rc=' ~ script_result.rc ~ ') — trying next host' }}
+
+    # Stop the entire play the moment one host succeeds.
+    # Hosts not yet attempted are skipped cleanly.
+    - name: Stop play after first successful host
+      ansible.builtin.meta: end_play
+      when: script_result is succeeded
+...
