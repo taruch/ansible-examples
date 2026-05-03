@@ -1,6 +1,7 @@
 collections/ansible_collections
 collections/ansible_collections
 wordpress-nginx/hosts
+windows_examples/hosts
 IaC_testing/collections/
 .DS_Store
 *.log
@@ -12,3 +13,4 @@ IaC_testing/*
 *-artifact-*
 key.pem
 scratch.txt
+secrets.yml

@@ -145,7 +145,7 @@
 
     - name: "format | Build a connection string"
       debug:
-        msg: "{{ 'postgresql://%s:%s@%s:%d/%s' | format('admin', 'secret', 'db-server-02.prod.example.com', 5432, 'appdb') }}"
+        msg: "{{ 'postgresql://%s:%s@%s:%d/%s' | format('admin', 'EXAMPLE_PASSWORD', 'db-server-02.prod.example.com', 5432, 'appdb') }}"
 
     - name: "indent | Indent multiline output for embedding in config"
       debug:

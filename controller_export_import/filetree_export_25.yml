@@ -1,5 +1,6 @@
 ---
-- hosts: localhost
+- name: Export AAP 2.5 instance to code
+  hosts: localhost
   connection: local
   gather_facts: false
   vars:
@@ -10,6 +11,10 @@
 
   tasks:
     - name: "Setup authentication (block)"
+      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
+      when: aap_oauthtoken is not defined
+      tags:
+        - always
       block:
         - name: "Get the Authentication Token for the future requests"
           ansible.builtin.uri:
@@ -29,57 +34,52 @@
             aap_token: "{{ authtoken_res.json.token }}"
             aap_oauthtoken: "{{ authtoken_res.json.token }}"
             aap_oauthtoken_url: "{{ authtoken_res.json.url }}"
-      no_log: "{{ controller_configuration_filetree_create_secure_logging | default('false') }}"
-      when: aap_oauthtoken is not defined
-      tags:
-        - always
-
 
     - name: Utilize the filetree create role to export the configuration
       ansible.builtin.import_role:
-        name: infra.aap_configuration_extended.filetree_create 
+        name: infra.aap_configuration_extended.filetree_create
       vars:
         input_tag:
-          - all
-          # # - controller
-          # # - controller_settings
-          # - controller_credentials
-          # - controller_credential_types
-          # - controller_execution_environments
-          # - controller_groups
-          # - controller_hosts
-          # - controller_inventories
-          # - controller_inventory_sources
-          # - controller_job_templates
-          # - controller_notification_templates
-          # - controller_organizations
-          # - controller_projects
-          # - controller_roles
-          # - controller_teams
-          # - controller_users
-          # - controller_workflow_job_templates
-          # - controller_instance_groups
-          # - controller_applications
-          # - controller_labels
-          # - controller_schedules
-          # # - controller_gateway_authenticator
-          # # - controller_gateway_authenticator_maps
-          # - gateway
-          # # - gateway_applications
-          # # - gateway_authenticator_maps
-          # # - gateway_authenticators
-          # # - gateway_http_ports
-          # # - gateway_organizations
-          # # - gateway_role_user_assignments
-          # # - gateway_routes
-          # # - gateway_service_clusters
-          # # - gateway_service_keys
-          # # - gateway_service_nodes
-          # # - gateway_services
-          # # - gateway_settings
-          # # - gateway_teams
-          # # - gateway_users
-          # # - eda
+          # - all
+          - controller
+          - controller_settings
+          - controller_credentials
+          - controller_credential_types
+          - controller_execution_environments
+          - controller_groups
+          - controller_hosts
+          - controller_inventories
+          - controller_inventory_sources
+          - controller_job_templates
+          - controller_notification_templates
+          - controller_organizations
+          - controller_projects
+          - controller_roles
+          - controller_teams
+          - controller_users
+          - controller_workflow_job_templates
+          - controller_instance_groups
+          - controller_applications
+          - controller_labels
+          - controller_schedules
+          - controller_gateway_authenticator
+          - controller_gateway_authenticator_maps
+          - gateway
+          - gateway_applications
+          - gateway_authenticator_maps
+          - gateway_authenticators
+          - gateway_http_ports
+          - gateway_organizations
+          - gateway_role_user_assignments
+          - gateway_routes
+          - gateway_service_clusters
+          - gateway_service_keys
+          - gateway_service_nodes
+          - gateway_services
+          - gateway_settings
+          - gateway_teams
+          - gateway_users
+          # - eda
           # - eda_credential_types
           # - eda_credentials
           # - eda_decision_environments
@@ -96,7 +96,7 @@
           # # - hub_roles
         organization_filter: ""  # Specify the organization to filter the export, if needed
         secrets_as_variables: true
-        output_path: "./export_25_3"
+        output_path: "./export_25_20260503_1"
 
     - name: "Delete the Authentication Token used"
       ansible.builtin.uri:

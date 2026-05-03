@@ -1,6 +1,7 @@
 ---
 # Demonstrates Jinja2 set filters (difference, intersect, union,
 # symmetric_difference) using realistic IP address datasets.
+# The difference filter returns items from the first list that are not present in the second list — essentially a set subtraction.
 
 - name: Jinja2 set filter examples with IP addresses
   hosts: localhost

@@ -117,7 +117,7 @@
 
     - name: "regex_replace | Redact passwords in connection strings"
       debug:
-        msg: "{{ 'postgresql://app:S3cr3t@db-01:5432/appdb' | regex_replace(':[^:@]+@', ':REDACTED@') }}"
+        msg: "{{ 'postgresql://app:EXAMPLE_PASSWORD@db-01:5432/appdb' | regex_replace(':[^:@]+@', ':REDACTED@') }}"
 
     # ------------------------------------------------------------------
     # Combining with list filters

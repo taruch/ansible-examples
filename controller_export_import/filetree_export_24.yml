@@ -48,8 +48,8 @@
           - 'job_templates'
           - 'workflow_job_templates'
           - 'schedules'
-        organization_filter: "Default"  # Specify the organization to filter the export, if needed
-        output_path: "./export_24_260105-01"
+        organization_filter: ""  # Specify the organization to filter the export, if needed
+        output_path: "./export_24_260416-01"
 
   post_tasks:
     - name: "Delete the Authentication Token used"

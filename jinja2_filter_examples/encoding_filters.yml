@@ -7,9 +7,9 @@
   gather_facts: false
 
   vars:
-    plain_password: "S3cr3tP@ssw0rd!"
+    plain_password: "EXAMPLE_PLAINTEXT_VALUE"
     api_user: "deploy-svc"
-    api_token: "ghp_exampleTokenForDemoPurposes12345"
+    api_token: "EXAMPLE_TOKEN_VALUE_REPLACE_WITH_VAULT"
 
     server_config:
       host: "db-01.prod.example.com"

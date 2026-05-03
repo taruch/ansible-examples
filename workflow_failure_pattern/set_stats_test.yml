@@ -1,0 +1,51 @@
+---
+- name: Various test of the set_stats module
+  hosts: all
+  # gather_facts: false
+  vars:
+    show_custom_stats: true
+  tasks:
+#  - name: spit out info
+#    ansible.builtin.debug:
+#      var: ansible_facts
+#      var: hostvars
+
+############## First Standard Four ##################
+  - name: per_host true and aggregate true
+    ansible.builtin.set_stats:
+      data:
+        dist_ver_per_host_true_agg_true: "{{ ansible_facts.distribution_version }}"
+      per_host: true
+
+  - name: per_host true and aggregate false
+    ansible.builtin.set_stats:
+      data:
+        dist_ver_per_host_true_agg_false: "{{ ansible_facts.distribution_version }}"
+      per_host: true
+      aggregate: false
+
+  - name: per_host false and aggregate true- default behavior
+    ansible.builtin.set_stats:
+      data:
+        dist_ver_per_host_false_agg_true: "{{ ansible_facts.distribution_version }}"
+      per_host: false
+
+  - name: per_host false and aggregate false
+    ansible.builtin.set_stats:
+      data:
+        dist_ver_per_host_false_agg_false: "{{ ansible_facts.distribution_version }}"
+      per_host: false
+      aggregate: false
+
+############## Workaround ##################
+  - name: per host collection and aggregate false via a workaround
+    ansible.builtin.set_stats:
+      data:
+        dist_ver_per_host_agg_true: "{{ dist_ver_per_host_agg_true | default({}) | combine({ inventory_hostname : { 'ver' : ansible_facts.failed_node}}) }}"
+      aggregate: false
+
+  - name: per host collection and aggregate true via a workaround
+    ansible.builtin.set_stats:
+      data:
+        dist_ver_per_host_agg_true: "{{ dist_ver_per_host_agg_true | default({}) | combine({ inventory_hostname : { 'ver' : ansible_facts.failed_node}}) }}"
+      aggregate: true

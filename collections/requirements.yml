@@ -1,3 +1,5 @@
 ---
 collections:
   - name: community.windows
+  - name: ansible.windows
+  - name: microsoft.ad

@@ -14,7 +14,7 @@
 
   tasks:
     - name: Install Podman, nginx, and integration tools
-      ansible.builtin.dnf:
+      ansible.builtin.package:
         name:
           - podman
           - slirp4netns
@@ -23,6 +23,8 @@
           - nginx
           - openssl
         state: present
+        update_cache: true
+
 
     - name: Ensure Gitea storage path exists
       ansible.builtin.file:
@@ -60,7 +62,16 @@
           server {
               listen 80;
               server_name _;
-              return 301 https://$host$request_uri;
+
+              client_max_body_size 100m;
+
+              location / {
+                  proxy_pass         http://127.0.0.1:{{ gitea_http_port }};
+                  proxy_set_header   Host              $host;
+                  proxy_set_header   X-Real-IP         $remote_addr;
+                  proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+                  proxy_set_header   X-Forwarded-Proto $scheme;
+              }
           }
 
           server {
@@ -105,12 +116,30 @@
       containers.podman.podman_image:
         name: "{{ gitea_image }}:{{ gitea_version }}"
 
+    - name: Stop and disable native gitea service if present
+      ansible.builtin.systemd:
+        name: gitea
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Stop containerized Gitea systemd service if it exists
+      ansible.builtin.systemd:
+        name: container-gitea
+        state: stopped
+      ignore_errors: true
+
+    - name: Remove existing Gitea container if present
+      ansible.builtin.command: podman rm -f gitea
+      register: podman_rm
+      changed_when: podman_rm.rc == 0
+      failed_when: podman_rm.rc != 0 and 'no such container' not in podman_rm.stderr | lower
+
     - name: Run Gitea container
       containers.podman.podman_container:
         name: gitea
         image: "{{ gitea_image }}:{{ gitea_version }}"
         state: started
-        recreate: true
         ports:
           - "127.0.0.1:{{ gitea_http_port }}:3000"
           - "{{ gitea_ssh_port }}:22"
@@ -146,6 +175,11 @@
         enabled: true
         state: started
         daemon_reload: true
+
+    - name: Reload nginx to apply current configuration
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
 
   handlers:
     - name: Reload nginx

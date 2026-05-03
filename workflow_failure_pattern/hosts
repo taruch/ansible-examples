@@ -1,0 +1,7 @@
+[rhel8]
+ec2-3-143-173-2.us-east-2.compute.amazonaws.com ansible_user=ec2-user
+ec2-18-216-222-57.us-east-2.compute.amazonaws.com ansible_user=ec2-user
+
+[rhel9]
+ec2-3-145-189-73.us-east-2.compute.amazonaws.com ansible_user=ec2-user
+ec2-18-116-114-237.us-east-2.compute.amazonaws.com ansible_user=ec2-user

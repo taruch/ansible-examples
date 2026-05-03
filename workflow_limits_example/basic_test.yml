@@ -1,0 +1,7 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Show inventory hostname
+      ansible.builtin.debug:
+        msg: "This task is running on {{ inventory_hostname }}"
