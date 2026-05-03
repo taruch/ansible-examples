@@ -1,6 +1,6 @@
 ---
 - name: Restart Linux Services
-  hosts: "{{ _hosts }}" # Define your target group of Linux servers here
+  hosts: "{{ _hosts | default('omit)') }}" # Define your target group of Linux servers here
   become: true         # This playbook requires root privileges to manage services
   gather_facts: false  # No need to gather facts for this specific task
 
