@@ -1,0 +1,27 @@
+---
+
+- name: windows map json
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - ansible.netcommon
+  tasks:
+
+
+    - name: Map Windows drives from JSON file
+      ansible.builtin.set_fact:
+        services_info: "{{ lookup('file', 'files/services_output.json') | from_json }}"
+
+    - name: Debug services info
+      loop: "{{ services_info['service_info.results'] }}"
+      ansible.builtin.debug:
+        msg: "{{ item['item'] }}: {{ item.services[0].state }}"
+
+    - name: Map name and service state from 'files/services_output.json'
+      ansible.builtin.set_fact:
+        windows_services: "{{ windows_services | default({}) | combine({ item['item']: item.services[0].state }) }}"
+      loop: "{{ services_info['service_info.results'] }}"
+
+    - name: Debug mapped windows services
+      ansible.builtin.debug:
+        var: windows_services
