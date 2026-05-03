@@ -1,0 +1,909 @@
+controller_workflows:
+- allow_simultaneous: false
+  ask_inventory_on_launch: false
+  ask_labels_on_launch: false
+  ask_limit_on_launch: false
+  ask_scm_branch_on_launch: false
+  ask_skip_tags_on_launch: false
+  ask_tags_on_launch: false
+  ask_variables_on_launch: false
+  description: A workflow to deploy a cloud stack
+  extra_vars: '{"vm_deployment": "cloud_stack"}'
+  inventory: null
+  job_tags: null
+  limit: null
+  name: Deploy Cloud Stack in AWS test
+  natural_key:
+    name: Deploy Cloud Stack in AWS test
+    organization:
+      name: Default
+      type: organization
+    type: workflow_job_template
+  organization:
+    name: Default
+    type: organization
+  related:
+    labels: []
+    notification_templates_approvals: []
+    notification_templates_error:
+    - name: Telemetry
+      organization:
+        name: Default
+        type: organization
+      type: notification_template
+    notification_templates_started:
+    - name: Telemetry
+      organization:
+        name: Default
+        type: organization
+      type: notification_template
+    notification_templates_success:
+    - name: Telemetry
+      organization:
+        name: Default
+        type: organization
+      type: notification_template
+    schedules: []
+    survey_spec:
+      description: ''
+      name: ''
+      spec:
+      - choices:
+        - us-east-1
+        - us-east-2
+        - us-west-1
+        - us-west-2
+        question_name: AWS Region
+        required: true
+        type: multiplechoice
+        variable: create_vm_aws_region
+      - question_name: Owner
+        required: true
+        type: text
+        variable: create_vm_aws_owner_tag
+      - choices:
+        - Dev
+        - QA
+        - Prod
+        question_name: Environment
+        required: true
+        type: multiplechoice
+        variable: vm_environment
+      - question_name: Keypair Public Key
+        required: true
+        type: textarea
+        variable: aws_public_key
+      - question_name: Email
+        required: true
+        type: text
+        variable: email
+    workflow_nodes:
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        aws_keypair_owner: 'new'
+      forks: null
+      identifier: Create Keypair
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Create Keypair
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes:
+        - identifier: Ticket - Keypair Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        success_nodes:
+        - identifier: VPC Report
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create Keypair
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data: {}
+      forks: null
+      identifier: Create VPC
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Create VPC
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes:
+        - identifier: new approval test
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        credentials: []
+        failure_nodes: []
+        success_nodes:
+        - identifier: VPC Report
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create VPC
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        feedback: Failed to create AWS keypair
+      forks: null
+      identifier: Ticket - Keypair Failed
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Ticket - Keypair Failed
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes: []
+        success_nodes: []
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: SUBMIT FEEDBACK
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: true
+      diff_mode: null
+      execution_environment: null
+      extra_data: {}
+      forks: null
+      identifier: VPC Report
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: VPC Report
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes:
+        - identifier: Deploy Windows GUI Blueprint
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        - identifier: Deploy Windows Core Blueprint
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        - identifier: Deploy Report Server
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        credentials: []
+        failure_nodes: []
+        success_nodes:
+        - identifier: Deploy Windows Blueprint
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        - identifier: Deploy RHEL8 Blueprint
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        - identifier: Deploy RHEL9 Blueprint
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / VPC Report
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        create_vm_vm_name: aws_win
+        vm_blueprint: windows_full
+      forks: null
+      identifier: Deploy Windows Blueprint
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Deploy Windows Blueprint
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes:
+        - identifier: Ticket - Instance Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        success_nodes:
+        - identifier: Update Inventory
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create VM
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        create_vm_vm_name: aws_rhel8
+        vm_blueprint: rhel8
+      forks: null
+      identifier: Deploy RHEL8 Blueprint
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Deploy RHEL8 Blueprint
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes:
+        - identifier: Ticket - Instance Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        success_nodes:
+        - identifier: Update Inventory
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create VM
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        create_vm_vm_name: aws_rhel9
+        vm_blueprint: rhel9
+      forks: null
+      identifier: Deploy RHEL9 Blueprint
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Deploy RHEL9 Blueprint
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes:
+        - identifier: Ticket - Instance Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        success_nodes:
+        - identifier: Update Inventory
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create VM
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        feedback: Failed to create AWS VPC
+      forks: null
+      identifier: Ticket - VPC Failed
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Ticket - VPC Failed
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes: []
+        success_nodes: []
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: SUBMIT FEEDBACK
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data: {}
+      forks: null
+      identifier: Update Inventory
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Update Inventory
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes: []
+        success_nodes:
+        - identifier: Tag Report
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        inventory:
+          name: Demo Inventory
+          organization:
+            name: Default
+            type: organization
+          type: inventory
+        name: AWS Inventory
+        type: inventory_source
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        feedback: Failed to create AWS instance
+      forks: null
+      identifier: Ticket - Instance Failed
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Ticket - Instance Failed
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes: []
+        success_nodes: []
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: SUBMIT FEEDBACK
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data: {}
+      forks: null
+      identifier: Tag Report
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Tag Report
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes: []
+        success_nodes: []
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Tags Report
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        create_vm_vm_name: aws_dc
+        vm_blueprint: windows_full
+      forks: null
+      identifier: Deploy Windows GUI Blueprint
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Deploy Windows GUI Blueprint
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes:
+        - identifier: Ticket - Instance Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        success_nodes:
+        - identifier: Update Inventory
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create VM
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        create_vm_vm_name: aws_win1
+        vm_blueprint: windows_core
+      forks: null
+      identifier: Deploy Windows Core Blueprint
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Deploy Windows Core Blueprint
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes:
+        - identifier: Ticket - Instance Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        success_nodes:
+        - identifier: Update Inventory
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create VM
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data:
+        create_vm_vm_name: reports
+        vm_blueprint: rhel9
+      forks: null
+      identifier: Deploy Report Server
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: Deploy Report Server
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        credentials: []
+        failure_nodes:
+        - identifier: Ticket - Instance Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+        success_nodes:
+        - identifier: Update Inventory
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      unified_job_template:
+        name: Cloud / AWS / Create VM
+        organization:
+          name: Default
+          type: organization
+        type: job_template
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+    - all_parents_must_converge: false
+      diff_mode: null
+      execution_environment: null
+      extra_data: {}
+      forks: null
+      identifier: new approval test
+      inventory: null
+      job_slice_count: null
+      job_tags: null
+      job_type: null
+      limit: null
+      natural_key:
+        identifier: new approval test
+        type: workflow_job_template_node
+        workflow_job_template:
+          name: Deploy Cloud Stack in AWS test
+          organization:
+            name: Default
+            type: organization
+          type: workflow_job_template
+      related:
+        always_nodes: []
+        create_approval_template:
+          description: ''
+          name: new approval test
+          timeout: 0
+        credentials: []
+        failure_nodes: []
+        success_nodes:
+        - identifier: Ticket - VPC Failed
+          type: workflow_job_template_node
+          workflow_job_template:
+            name: Deploy Cloud Stack in AWS test
+            organization:
+              name: Default
+              type: organization
+            type: workflow_job_template
+      scm_branch: null
+      skip_tags: null
+      timeout: null
+      verbosity: null
+      workflow_job_template:
+        name: Deploy Cloud Stack in AWS test
+        organization:
+          name: Default
+          type: organization
+        type: workflow_job_template
+  scm_branch: null
+  skip_tags: null
+  survey_enabled: true
+  webhook_credential: null
+  webhook_service: ''
