@@ -1,0 +1,156 @@
+---
+# update_survey_hosts.yml
+#
+# Reads a flat hosts file and updates an AAP job template survey with the
+# host list as choices in a multiplechoice question — creating a
+# "semi-dynamic" survey that stays current without a full dynamic inventory
+# integration.
+#
+# Required variables (set as extra vars, env vars, or in a vault):
+#   controller_hostname    - AAP controller FQDN/IP
+#   controller_username    - AAP username
+#   controller_password    - AAP password
+#   job_template_name      - Name of the job template to update
+#
+# Optional variables:
+#   hosts_file             - Path to the newline-delimited hosts file
+#                            (default: ./hosts.txt relative to playbook)
+#   survey_question_name   - Display label for the survey question
+#                            (default: "Target Host")
+#   survey_variable        - Variable name injected into the job
+#                            (default: "target_host")
+#   controller_validate_certs - Validate SSL certs (default: true)
+
+- name: Update AAP job template survey with hosts from file
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    controller_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    controller_username: "{{ vault_aap_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    controller_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    controller_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL') | default(true)) }}"
+    hosts_file: "{{ playbook_dir }}/hosts.txt"
+    survey_question_name: "Target Host"
+    survey_variable: "target_host"
+
+  tasks:
+    - name: Authenticate and get token
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/gateway/v1/tokens/"
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 201
+      register: authtoken_res
+
+    - name: Set token fact
+      ansible.builtin.set_fact:
+        controller_token: "{{ authtoken_res.json.token }}"
+        controller_token_url: "{{ authtoken_res.json.url }}"
+
+    - name: Read hosts file
+      ansible.builtin.slurp:
+        src: "{{ hosts_file }}"
+      register: hosts_file_content
+
+    - name: Build host list from file
+      ansible.builtin.set_fact:
+        host_list: >-
+          {{ (hosts_file_content.content | b64decode).splitlines()
+             | select('match', '^[^#]')
+             | map('trim')
+             | reject('equalto', '')
+             | list }}
+
+    - name: Fail if host list is empty
+      ansible.builtin.fail:
+        msg: "No hosts found in {{ hosts_file }}. Add at least one host (one per line)."
+      when: host_list | length == 0
+
+    - name: Show hosts that will be added to survey
+      ansible.builtin.debug:
+        msg: "Updating survey with {{ host_list | length }} hosts: {{ host_list }}"
+
+    - name: Look up job template ID
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/job_templates/?name={{ job_template_name | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ controller_token }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: jt_lookup
+
+    - name: Fail if job template not found
+      ansible.builtin.fail:
+        msg: "Job template '{{ job_template_name }}' not found on {{ controller_hostname }}"
+      when: jt_lookup.json.count == 0
+
+    - name: Set job template ID
+      ansible.builtin.set_fact:
+        job_template_id: "{{ jt_lookup.json.results[0].id }}"
+
+    - name: Build survey spec
+      ansible.builtin.set_fact:
+        survey_spec:
+          name: "{{ job_template_name }} Survey"
+          description: "Auto-updated from {{ hosts_file | basename }}"
+          spec:
+            - question_name: "{{ survey_question_name }}"
+              question_description: "Select the target host"
+              required: true
+              type: multiplechoice
+              variable: "{{ survey_variable }}"
+              min: 0
+              max: 1024
+              default: "{{ host_list | first }}"
+              choices: "{{ host_list | join('\n') }}"
+
+    - name: Update job template survey spec
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/job_templates/{{ job_template_id }}/survey_spec/"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ controller_token }}"
+          Content-Type: application/json
+        body: "{{ survey_spec | to_json }}"
+        body_format: json
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: survey_update
+
+    - name: Enable survey on job template (if not already enabled)
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/job_templates/{{ job_template_id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Bearer {{ controller_token }}"
+          Content-Type: application/json
+        body:
+          survey_enabled: true
+        body_format: json
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+
+    - name: Confirm survey update
+      ansible.builtin.debug:
+        msg: >-
+          Survey updated on '{{ job_template_name }}' (ID: {{ job_template_id }}).
+          Question '{{ survey_question_name }}' now has {{ host_list | length }} choices.
+
+    - name: Delete auth token
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}{{ controller_token_url }}"
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 204
+      when: controller_token_url is defined
+
+...
