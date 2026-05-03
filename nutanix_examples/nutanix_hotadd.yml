@@ -1,0 +1,39 @@
+---
+# Update vCPU and memory on an existing Nutanix VM.
+# Nutanix supports hot-add of vCPUs and memory when the guest OS and VM config allow it.
+# Requires memory_overcommit and cpu hot-plug to be enabled on the VM.
+#
+# Example:
+# ansible-navigator run -mstdout nutanix_hotadd.yml -vv \
+#   -e vm_name=rhel9test -e vm_memory_gb=8 -e vm_vcpus=4
+
+- name: Update CPU and RAM on Nutanix VM in Prism Central
+  hosts: localhost
+  gather_facts: false
+
+  module_defaults:
+    group/nutanix.ncp.ntnx:
+      nutanix_host: "{{ nutanix_host }}"
+      nutanix_username: "{{ nutanix_username }}"
+      nutanix_password: "{{ nutanix_password }}"
+      validate_certs: "{{ validate_certs | default(false) }}"
+
+  tasks:
+    # Look up the VM UUID by name
+    - name: "Get VM info for '{{ vm_name }}'"
+      nutanix.ncp.ntnx_vms_info:
+        filter:
+          name: "{{ vm_name }}"
+      register: vm_info
+
+    - name: Set VM UUID fact
+      ansible.builtin.set_fact:
+        vm_uuid: "{{ vm_info.response.entities[0].metadata.uuid }}"
+
+    - name: "Update CPU and RAM on VM '{{ vm_name }}'"
+      nutanix.ncp.ntnx_vms:
+        state: present
+        vm_uuid: "{{ vm_uuid }}"
+        vcpus: "{{ vm_vcpus | default(omit) }}"
+        cores_per_vcpu: 1
+        memory_gb: "{{ vm_memory_gb | default(omit) }}"

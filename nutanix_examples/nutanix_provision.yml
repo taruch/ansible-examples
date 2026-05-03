@@ -1,0 +1,88 @@
+---
+- name: Provision VM from image in Nutanix Prism Central
+  hosts: localhost
+  gather_facts: false
+
+  vars_files:
+    - secrets.yml
+
+  module_defaults:
+    group/nutanix.ncp.ntnx:
+      nutanix_host: "{{ nutanix_host }}"
+      nutanix_username: "{{ nutanix_username }}"
+      nutanix_password: "{{ nutanix_password }}"
+      validate_certs: "{{ validate_certs | default(false) }}"
+
+  tasks:
+    # --- STEP 1: Provision a VM from a disk image (template) ---
+    - name: Provision a VM
+      nutanix.ncp.ntnx_vms:
+        state: present
+        name: "{{ vm_name }}"
+        cluster:
+          name: "{{ nutanix_cluster }}"
+        vcpus: "{{ vm_vcpus | default(2) }}"
+        cores_per_vcpu: 1
+        memory_gb: "{{ vm_memory_gb | default(4) }}"
+        disks:
+          - type: "DISK"
+            size_gb: "{{ vm_disk_size_gb | default(40) }}"
+            bus: "SATA"
+            clone_image:
+              name: "{{ vm_template }}"
+        networks:
+          - is_connected: true
+            vlan_mode: "ACCESS"
+            subnet:
+              name: "{{ nutanix_subnet }}"
+        guest_customization:
+          type: "cloud_init"
+          script_path: "{{ cloud_init_script | default(omit) }}"
+          is_overridable: true
+        power_state: ON
+      register: vm_result
+
+    - name: Pause for 30 seconds to allow VM to get IP address
+      ansible.builtin.pause:
+        seconds: 30
+
+    # --- STEP 2: Query Prism Central for the VM's details ---
+    - name: "Get facts for the VM '{{ vm_name }}'"
+      nutanix.ncp.ntnx_vms_info:
+        filter:
+          name: "{{ vm_name }}"
+      register: vm_facts
+      until: >
+        vm_facts.response.entities is defined and
+        vm_facts.response.entities | length > 0 and
+        vm_facts.response.entities[0].status.resources.nic_list[0].ip_endpoint_list | length > 0 and
+        vm_facts.response.entities[0].status.resources.nic_list[0].ip_endpoint_list[0].ip is defined
+      retries: 10
+      delay: 15
+
+    - name: Debug the gathered facts
+      ansible.builtin.debug:
+        var: vm_facts
+
+    - name: Set VM IP fact
+      ansible.builtin.set_fact:
+        vm_ip: "{{ vm_facts.response.entities[0].status.resources.nic_list[0].ip_endpoint_list[0].ip }}"
+      when:
+        - vm_facts.response.entities is defined
+        - vm_facts.response.entities | length > 0
+
+    - name: "Display the IP address of the VM"
+      ansible.builtin.debug:
+        msg: "VM '{{ vm_name }}' was found with IP address: {{ vm_ip }}"
+      when: vm_ip is defined
+
+    - name: Send data to follow-on playbook
+      ansible.builtin.set_stats:
+        data:
+          new_vm_info: "{{ vm_facts.response.entities[0].status }}"
+          vm_uuid: "{{ vm_result.vm_uuid }}"
+      when:
+        - vm_facts.response.entities is defined
+        - vm_facts.response.entities | length > 0
+
+...

@@ -1,0 +1,47 @@
+---
+- name: Set power state of Nutanix VM in Prism Central
+  hosts: localhost
+  gather_facts: false
+  # vars:
+  #   vm_name: "rhel9test"
+  #   vmpowerstate: "on"  # Choices: on, off, restart
+
+  module_defaults:
+    group/nutanix.ncp.ntnx:
+      nutanix_host: "{{ nutanix_host }}"
+      nutanix_username: "{{ nutanix_username }}"
+      nutanix_password: "{{ nutanix_password }}"
+      validate_certs: "{{ validate_certs | default(false) }}"
+
+  tasks:
+    # Look up the VM UUID by name first, required for power state operations
+    - name: "Get VM info for '{{ vm_name }}'"
+      nutanix.ncp.ntnx_vms_info:
+        filter:
+          name: "{{ vm_name }}"
+      register: vm_info
+
+    - name: Set VM UUID fact
+      ansible.builtin.set_fact:
+        vm_uuid: "{{ vm_info.response.entities[0].metadata.uuid }}"
+
+    - name: Power off the VM
+      nutanix.ncp.ntnx_vms:
+        state: present
+        vm_uuid: "{{ vm_uuid }}"
+        power_state: OFF
+      when: vmpowerstate == "off"
+
+    - name: Power on the VM
+      nutanix.ncp.ntnx_vms:
+        state: present
+        vm_uuid: "{{ vm_uuid }}"
+        power_state: ON
+      when: vmpowerstate == "on"
+
+    - name: Restart the VM
+      nutanix.ncp.ntnx_vms:
+        state: present
+        vm_uuid: "{{ vm_uuid }}"
+        power_state: HARD_RESET
+      when: vmpowerstate == "restart"

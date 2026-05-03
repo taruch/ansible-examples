@@ -1,0 +1,80 @@
+---
+# ----------------------------------------------------------------------
+# PLAY 1: Extend the Virtual Disk at the Nutanix (AHV) Level
+# Connects to Prism Central and increases the disk size for the VM.
+# ----------------------------------------------------------------------
+- name: Extend a Nutanix VM Virtual Disk
+  hosts: localhost
+  gather_facts: false
+  vars:
+    vm_name: "my-linux-vm"         # Name of the VM to modify
+    disk_index: 0                  # Index of the disk to extend (0 = first disk)
+    new_disk_size_gb: "{{ disk_size | default(omit) }}"  # New TOTAL size in GB
+
+  module_defaults:
+    group/nutanix.ncp.ntnx:
+      nutanix_host: "{{ nutanix_host }}"
+      nutanix_username: "{{ nutanix_username }}"
+      nutanix_password: "{{ nutanix_password }}"
+      validate_certs: "{{ validate_certs | default(false) }}"
+
+  tasks:
+    # Look up the VM to get its UUID and current disk configuration
+    - name: "Get VM info for '{{ vm_name }}'"
+      nutanix.ncp.ntnx_vms_info:
+        filter:
+          name: "{{ vm_name }}"
+      register: vm_info
+
+    - name: Set VM UUID and current disk facts
+      ansible.builtin.set_fact:
+        vm_uuid: "{{ vm_info.response.entities[0].metadata.uuid }}"
+        current_disks: "{{ vm_info.response.entities[0].status.resources.disk_list }}"
+
+    - name: "Extend disk {{ disk_index }} on VM '{{ vm_name }}' to {{ new_disk_size_gb }}GB"
+      nutanix.ncp.ntnx_vms:
+        state: present
+        vm_uuid: "{{ vm_uuid }}"
+        disks:
+          - type: "DISK"
+            uuid: "{{ current_disks[disk_index].uuid }}"
+            size_gb: "{{ new_disk_size_gb }}"
+            bus: "SATA"
+      delegate_to: localhost
+
+# ----------------------------------------------------------------------
+# PLAY 2: Extend the Partition and Filesystem Inside the Guest OS
+# Connects to the VM and tells the OS to use the new space.
+# This example is for a Linux VM with a single disk (/dev/sda).
+# ----------------------------------------------------------------------
+- name: Resize the Partition and Filesystem inside the Linux Guest OS
+  hosts: "{{ vm_name }}"  # The VM name must be in your Ansible inventory
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Extend the partition
+      community.general.parted:
+        device: /dev/sda
+        number: 1  # Assumes extending the first partition
+        state: present
+        part_end: 100%
+        resize: true
+      register: partition_result
+
+    - name: Extend the filesystem (ext4/xfs)
+      community.general.filesystem:
+        fstype: "{{ ansible_facts['mounts'][0]['fstype'] }}"  # Auto-detects fstype
+        dev: /dev/sda1
+        state: present
+        resizefs: true
+      when: partition_result.changed
+
+    - name: Display the new disk space
+      ansible.builtin.command: df -h /
+      register: df_output
+      changed_when: false
+
+    - name: Show new disk space
+      ansible.builtin.debug:
+        var: df_output.stdout_lines

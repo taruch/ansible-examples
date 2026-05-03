@@ -1,0 +1,67 @@
+---
+- name: Manage Nutanix VM Snapshots via Prism Central
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - secrets.yml
+
+  vars:
+    # vm_name: "rhel9test"
+    snapshot_description: "Pre-upgrade snapshot taken on {{ ansible_date_time.date }}"
+
+  module_defaults:
+    group/nutanix.ncp.ntnx:
+      nutanix_host: "{{ nutanix_host }}"
+      nutanix_username: "{{ nutanix_username }}"
+      nutanix_password: "{{ nutanix_password }}"
+      validate_certs: "{{ validate_certs | default(false) }}"
+
+  tasks:
+    - name: Get only date and time facts
+      tags:
+        - always
+      ansible.builtin.setup:
+        gather_subset:
+          - 'date_time'
+
+    # Look up VM UUID by name — required for snapshot operations
+    - name: "Get VM info for '{{ vm_name }}'"
+      tags:
+        - always
+      nutanix.ncp.ntnx_vms_info:
+        filter:
+          name: "{{ vm_name }}"
+      register: vm_info
+
+    - name: Set VM UUID fact
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        vm_uuid: "{{ vm_info.response.entities[0].metadata.uuid }}"
+
+    - name: "Create snapshot for VM: {{ vm_name }}"
+      tags:
+        - snapshot_create
+      nutanix.ncp.ntnx_vm_snapshots:
+        state: present
+        vm_uuid: "{{ vm_uuid }}"
+        snapshot_name: "Pre-Upgrade-Snapshot-{{ ansible_date_time.epoch }}"
+
+    # Nutanix does not have a single "remove all snapshots" API call.
+    # This task retrieves all snapshots for the VM and deletes each one.
+    - name: "Get all snapshots for VM: {{ vm_name }}"
+      tags:
+        - snapshot_remove_all
+      nutanix.ncp.ntnx_vm_snapshots_info:
+        vm_uuid: "{{ vm_uuid }}"
+      register: snapshot_list
+
+    - name: Remove all snapshots for the VM
+      tags:
+        - snapshot_remove_all
+      nutanix.ncp.ntnx_vm_snapshots:
+        state: absent
+        snapshot_uuid: "{{ item.metadata.uuid }}"
+      loop: "{{ snapshot_list.response.entities }}"
+      when: snapshot_list.response.entities is defined and snapshot_list.response.entities | length > 0
