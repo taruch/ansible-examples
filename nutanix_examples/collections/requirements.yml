@@ -1,0 +1,4 @@
+---
+collections:
+  - name: nutanix.ncp
+  - name: community.general
