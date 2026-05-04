@@ -1,0 +1,20 @@
+---
+ansible-navigator:
+  ansible:
+    inventory:
+      entries:
+      - inventory
+  execution-environment:
+    container-engine: podman
+    enabled: false
+    # image: quay.io/ansible-product-demos/apd-ee-25:latest
+    image: quay.io/truch/export24:1.0
+    pull:
+      policy: missing
+  logging:
+    level: debug
+  playbook-artifact:
+    enable: true
+    save-as: playbook-artifacts/{playbook_name}-artifact-{time_stamp}.json
+  # mode: stdout
+  mode: interactive
