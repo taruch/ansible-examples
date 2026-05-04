@@ -15,3 +15,14 @@ key.pem
 scratch.txt
 secrets.yml
 set_*
+AAP_Windows_LDAP_example
+infra_gateway_config.yml
+.ansible
+aap_migration
+playbook-artifacts
+mitchell_issue
+.claude
+.github
+token_testing.yml
+setup_demo.yml
+filetree_import_25_workflow.yml_orig

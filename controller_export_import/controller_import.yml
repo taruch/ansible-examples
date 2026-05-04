@@ -1,0 +1,87 @@
+---
+- name: Export Workflow
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections:
+    - ansible.controller
+  environment:
+     CONTROLLER_HOST: 'https://aapcontrol2.entrenchedrealist.com'
+     #CONTROLLER_HOST: 'https://autoctl1.r4bb7.sandbox1884.opentlc.com'
+     CONTROLLER_USERNAME: admin
+     CONTROLLER_PASSWORD: "{{ PASSWORD }}"
+     CONTROLLER_VERIFY_SSL: False
+
+  tasks:
+    - name: import from inventory_sources export
+      ansible.controller.import:
+        assets: "{{ lookup('file', './files/aap_inventory_sources.json') }}"
+      register: import_results
+      tags:
+        - all
+        - never
+        - inventory_sources
+
+    - debug:
+        var: import_results
+
+    - name: import from inventories export
+      ansible.controller.import:
+        assets: "{{ lookup('file', './files/aap_inventories.json') }}"
+      register: import_results
+      tags:
+        - all
+        - never
+        - inventories
+
+    - debug:
+        var: import_results
+
+    - name: import from credential_types export
+      ansible.controller.import:
+        assets: "{{ lookup('file', './files/aap_credential_types.json') }}"
+      register: import_results
+      tags:
+        - all
+        - never
+        - credential_types
+
+    - debug:
+        var: import_results
+
+    - name: import from credentials export
+      ansible.controller.import:
+        assets: "{{ lookup('file', './files/aap_credentials.json') }}"
+      register: import_results
+      tags:
+        - all
+        - never
+        - credentials
+
+    - debug:
+        var: import_results
+
+    - name: import from projects export
+      ansible.controller.import:
+        assets: "{{ lookup('file', './files/aap_projects.json') }}"
+      register: import_results
+      tags:
+        - all
+        - never
+        - projects
+
+    - debug:
+        var: import_results
+
+    - name: import from job_templates export
+      ansible.controller.import:
+        #assets: "{{ assets.credential_types }}"
+        assets: "{{ lookup('file', './files/aap_job_templates.json') }}"
+      register: import_results
+      tags:
+        - all
+        - never
+        - job_templates
+
+    - debug:
+        var: import_results

@@ -1,0 +1,121 @@
+---
+- name: Export Workflow
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections:
+    - ansible.controller
+  environment:
+     CONTROLLER_HOST: "{{ HOST }}"
+     CONTROLLER_USERNAME: admin
+     CONTROLLER_PASSWORD: "{{ PASSWORD }}"
+     CONTROLLER_VERIFY_SSL: False
+
+  tasks:
+    - name: Export inventory_sources to file
+      block:
+      - name: Export all inventory_sources to variable
+        ansible.controller.export:
+          inventory_sources: 'all'
+        register: export_results
+      
+      - name: debug export
+        ansible.builtin.debug:
+          var: export_results.assets
+  
+      - name: Export inventories to file
+        copy:
+          content: "{{ export_results.assets }}"
+          dest: ./files/aap_inventory_sources.json
+      ###  End of Block  ###
+
+    - name: Export inventories to file
+      block:
+      - name: Export all inventories to variable
+        ansible.controller.export:
+          inventory: 'all'
+        register: export_results
+      
+      - name: debug export
+        ansible.builtin.debug:
+          var: export_results.assets
+  
+      - name: Export inventories to file
+        copy:
+          content: "{{ export_results.assets }}"
+          dest: ./files/aap_inventories.json
+      ###  End of Block  ###
+
+    - name: Export credential types to file
+      block:
+      - name: Export all credential types to variable
+        ansible.controller.export:
+          credentials: 'all'
+        register: export_results
+      
+      - name: debug export
+        ansible.builtin.debug:
+          var: export_results.assets
+  
+      - name: Export to file
+        copy:
+          content: "{{ export_results.assets }}"
+          dest: ./files/aap_credential_types.json
+      ###  End of Block  ###
+      
+    - name: Export credentials to file
+      block:
+      - name: Export all credentials to variable
+        ansible.controller.export:
+          credentials: 'all'
+        register: export_results
+      
+      - name: debug export
+        ansible.builtin.debug:
+          var: export_results.assets
+  
+      - name: Export to file
+        copy:
+          content: "{{ export_results.assets }}"
+          dest: ./files/aap_credentials.json
+      ###  End of Block  ###
+
+    - name: Export projects to file
+      block:
+      - name: Export all projects to variable
+        ansible.controller.export:
+          inventory: 'all'
+        register: export_results
+      
+      - name: debug export
+        ansible.builtin.debug:
+          msg: export_results
+  
+      - name: Export to file
+        copy:
+          content: "{{ export_results.assets }}"
+          dest: ./files/aap_projects.json
+      ###  End of Block  ###
+
+    - name: Export job_templates to file
+      block:
+      - name: Export all job_templates to variable
+        ansible.controller.export:
+          job_templates: 'all'
+        register: export_results
+      
+      - name: debug export
+        ansible.builtin.debug:
+          msg: export_results
+  
+      - name: Export to file
+        copy:
+          content: "{{ export_results.assets }}"
+          dest: ./files/aap_job_templates.json
+      ###  End of Block  ###
+          
+#
+#    - name: Export job template to file
+#      copy:
+#        content: "{{ export_results | to_nice_yaml( width=50, explicit_start=True, explicit_end=True) }}"
+#        dest: automation_controller_export.json

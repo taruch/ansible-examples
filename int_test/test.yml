@@ -1,0 +1,10 @@
+---
+- name: Test Int
+  hosts: localhost
+  gather_facts: true
+  vars:
+    days: 20
+  tasks:
+    - name: Calculate epoch time + 60 days
+      set_fact:
+        future_epoch_time: "{{ (ansible_date_time.epoch | int) + (days | int * 24 * 60 * 60) }}"

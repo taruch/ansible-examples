@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+[Unit]
+Description=WildFly Application Server
+After=network.target
+
+[Service]
+User={{ wildfly_user }}
+Group={{ wildfly_group }}
+LimitNOFILE=102642
+Environment=JBOSS_HOME={{ wildfly_home }}
+Environment=JBOSS_LOG_DIR=/var/log/wildfly
+PIDFile=/var/run/wildfly/wildfly.pid
+ExecStart={{ wildfly_home }}/bin/standalone.sh \
+  -c standalone.xml \
+  -b 0.0.0.0 \
+  -bmanagement 127.0.0.1 \
+  -Djboss.http.port={{ http_port }} \
+  -Djboss.https.port={{ https_port }}
+ExecStop={{ wildfly_home }}/bin/jboss-cli.sh --connect command=:shutdown
+TimeoutStartSec=120
+TimeoutStopSec=30
+StandardOutput=append:/var/log/wildfly/console.log
+StandardError=append:/var/log/wildfly/console.log
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

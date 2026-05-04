@@ -1,0 +1,122 @@
+---
+- name: Import file tree into controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    controller_username: "{{ vault_controller_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+    aap_username: "{{ vault_aap_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    aap_password: "{{ vault_aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+    ansible_no_log: false
+    import_path: "./export_24"
+  
+  # You can set 'file_path' to have a specific file read in and processed for troubleshooting.  Typically you would do this by adding it as an extra var when running the playbook.
+
+  tasks:
+    # - name: Import vaulted variables
+    #   ansible.builtin.include_vars: "{{ import_path }}/vaulted_variables.yml"
+
+    - name: "Setup authentication (block)"
+      when: controller_oauthtoken is not defined
+      block:
+        - name: "Get the Authentication Token for the future requests"
+          ansible.builtin.uri:
+            url: "https://{{ controller_hostname }}/api/v2/tokens/"
+            user: "{{ controller_username }}"
+            password: "{{ controller_password }}"
+            method: POST
+            force_basic_auth: true
+            validate_certs: "{{ controller_validate_certs }}"
+            status_code: 201
+          register: authtoken_res
+
+        - name: "Set the oauth token to be used since now"
+          ansible.builtin.set_fact:
+            controller_oauthtoken: "{{ authtoken_res.json.token }}"
+            controller_oauthtoken_url: "{{ authtoken_res.json.url }}"
+
+    - name: Read configuration variables from the exported filetree
+      when: file_path is not defined
+      ansible.builtin.include_role:
+        name: infra.controller_configuration.filetree_read
+      vars:
+        # These variables tell filetree_read where to find your exported configuration
+        any_errors_fatal: true
+        orgs: ""
+        dir_orgs_vars: "{{ import_path }}"
+        # Gateway Directory Paths
+        # filetree_gateway_authenticators: "{{ import_path }}"
+        # filetree_gateway_authenticator_maps: "{{ import_path }}"
+        # filetree_gateway_settings: "{{ import_path }}"
+        # filetree_aap_organizations: "{{ import_path }}"
+        # filetree_aap_applications: "{{ import_path }}"
+        # filetree_gateway_http_ports: "{{ import_path }}"
+        # filetree_gateway_service_clusters: "{{ import_path }}"
+        # filetree_gateway_service_keys: "{{ import_path }}"
+        # filetree_gateway_service_nodes: "{{ import_path }}"
+        # filetree_gateway_services: "{{ import_path }}"
+        # filetree_aap_teams: "{{ import_path }}"
+        # filetree_aap_user_accounts: "{{ import_path }}"
+        # filetree_gateway_role_definitions: "{{ import_path }}"
+        # filetree_gateway_role_team_assignments: "{{ import_path }}"
+        # filetree_gateway_role_user_assignments: "{{ import_path }}"
+        # filetree_gateway_routes: "{{ import_path }}"
+        # Controller Directory Paths
+        filetree_controller_settings: "{{ import_path }}"
+        filetree_controller_organizations: "{{ import_path }}"
+        filetree_controller_labels: "{{ import_path }}"
+        filetree_controller_credential_types: "{{ import_path }}"
+        filetree_controller_credentials: "{{ import_path }}"
+        filetree_controller_credential_input_sources: "{{ import_path }}"
+        filetree_controller_notifications: "{{ import_path }}"
+        filetree_controller_projects: "{{ import_path }}"
+        filetree_controller_execution_environments: "{{ import_path }}"
+        filetree_controller_inventories: "{{ import_path }}"
+        filetree_controller_inventory_sources: "{{ import_path }}"
+        filetree_controller_instance_groups: "{{ import_path }}"
+        filetree_controller_hosts: "{{ import_path }}"
+        filetree_controller_groups: "{{ import_path }}"
+        filetree_controller_templates: "{{ import_path }}"
+        filetree_controller_workflow_job_templates: "{{ import_path }}"
+        filetree_controller_schedules: "{{ import_path }}"
+        filetree_controller_roles: "{{ import_path }}"
+        filetree_controller_teams: "{{ import_path }}"
+        # Logging
+        controller_configuration_filetree_read_secure_logging: false
+        controller_configuration_secure_logging: false
+        aap_configuration_collect_logs: true
+        # controller_configuration_credential_types_secure_logging: true
+
+
+    - name: Include configuration file
+      when: file_path is defined
+      ansible.builtin.include_vars: "{{ file_path }}"
+
+    - name: Dispatch the configuration to AAP 2.5
+      ansible.builtin.include_role:
+        name: infra.controller_configuration.dispatch
+      vars:
+        controller_configuration_filetree_create_secure_logging: false
+        controller_configuration_filetree_read_secure_logging: false
+        aap_configuration_secure_logging: false
+        aap_configuration_collect_logs: true
+        cas_secure_logging: false
+        controller_configuration_job_templates_secure_logging: false
+
+    - name: "Delete the Authentication Token used"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}{{ controller_oauthtoken_url }}"
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 204
+      when: controller_oauthtoken_url is defined
+
+...
