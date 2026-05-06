@@ -1,0 +1,6 @@
+---
+package_name: nginx
+service_name: nginx
+document_root: /usr/share/nginx/html
+site_title: Default site
+listen_port: 80

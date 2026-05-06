@@ -1,0 +1,15 @@
+---
+- name: Render /etc/motd from a Jinja2 template
+  hosts: all
+  become: true
+  vars:
+    env_name: production
+    maintenance_mode: false
+  tasks:
+    - name: Render MOTD
+      ansible.builtin.template:
+        src: motd.j2
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: '0644'

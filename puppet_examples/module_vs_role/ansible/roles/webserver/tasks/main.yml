@@ -1,0 +1,20 @@
+---
+- name: Install webserver package
+  ansible.builtin.package:
+    name: "{{ package_name }}"
+    state: present
+
+- name: Render landing page
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ document_root }}/index.html"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart webserver
+
+- name: Ensure webserver is running and enabled
+  ansible.builtin.service:
+    name: "{{ service_name }}"
+    state: started
+    enabled: true

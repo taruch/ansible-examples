@@ -1,0 +1,8 @@
+Welcome to <%= @fqdn %>
+
+Environment: <%= @env_name %>
+OS: <%= @os_family %> <%= @os_release %>
+
+<% if @maintenance_mode -%>
+*** MAINTENANCE MODE — DO NOT MODIFY ***
+<% end -%>

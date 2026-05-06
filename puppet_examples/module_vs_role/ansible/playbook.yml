@@ -1,0 +1,8 @@
+---
+- name: Apply webserver role
+  hosts: all
+  become: true
+  roles:
+    - role: webserver
+      vars:
+        site_title: Hello from Ansible

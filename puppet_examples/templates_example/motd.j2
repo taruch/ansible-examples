@@ -1,0 +1,8 @@
+Welcome to {{ ansible_facts['fqdn'] }}
+
+Environment: {{ env_name }}
+OS: {{ ansible_facts['os_family'] }} {{ ansible_facts['distribution_major_version'] }}
+
+{% if maintenance_mode %}
+*** MAINTENANCE MODE — DO NOT MODIFY ***
+{% endif %}
