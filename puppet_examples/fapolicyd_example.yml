@@ -1,0 +1,37 @@
+---
+- name: Configure fapolicyd
+  hosts: all
+  become: true
+  tasks:
+    - name: Install fapolicyd
+      ansible.builtin.package:
+        name: fapolicyd
+        state: present
+
+    - name: Manage fapolicyd configuration file
+      ansible.builtin.copy:
+        dest: /etc/fapolicyd/fapolicyd.conf
+        owner: root
+        group: fapolicyd
+        mode: '0644'
+        content: |
+          permissive = 0
+          integrity = sha256
+      notify:
+        - Restart fapolicyd
+        - Update fapolicyd trust database
+
+    - name: Ensure fapolicyd is running and enabled at boot
+      ansible.builtin.service:
+        name: fapolicyd
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart fapolicyd
+      ansible.builtin.service:
+        name: fapolicyd
+        state: restarted
+
+    - name: Update fapolicyd trust database
+      ansible.builtin.command: /usr/sbin/fapolicyd-cli --update

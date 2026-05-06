@@ -1,0 +1,20 @@
+---
+- name: Create deploy group and app_user
+  hosts: all
+  become: true
+  tasks:
+    - name: Ensure deploy group exists
+      ansible.builtin.group:
+        name: deploy
+        gid: 2001
+        state: present
+
+    - name: Ensure app_user exists
+      ansible.builtin.user:
+        name: app_user
+        uid: 2001
+        group: deploy
+        shell: /bin/bash
+        home: /home/app_user
+        create_home: true
+        state: present

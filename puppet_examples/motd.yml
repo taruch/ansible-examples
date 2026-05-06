@@ -1,0 +1,14 @@
+---
+- name: Manage /etc/motd
+  hosts: all
+  become: true
+  tasks:
+    - name: Set MOTD content
+      ansible.builtin.copy:
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          Welcome to this server!
+          This system is managed by Ansible.
