@@ -176,6 +176,18 @@ The `other` dict is an escape hatch for fields not exposed as named options — 
 
 Connection parameters can also come from the environment — see the [Authentication](#authentication) table.
 
+### Host formats
+
+`instance.host` accepts three forms:
+
+| Input | Resolved base URL |
+|-------|-------------------|
+| `myorg` | `https://myorg.teamdynamix.com/TDWebApi/api` |
+| `https://myorg.teamdynamix.com` | `https://myorg.teamdynamix.com/TDWebApi/api` |
+| `https://tdx.example.com/sbtdwebapi/api` | used verbatim |
+
+Use the third form when the tenant doesn't live under `*.teamdynamix.com` or its API path isn't `/TDWebApi/api` (sandboxes typically use `/sbtdwebapi/api`).
+
 Returns:
 - `record` — the created/updated ticket as a dict (snake_case keys)
 - `diff.before` / `diff.after` — useful with `--diff`

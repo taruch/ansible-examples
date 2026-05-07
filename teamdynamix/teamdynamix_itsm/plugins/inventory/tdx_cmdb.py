@@ -17,7 +17,11 @@ DOCUMENTATION = r'''
         required: true
         choices: ["teamdynamix.itsm.tdx_cmdb"]
       instance:
-        description: TDX subdomain (e.g. C(myorg) for myorg.teamdynamix.com).
+        description:
+          - TDX host. Three accepted forms.
+          - bare subdomain (C(myorg)) -- expands to C(https://myorg.teamdynamix.com/TDWebApi/api).
+          - scheme + host (C(https://myorg.teamdynamix.com)) -- C(/TDWebApi/api) appended.
+          - full base URL with API path (C(https://tdx.example.com/sbtdwebapi/api)) -- used verbatim, for sandboxes or custom-domain tenants whose API path differs from C(/TDWebApi/api).
         required: true
         type: str
         env:
@@ -97,9 +101,27 @@ RETURN = r'''  # Nothing returned directly; hosts and groups are added to the in
 import json
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 from ansible.errors import AnsibleError, AnsibleParserError
 from ansible.plugins.inventory import BaseInventoryPlugin
+
+
+def _resolve_base_url(instance):
+    """Build a TDX API base URL from one of three input forms.
+
+    * bare subdomain (``myorg``) -> ``https://myorg.teamdynamix.com/TDWebApi/api``
+    * scheme + host (``https://myorg.teamdynamix.com``) -> ``.../TDWebApi/api``
+    * full base URL with API path -> used verbatim (for sandbox or
+      custom-domain tenants whose API path isn't ``/TDWebApi/api``)
+    """
+    if "://" not in instance:
+        return f"https://{instance}.teamdynamix.com/TDWebApi/api"
+    cleaned = instance.rstrip("/")
+    parsed = urlparse(cleaned)
+    if parsed.path and parsed.path != "/":
+        return cleaned
+    return f"{cleaned}/TDWebApi/api"
 
 
 class InventoryModule(BaseInventoryPlugin):
@@ -136,7 +158,7 @@ class InventoryModule(BaseInventoryPlugin):
                 "tdx_cmdb requires either 'token', or both 'username' and 'password'"
             )
 
-        base_url = f"https://{instance}.teamdynamix.com/TDWebApi/api"
+        base_url = _resolve_base_url(instance)
 
         try:
             if not token:

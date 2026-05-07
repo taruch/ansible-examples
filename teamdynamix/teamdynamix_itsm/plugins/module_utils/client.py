@@ -8,7 +8,7 @@ __metaclass__ = type
 import json
 
 from ansible.module_utils.six.moves.urllib.error import HTTPError, URLError
-from ansible.module_utils.six.moves.urllib.parse import urlencode
+from ansible.module_utils.six.moves.urllib.parse import urlencode, urlparse
 from ansible.module_utils.urls import Request
 
 from .errors import TeamDynamixError, AuthError, UnexpectedAPIResponse
@@ -62,9 +62,22 @@ class Client(object):
             )
 
         if "://" not in host:
-            host = "https://{0}.teamdynamix.com".format(host)
-        self.host = host.rstrip("/")
-        self.base_url = "{0}/TDWebApi/api".format(self.host)
+            # Bare subdomain -- assume the standard hosted-tenant URL shape.
+            self.host = "https://{0}.teamdynamix.com".format(host)
+            self.base_url = "{0}/TDWebApi/api".format(self.host)
+        else:
+            cleaned = host.rstrip("/")
+            parsed = urlparse(cleaned)
+            if parsed.path and parsed.path != "/":
+                # Caller supplied the full base URL including the API path
+                # (e.g. sandboxes that use /sbtdwebapi/api, or custom domains
+                # that don't live under *.teamdynamix.com). Use it verbatim.
+                self.host = "{0}://{1}".format(parsed.scheme, parsed.netloc)
+                self.base_url = cleaned
+            else:
+                # Scheme + host only -- append the standard API path.
+                self.host = cleaned
+                self.base_url = "{0}/TDWebApi/api".format(cleaned)
         self.app_id = app_id
         self.username = username
         self.password = password
