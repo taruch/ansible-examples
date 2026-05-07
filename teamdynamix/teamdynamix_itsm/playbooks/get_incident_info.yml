@@ -1,0 +1,68 @@
+---
+# teamdynamix.itsm — Read TeamDynamix incident tickets.
+#
+# Demonstrates teamdynamix.itsm.incident_info. Two modes:
+#
+#   1. Look up a single ticket by ID:
+#        ansible-playbook teamdynamix.itsm.get_incident_info \
+#          -e tdx_ticket_id=98765
+#
+#   2. Search by query (snake_case keys, scalar values for *_id fields are
+#      auto-wrapped to a one-element list):
+#        ansible-playbook teamdynamix.itsm.get_incident_info \
+#          -e '{"search_query": {"status_id": [333, 555], "search_text": "database", "max_results": 20}}'
+#
+# Auth comes from env vars (TDX_HOST, TDX_APP_ID, and either
+# TDX_USERNAME+TDX_PASSWORD or TDX_TOKEN) or extra vars.
+
+- name: Get TeamDynamix incident info
+  hosts: localhost
+  gather_facts: false
+  vars:
+    instance:
+      host: "{{ tdx_instance | default(omit) }}"
+      app_id: "{{ tdx_app_id | default(omit) }}"
+      username: "{{ tdx_username | default(omit) }}"
+      password: "{{ tdx_password | default(omit) }}"
+      token: "{{ tdx_token | default(omit) }}"
+  tasks:
+    - name: Look up a single ticket by ID
+      teamdynamix.itsm.incident_info:
+        instance: "{{ instance }}"
+        id: "{{ tdx_ticket_id | int }}"
+      register: by_id
+      when: tdx_ticket_id is defined
+
+    - name: Search tickets via query
+      teamdynamix.itsm.incident_info:
+        instance: "{{ instance }}"
+        query: "{{ search_query | default({}) }}"
+      register: by_query
+      when: tdx_ticket_id is not defined
+
+    - name: Aggregate results
+      ansible.builtin.set_fact:
+        tdx_records: "{{ (by_id.records | default([])) + (by_query.records | default([])) }}"
+
+    - name: Show match count
+      ansible.builtin.debug:
+        msg: "Matched {{ tdx_records | length }} ticket(s)"
+
+    - name: Show each ticket
+      ansible.builtin.debug:
+        msg:
+          - "ID       : {{ item.id }}"
+          - "Title    : {{ item.title }}"
+          - "Status   : {{ item.status_name }} (id {{ item.status_id }})"
+          - "Priority : {{ item.priority_name }} (id {{ item.priority_id }})"
+          - "Created  : {{ item.created_date }}"
+          - "Modified : {{ item.modified_date }}"
+      loop: "{{ tdx_records }}"
+      loop_control:
+        label: "ticket {{ item.id }}"
+      when: tdx_records | length > 0
+
+    - name: Expose the first record's ID for downstream tasks
+      ansible.builtin.set_fact:
+        tdx_first_ticket_id: "{{ tdx_records[0].id }}"
+      when: tdx_records | length > 0

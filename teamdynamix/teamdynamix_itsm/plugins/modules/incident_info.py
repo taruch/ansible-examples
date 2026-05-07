@@ -77,7 +77,7 @@ options:
         C(created_date_from), C(created_date_to), C(modified_date_from),
         C(modified_date_to), C(is_on_hold), C(is_assigned).
       - Any other key is passed through verbatim, so raw TDX PascalCase
-        field names also work (e.g. C(StatusIDs: [333])).
+        field names also work (e.g. C(StatusIDs: [<your-status-id>])).
     type: dict
 
 author:
@@ -106,7 +106,7 @@ EXAMPLES = r"""
       username: "{{ tdx_username }}"
       password: "{{ tdx_password }}"
     query:
-      status_id: [333, 555]
+      status_id: [<your-new-status-id>, <your-in-progress-status-id>]
       search_text: database
       max_results: 50
   register: result
@@ -120,7 +120,7 @@ EXAMPLES = r"""
       password: "{{ tdx_password }}"
     query:
       requestor: jdoe@example.com
-      status_id: 333
+      status_id: <your-new-status-id>
       max_results: 25
   register: result
 

@@ -1,6 +1,6 @@
 # teamdynamix.itsm
 
-Ansible collection for integrating with the [TeamDynamix](https://www.teamdynamix.com/) ITSM REST API.
+Ansible collection for integrating with the [TeamDynamix](https://www.teamdynamix.com/) ITSM REST API. The [TDX Web API Explorer](https://api.teamdynamix.com/TDWebApi/) is the canonical reference for all endpoints, field names, and request/response shapes.
 
 ## Contents
 
@@ -11,6 +11,7 @@ Ansible collection for integrating with the [TeamDynamix](https://www.teamdynami
 | Inventory plugin | `teamdynamix.itsm.tdx_cmdb` | Dynamic inventory from the TDX CMDB/Asset API |
 | Playbook | `teamdynamix.itsm.create_incident` | Example: create a ticket using the `incident` module |
 | Playbook | `teamdynamix.itsm.update_incident` | Example: read with `incident_info`, update with `incident` |
+| Playbook | `teamdynamix.itsm.get_incident_info` | Example: look up a ticket by ID or search by query |
 
 The two modules mirror the pattern used by `servicenow.itsm` (`incident` + `incident_info`), backed by shared `module_utils/` (client, errors, arguments, utils, payload mapping).
 
@@ -24,7 +25,7 @@ ansible-galaxy collection install .
 
 # Or build and install
 ansible-galaxy collection build
-ansible-galaxy collection install teamdynamix-itsm-1.0.0.tar.gz
+ansible-galaxy collection install teamdynamix-itsm-1.1.0.tar.gz
 ```
 
 ---
@@ -144,31 +145,58 @@ Idempotent ticket CRUD. `state: present` creates a new ticket if `id` is omitted
     state: present
     title: "Database server unreachable"
     description: "Primary DB host stopped responding at 14:30 UTC."
-    type_id: 111
-    account_id: 222
-    status_id: 333
-    priority_id: 444
+    type_id: <your-type-id>             # tenant-specific ints — see
+    account_id: <your-account-id>       # "Finding TDX Integer IDs" below
+    status_id: <your-new-status-id>
+    priority_id: <your-priority-id>
   register: result
 
 - name: Move ticket to In Progress
   teamdynamix.itsm.incident:
     instance: "{{ tdx_instance }}"
     id: "{{ result.record.id }}"
-    status_id: 555
+    status_id: <your-in-progress-status-id>
 
 - name: Open a ticket — resolve users by name, plus extra TDX fields
   teamdynamix.itsm.incident:
     instance: "{{ tdx_instance }}"
     title: "VPN access request"
-    type_id: 111
-    status_id: 333
-    priority_id: 444
+    type_id: <your-type-id>
+    status_id: <your-new-status-id>
+    priority_id: <your-priority-id>
     requestor: jdoe@example.com    # username, email, or UID; resolved via /people/search
     responsible: helpdesk-tier1
     other:                          # arbitrary TDX PascalCase fields the module doesn't expose
       Tags: ["vpn", "remote-access"]
       EstimatedHours: 2
 ```
+
+### Required fields when creating
+
+When `id` is omitted (i.e. creating a new ticket), the module requires the following:
+
+| Field | TDX field | Description |
+|-------|-----------|-------------|
+| `title` | `Title` | Short summary of the ticket |
+| `type_id` | `TypeID` | Ticket type (e.g. *Incident*, *Service Request*) — values are tenant-specific |
+| `status_id` | `StatusID` | Initial status (e.g. *New*, *Open*) — values are tenant-specific |
+| `priority_id` | `PriorityID` | Priority (e.g. *Low*, *High*) — values are tenant-specific |
+
+Optional but commonly set:
+
+| Field | TDX field | Description |
+|-------|-----------|-------------|
+| `account_id` | `AccountID` | Department / account that owns the ticket |
+| `description` | `Description` | Long-form description |
+| `requestor` *or* `requestor_uid` | `RequestorUid` | Person reporting the ticket; defaults to the auth'd user |
+| `responsible` *or* `responsible_uid` | `ResponsibleUid` | Person/group assigned to work the ticket |
+| `impact_id`, `urgency_id`, `source_id` | matching `*ID` | Categorization fields |
+| `location_id`, `location_room_id` | matching `*ID` | Where the issue is occurring |
+| `service_id`, `service_offering_id` | matching `*ID` | Service catalog mapping |
+| `form_id` | `FormID` | TDX form template applied to the ticket |
+| `notify_requestor` | n/a (query param) | Whether TDX emails the requestor on create/update (default `true`) |
+
+`type_id`, `status_id`, `priority_id`, `account_id`, `form_id` etc. are **integer IDs that vary per TDX tenant** — see [Finding TDX Integer IDs](#finding-tdx-integer-ids) for how to retrieve them.
 
 The `requestor` / `responsible` options accept a UID (used as-is), a username, or an email; non-UID values are resolved via TDX `/people/search` and must match exactly one active user. They are mutually exclusive with the corresponding `*_uid` options.
 
@@ -209,8 +237,8 @@ Read-only lookup. Returns `records` (always a list).
   teamdynamix.itsm.incident_info:
     instance: "{{ tdx_instance }}"
     query:
-      status_id: [333, 555]   # auto-wrapped to StatusIDs
-      priority_id: 444         # scalar → [444] → PriorityIDs
+      status_id: [<your-new-status-id>, <your-in-progress-status-id>]   # auto-wrapped to StatusIDs
+      priority_id: <your-priority-id>                                    # scalar → [...] → PriorityIDs
       search_text: database
       max_results: 50
 
@@ -219,7 +247,7 @@ Read-only lookup. Returns `records` (always a list).
     instance: "{{ tdx_instance }}"
     query:
       requestor: jdoe@example.com   # resolved to UID, sent as RequestorUids
-      status_id: 333
+      status_id: <your-new-status-id>
       max_results: 25
 ```
 
@@ -234,7 +262,7 @@ Read-only lookup. Returns `records` (always a list).
 | `requestor_uid`, `responsible_uid` | `RequestorUids`, `ResponsibilityUids` | scalar wrapped |
 | `requestor`, `responsible` | `RequestorUids`, `ResponsibilityUids` | username/email looked up via `/people/search`, then wrapped |
 
-Any other key is passed through verbatim, so raw TDX PascalCase still works (e.g. `StatusIDs: [333]`). See the TDX Web API `TicketSearch` contract for the full field set.
+Any other key is passed through verbatim, so raw TDX PascalCase still works (e.g. `StatusIDs: [<your-new-status-id>]`). See the TDX Web API `TicketSearch` contract for the full field set.
 
 ---
 
@@ -246,10 +274,10 @@ ansible-playbook teamdynamix.itsm.create_incident \
   -e tdx_app_id=35 \
   -e tdx_username=$TDX_USERNAME \
   -e tdx_password=$TDX_PASSWORD \
-  -e ticket_type_id=111 \
-  -e ticket_account_id=222 \
-  -e ticket_status_id=333 \
-  -e ticket_priority_id=444 \
+  -e "ticket_type_id=<your-type-id>" \
+  -e "ticket_account_id=<your-account-id>" \
+  -e "ticket_status_id=<your-new-status-id>" \
+  -e "ticket_priority_id=<your-priority-id>" \
   -e "ticket_title='Database server unreachable'" \
   -e "ticket_description='The primary DB host stopped responding at 14:30 UTC.'"
 ```
@@ -268,7 +296,7 @@ ansible-playbook teamdynamix.itsm.update_incident \
   -e tdx_username=$TDX_USERNAME \
   -e tdx_password=$TDX_PASSWORD \
   -e tdx_ticket_id=98765 \
-  -e update_status_id=555 \
+  -e "update_status_id=<your-in-progress-status-id>" \
   -e "update_comment='Remediation script applied. Monitoring for recurrence.'"
 
 # Comment only (no field changes)
@@ -283,9 +311,74 @@ ansible-playbook teamdynamix.itsm.update_incident \
 
 ---
 
+## Playbook: `teamdynamix.itsm.get_incident_info`
+
+Two modes — single-ticket lookup by ID, or a search returning a list of records.
+
+```bash
+# By ID
+ansible-playbook teamdynamix.itsm.get_incident_info \
+  -e tdx_instance=myorg \
+  -e tdx_app_id=35 \
+  -e tdx_username=$TDX_USERNAME \
+  -e tdx_password=$TDX_PASSWORD \
+  -e tdx_ticket_id=98765
+
+# By search (snake_case keys; scalar *_id values are auto-wrapped to a list)
+ansible-playbook teamdynamix.itsm.get_incident_info \
+  -e tdx_instance=myorg \
+  -e tdx_app_id=35 \
+  -e tdx_username=$TDX_USERNAME \
+  -e tdx_password=$TDX_PASSWORD \
+  -e '{"search_query": {"status_id": ["<your-new-status-id>", "<your-in-progress-status-id>"], "search_text": "database", "max_results": 20}}'
+```
+
+Sets the fact `tdx_records` (full list) and `tdx_first_ticket_id` (when at least one match) for use in downstream tasks.
+
+---
+
+## TeamDynamix API documentation
+
+This collection wraps the [TeamDynamix Web API](https://api.teamdynamix.com/TDWebApi/) — the API Explorer linked above is the canonical reference for every field name, request/response shape, and endpoint listed below.
+
+Endpoints touched by this collection:
+
+| Endpoint | Used by |
+|----------|---------|
+| `POST /auth` | `incident`, `incident_info`, `tdx_cmdb` (when supplying `username`+`password`) |
+| `GET /{appId}/tickets/{id}` | `incident` (fetch for update/delete diff), `incident_info` (lookup by ID) |
+| `POST /{appId}/tickets` | `incident` (create) |
+| `POST /{appId}/tickets/{id}` | `incident` (update) |
+| `DELETE /{appId}/tickets/{id}` | `incident` (delete) |
+| `POST /{appId}/tickets/search` | `incident_info` (search via `query:`) |
+| `POST /people/search` | `requestor` / `responsible` username/email resolution |
+| `POST /{appId}/assets/search` | `tdx_cmdb` inventory plugin |
+
+The `query:` parameter on `incident_info` follows the TDX `TicketSearch` schema — see the **Tickets** section of the API Explorer for the full list of supported filters.
+
+---
+
 ## Finding TDX Integer IDs
 
-TypeID, StatusID, PriorityID, and AccountID are org-specific. Retrieve them via the API:
+TypeID, StatusID, PriorityID, AccountID, and the rest of the `*_id` fields are tenant-specific. Two ways to look them up:
+
+### From the TDX Admin UI (TDAdmin)
+
+1. Log in as an admin and open **TDAdmin**.
+2. In the **Applications** list, click into your Ticketing application.
+3. Use the left-hand sidebar to navigate to the section that matches the field you need:
+   - **Types** → values for `type_id`
+   - **Statuses** → values for `status_id`
+   - **Priorities** → values for `priority_id`
+   - **Impacts** / **Urgencies** / **Sources** → `impact_id`, `urgency_id`, `source_id`
+   - **Forms** → `form_id`
+   - **Accounts**, **Locations**, **Services** etc. live under their own top-level Admin sections
+
+The integer ID is shown either as a column on the list page or in the URL when you open an item for edit (e.g. `…/Admin/TicketingApplications/<appId>/Types/Edit?id=<your-type-id>`).
+
+### From the API
+
+Retrieve them programmatically:
 
 ```bash
 TOKEN=$(curl -s -X POST \

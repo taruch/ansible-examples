@@ -172,10 +172,10 @@ EXAMPLES = r"""
     state: present
     title: "Database server unreachable"
     description: "Primary DB host stopped responding at 14:30 UTC."
-    type_id: 111
-    account_id: 222
-    status_id: 333
-    priority_id: 444
+    type_id: <your-type-id>             # tenant-specific ints; see your TDX
+    account_id: <your-account-id>       # admin URLs or the API's
+    status_id: <your-new-status-id>     # /tickets/types, /tickets/statuses,
+    priority_id: <your-priority-id>     # /tickets/priorities, etc.
   register: created
 
 - name: Update an existing incident's status (pre-obtained token)
@@ -185,7 +185,7 @@ EXAMPLES = r"""
       app_id: 35
       token: "{{ tdx_token }}"
     id: "{{ created.record.id }}"
-    status_id: 555  # In Progress
+    status_id: <your-in-progress-status-id>
 
 - name: Close (delete) an incident
   teamdynamix.itsm.incident:
@@ -205,9 +205,9 @@ EXAMPLES = r"""
       username: "{{ tdx_username }}"
       password: "{{ tdx_password }}"
     title: "VPN access request"
-    type_id: 111
-    status_id: 333
-    priority_id: 444
+    type_id: <your-type-id>
+    status_id: <your-new-status-id>
+    priority_id: <your-priority-id>
     requestor: jdoe@example.com    # resolved to UID via /people/search
     responsible: helpdesk-tier1    # resolved by username
     other:
