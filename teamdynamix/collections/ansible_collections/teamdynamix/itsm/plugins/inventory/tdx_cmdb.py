@@ -7,7 +7,8 @@ DOCUMENTATION = r'''
     description:
       - Fetches assets from the TeamDynamix Asset/CMDB API.
       - Returns an Ansible inventory with hosts grouped by I(location) and I(status).
-      - Authenticates using a TDX service account (BEID + Web Services Key).
+      - Authenticates with either I(username) + I(password) (calls C(POST /auth)
+        to obtain a bearer token) or a pre-obtained I(token).
     version_added: "1.0.0"
     author: Your Name (@yourhandle)
     options:
@@ -27,18 +28,29 @@ DOCUMENTATION = r'''
         type: int
         env:
           - name: TDX_APP_ID
-      beid:
-        description: Service account BEID (GUID). Use a vault-encrypted variable or env var.
-        required: true
+      username:
+        description:
+          - TDX username. Required unless I(token) is supplied.
+          - Use a vault-encrypted variable or env var.
+        required: false
         type: str
         env:
-          - name: TDX_BEID
-      wskey:
-        description: Service account Web Services Key (GUID).
-        required: true
+          - name: TDX_USERNAME
+      password:
+        description:
+          - TDX password. Required unless I(token) is supplied.
+        required: false
         type: str
         env:
-          - name: TDX_WS_KEY
+          - name: TDX_PASSWORD
+      token:
+        description:
+          - Pre-obtained TDX bearer token. When set, no login call is made
+            and I(username)/I(password) are ignored.
+        required: false
+        type: str
+        env:
+          - name: TDX_TOKEN
       host_attr_id:
         description:
           - Custom asset attribute ID whose value holds the hostname or IP address.
@@ -62,21 +74,21 @@ DOCUMENTATION = r'''
 
 EXAMPLES = r'''
 # File: tdx_cmdb.yml  (pass with -i tdx_cmdb.yml)
+# Username + password auth
 plugin: teamdynamix.itsm.tdx_cmdb
 instance: myorg
 app_id: 40
-beid: "{{ lookup('env', 'TDX_BEID') }}"
-wskey: "{{ lookup('env', 'TDX_WS_KEY') }}"
+username: "{{ lookup('env', 'TDX_USERNAME') }}"
+password: "{{ lookup('env', 'TDX_PASSWORD') }}"
 status_filter:
   - "In Use"
   - "In Maintenance"
 
-# Use a custom attribute (ID 9876) as ansible_host instead of asset Name
+# Pre-obtained bearer token (skips /auth)
 plugin: teamdynamix.itsm.tdx_cmdb
 instance: myorg
 app_id: 40
-beid: "{{ lookup('env', 'TDX_BEID') }}"
-wskey: "{{ lookup('env', 'TDX_WS_KEY') }}"
+token: "{{ lookup('env', 'TDX_TOKEN') }}"
 host_attr_id: 9876
 '''
 
@@ -113,15 +125,22 @@ class InventoryModule(BaseInventoryPlugin):
 
         instance = self.get_option('instance')
         app_id = self.get_option('app_id')
-        beid = self.get_option('beid')
-        wskey = self.get_option('wskey')
+        username = self.get_option('username')
+        password = self.get_option('password')
+        token = self.get_option('token')
         host_attr_id = self.get_option('host_attr_id')
         status_filter = [s.lower() for s in (self.get_option('status_filter') or [])]
+
+        if not token and not (username and password):
+            raise AnsibleParserError(
+                "tdx_cmdb requires either 'token', or both 'username' and 'password'"
+            )
 
         base_url = f"https://{instance}.teamdynamix.com/TDWebApi/api"
 
         try:
-            token = self._auth(base_url, beid, wskey)
+            if not token:
+                token = self._auth(base_url, username, password)
             assets = self._search_assets(base_url, app_id, token)
         except urllib.error.HTTPError as exc:
             raise AnsibleError(
@@ -178,11 +197,11 @@ class InventoryModule(BaseInventoryPlugin):
         return name.lower().replace(' ', '_').replace('-', '_').replace('/', '_')
 
     @staticmethod
-    def _auth(base_url, beid, wskey):
-        """Authenticate with the TDX service account and return a bearer token."""
-        payload = json.dumps({'BEID': beid, 'WebServicesKey': wskey}).encode()
+    def _auth(base_url, username, password):
+        """Authenticate against TDX /auth and return a bearer token."""
+        payload = json.dumps({'username': username, 'password': password}).encode()
         req = urllib.request.Request(
-            f"{base_url}/auth/loginadmin",
+            f"{base_url}/auth",
             data=payload,
             headers={'Content-Type': 'application/json'},
             method='POST',

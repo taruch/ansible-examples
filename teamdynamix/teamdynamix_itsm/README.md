@@ -6,11 +6,13 @@ Ansible collection for integrating with the [TeamDynamix](https://www.teamdynami
 
 | Type | Name | Description |
 |------|------|-------------|
+| Module | `teamdynamix.itsm.incident` | Create / update / delete an incident ticket (idempotent, supports check_mode) |
+| Module | `teamdynamix.itsm.incident_info` | Look up a ticket by ID, or search via TDX `/tickets/search` |
 | Inventory plugin | `teamdynamix.itsm.tdx_cmdb` | Dynamic inventory from the TDX CMDB/Asset API |
-| Playbook | `teamdynamix.itsm.create_incident` | Create a new incident ticket |
-| Playbook | `teamdynamix.itsm.update_incident` | Update fields / add a comment to an existing ticket |
+| Playbook | `teamdynamix.itsm.create_incident` | Example: create a ticket using the `incident` module |
+| Playbook | `teamdynamix.itsm.update_incident` | Example: read with `incident_info`, update with `incident` |
 
-All content uses `ansible.builtin` modules only — no additional collection dependencies.
+The two modules mirror the pattern used by `servicenow.itsm` (`incident` + `incident_info`), backed by shared `module_utils/` (client, errors, arguments, utils, payload mapping).
 
 ---
 
@@ -29,13 +31,25 @@ ansible-galaxy collection install teamdynamix-itsm-1.0.0.tar.gz
 
 ## Authentication
 
-All plugins and playbooks authenticate with a **TDX Service Account** using BEID + Web Services Key.
+The `incident` and `incident_info` modules authenticate with TDX using **either**:
 
-To create a service account in TDX:
-> Admin → Users → Create User → enable **"Is Service Account"** → copy **BEID** and **Web Services Key**
+1. **Username + password** — the module POSTs to `/api/auth` and caches the returned bearer token for the duration of the run.
+2. **Token** — a bearer token you've already obtained out-of-band; the module uses it directly without calling `/auth`.
 
-Grant the service account read access to the Asset application (for CMDB inventory) and
-create/edit access to the Ticketing application (for incident management).
+The user (or whoever issued the token) needs at minimum *create / edit* access to the Ticketing application. For `requestor`/`responsible` name lookup, *view* access to People is also required.
+
+Connection parameters can be supplied inline or via environment variables:
+
+| Suboption | Env var |
+|-----------|---------|
+| `host` | `TDX_HOST` |
+| `app_id` | `TDX_APP_ID` |
+| `username` | `TDX_USERNAME` |
+| `password` | `TDX_PASSWORD` |
+| `token` | `TDX_TOKEN` |
+| `timeout` | `TDX_TIMEOUT` |
+
+The `tdx_cmdb` inventory plugin uses the same auth shape (`username` + `password`, or `token`).
 
 ---
 
@@ -52,8 +66,10 @@ Create a file ending in `tdx_cmdb.yml` (or `tdx.yml`):
 plugin: teamdynamix.itsm.tdx_cmdb
 instance: myorg          # subdomain: myorg.teamdynamix.com
 app_id: 40               # Asset application ID (integer from Admin URL)
-beid: "{{ lookup('env', 'TDX_BEID') }}"
-wskey: "{{ lookup('env', 'TDX_WS_KEY') }}"
+username: "{{ lookup('env', 'TDX_USERNAME') }}"
+password: "{{ lookup('env', 'TDX_PASSWORD') }}"
+# ...or in place of username/password:
+# token: "{{ lookup('env', 'TDX_TOKEN') }}"
 
 # Optional — filter by asset status (default: "In Use" only)
 status_filter:
@@ -67,7 +83,8 @@ status_filter:
 ### Usage
 
 ```bash
-export TDX_BEID=<your-beid> TDX_WS_KEY=<your-wskey>
+export TDX_USERNAME=<your-username> TDX_PASSWORD=<your-password>
+# or:  export TDX_TOKEN=<your-bearer-token>
 
 # Inspect inventory
 ansible-inventory -i inventory/tdx_cmdb.yml --list
@@ -105,8 +122,107 @@ Each host gets these variables set automatically:
 ### In AAP
 
 Add the inventory config YAML as a **Source from a Project** with **Inventory Plugin** type,
-or set the environment variables (`TDX_BEID`, `TDX_WS_KEY`, etc.) on the inventory source
-using a custom credential type.
+or set the environment variables (`TDX_USERNAME`, `TDX_PASSWORD`, or `TDX_TOKEN`) on the
+inventory source using a custom credential type.
+
+---
+
+## Module: `teamdynamix.itsm.incident`
+
+Idempotent ticket CRUD. `state: present` creates a new ticket if `id` is omitted, otherwise updates the ticket with that ID. `state: absent` deletes by `id`. Supports `--check` mode.
+
+```yaml
+- name: Create or update a ticket
+  teamdynamix.itsm.incident:
+    instance:
+      host: myorg            # or full URL: https://myorg.teamdynamix.com
+      app_id: 35
+      username: "{{ lookup('env', 'TDX_USERNAME') }}"
+      password: "{{ lookup('env', 'TDX_PASSWORD') }}"
+      # ...or in place of username/password:
+      # token: "{{ lookup('env', 'TDX_TOKEN') }}"
+    state: present
+    title: "Database server unreachable"
+    description: "Primary DB host stopped responding at 14:30 UTC."
+    type_id: 111
+    account_id: 222
+    status_id: 333
+    priority_id: 444
+  register: result
+
+- name: Move ticket to In Progress
+  teamdynamix.itsm.incident:
+    instance: "{{ tdx_instance }}"
+    id: "{{ result.record.id }}"
+    status_id: 555
+
+- name: Open a ticket — resolve users by name, plus extra TDX fields
+  teamdynamix.itsm.incident:
+    instance: "{{ tdx_instance }}"
+    title: "VPN access request"
+    type_id: 111
+    status_id: 333
+    priority_id: 444
+    requestor: jdoe@example.com    # username, email, or UID; resolved via /people/search
+    responsible: helpdesk-tier1
+    other:                          # arbitrary TDX PascalCase fields the module doesn't expose
+      Tags: ["vpn", "remote-access"]
+      EstimatedHours: 2
+```
+
+The `requestor` / `responsible` options accept a UID (used as-is), a username, or an email; non-UID values are resolved via TDX `/people/search` and must match exactly one active user. They are mutually exclusive with the corresponding `*_uid` options.
+
+The `other` dict is an escape hatch for fields not exposed as named options — keys are passed through verbatim, so use **TDX PascalCase** field names (e.g. `Tags`, `ExternalID`). Values here win over named options on conflict.
+
+Connection parameters can also come from the environment — see the [Authentication](#authentication) table.
+
+Returns:
+- `record` — the created/updated ticket as a dict (snake_case keys)
+- `diff.before` / `diff.after` — useful with `--diff`
+- `changed` — false when an update is a no-op (existing fields already match)
+
+---
+
+## Module: `teamdynamix.itsm.incident_info`
+
+Read-only lookup. Returns `records` (always a list).
+
+```yaml
+- name: Fetch one ticket by ID
+  teamdynamix.itsm.incident_info:
+    instance: "{{ tdx_instance }}"
+    id: 98765
+
+- name: Search for open high-priority tickets containing "database"
+  teamdynamix.itsm.incident_info:
+    instance: "{{ tdx_instance }}"
+    query:
+      status_id: [333, 555]   # auto-wrapped to StatusIDs
+      priority_id: 444         # scalar → [444] → PriorityIDs
+      search_text: database
+      max_results: 50
+
+- name: Find tickets opened by a specific user (looked up by email)
+  teamdynamix.itsm.incident_info:
+    instance: "{{ tdx_instance }}"
+    query:
+      requestor: jdoe@example.com   # resolved to UID, sent as RequestorUids
+      status_id: 333
+      max_results: 25
+```
+
+`query` accepts Ansible-friendly snake_case keys that get translated into the TDX `TicketSearch` payload. Recognized keys include:
+
+| Snake_case | TDX field | Notes |
+|------------|-----------|-------|
+| `search_text`, `max_results`, `classification`, `ticket_id` | `SearchText`, `MaxResults`, `TicketClassification`, `TicketID` | scalar |
+| `created_date_from`, `created_date_to`, `modified_date_from`, `modified_date_to` | matching `*Date{From,To}` | scalar |
+| `is_on_hold`, `is_assigned` | `IsOnHold`, `IsAssigned` | bool |
+| `status_id`, `priority_id`, `urgency_id`, `impact_id`, `type_id`, `account_id`, `source_id`, `location_id`, `location_room_id`, `service_id`, `service_offering_id`, `form_id`, `status_class_id` | corresponding `*IDs` | scalar wrapped to one-element list |
+| `requestor_uid`, `responsible_uid` | `RequestorUids`, `ResponsibilityUids` | scalar wrapped |
+| `requestor`, `responsible` | `RequestorUids`, `ResponsibilityUids` | username/email looked up via `/people/search`, then wrapped |
+
+Any other key is passed through verbatim, so raw TDX PascalCase still works (e.g. `StatusIDs: [333]`). See the TDX Web API `TicketSearch` contract for the full field set.
 
 ---
 
@@ -116,8 +232,8 @@ using a custom credential type.
 ansible-playbook teamdynamix.itsm.create_incident \
   -e tdx_instance=myorg \
   -e tdx_app_id=35 \
-  -e tdx_beid=$TDX_BEID \
-  -e tdx_wskey=$TDX_WS_KEY \
+  -e tdx_username=$TDX_USERNAME \
+  -e tdx_password=$TDX_PASSWORD \
   -e ticket_type_id=111 \
   -e ticket_account_id=222 \
   -e ticket_status_id=333 \
@@ -137,8 +253,8 @@ Sets the fact `tdx_ticket_id` for use in downstream plays or workflows.
 ansible-playbook teamdynamix.itsm.update_incident \
   -e tdx_instance=myorg \
   -e tdx_app_id=35 \
-  -e tdx_beid=$TDX_BEID \
-  -e tdx_wskey=$TDX_WS_KEY \
+  -e tdx_username=$TDX_USERNAME \
+  -e tdx_password=$TDX_PASSWORD \
   -e tdx_ticket_id=98765 \
   -e update_status_id=555 \
   -e "update_comment='Remediation script applied. Monitoring for recurrence.'"
@@ -147,8 +263,8 @@ ansible-playbook teamdynamix.itsm.update_incident \
 ansible-playbook teamdynamix.itsm.update_incident \
   -e tdx_instance=myorg \
   -e tdx_app_id=35 \
-  -e tdx_beid=$TDX_BEID \
-  -e tdx_wskey=$TDX_WS_KEY \
+  -e tdx_username=$TDX_USERNAME \
+  -e tdx_password=$TDX_PASSWORD \
   -e tdx_ticket_id=98765 \
   -e "update_comment='Escalated to DBA team.'"
 ```
@@ -161,9 +277,9 @@ TypeID, StatusID, PriorityID, and AccountID are org-specific. Retrieve them via 
 
 ```bash
 TOKEN=$(curl -s -X POST \
-  https://myorg.teamdynamix.com/TDWebApi/api/auth/loginadmin \
+  https://myorg.teamdynamix.com/TDWebApi/api/auth \
   -H "Content-Type: application/json" \
-  -d "{\"BEID\":\"$TDX_BEID\",\"WebServicesKey\":\"$TDX_WS_KEY\"}" | tr -d '"')
+  -d "{\"username\":\"$TDX_USERNAME\",\"password\":\"$TDX_PASSWORD\"}" | tr -d '"')
 
 # Ticket types
 curl -s -H "Authorization: Bearer $TOKEN" \
