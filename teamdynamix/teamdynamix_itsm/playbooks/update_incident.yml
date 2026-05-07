@@ -32,9 +32,9 @@
     - name: Apply field updates (no-op if already at target values)
       teamdynamix.itsm.incident:
         instance: "{{ instance }}"
-        id: "{{ tdx_ticket_id | int }}"
-        status_id: "{{ update_status_id | int }}"
-        priority_id: "{{ update_priority_id | default(omit) | int if update_priority_id is defined else omit }}"
+        id: "{{ tdx_ticket_id }}"
+        status_id: "{{ update_status_id }}"
+        priority_id: "{{ update_priority_id | default(omit) }}"
       when: update_status_id is defined
       register: updated
 

@@ -30,14 +30,14 @@ options:
       host:
         description:
           - TDX host. Three accepted forms:
-          - "C(myorg) -> C(https://myorg.teamdynamix.com/TDWebApi/api)
+          - "C(myorg) -> C(https://myorg.teamdynamix.com/api)
             (bare subdomain on the standard hosted-tenant URL)."
-          - "C(https://myorg.teamdynamix.com) -> C(.../TDWebApi/api)
+          - "C(https://myorg.teamdynamix.com) -> C(.../api)
             (scheme + host; standard API path appended)."
           - "C(https://tdx.example.com/sbtdwebapi/api) -> used verbatim
             (full base URL including the API path; for sandboxes or
             custom-domain tenants whose API path differs from
-            C(/TDWebApi/api))."
+            C(/api))."
           - Falls back to C(TDX_HOST).
         type: str
         required: true
@@ -320,6 +320,30 @@ def _build_payload(params):
     return payload
 
 
+def _merge_for_update(existing_raw, user_payload):
+    """Build a full update body by layering the user's payload over the
+    existing record's settable fields.
+
+    TDX's POST /{appId}/tickets/{id} is a full-record update: required
+    fields (Title, TypeID, AccountID, StatusID, PriorityID, ...) must be
+    present in the body or the call fails. Callers shouldn't have to
+    re-supply unchanged fields, so we read the current ticket and merge
+    the caller's overrides on top of its settable fields.
+    """
+    settable_tdx_keys = [
+        PAYLOAD_FIELDS_MAPPING[f]
+        for f in SETTABLE_FIELDS
+        if f in PAYLOAD_FIELDS_MAPPING
+    ]
+    merged = {}
+    for tdx_key in settable_tdx_keys:
+        value = existing_raw.get(tdx_key)
+        if value is not None:
+            merged[tdx_key] = value
+    merged.update(user_payload)
+    return merged
+
+
 def _resolve_people(client, params):
     """Translate ``requestor``/``responsible`` (name/email) into ``*_uid`` params."""
     if params.get("requestor"):
@@ -365,11 +389,12 @@ def ensure_present(module, client):
         before = utils.to_ansible(existing_raw, PAYLOAD_FIELDS_MAPPING)
         return False, before, dict(before=before, after=before)
 
-    updated_raw = _update_ticket(client, app_id, ticket_id, payload, module.check_mode)
+    update_body = _merge_for_update(existing_raw, payload)
+    updated_raw = _update_ticket(client, app_id, ticket_id, update_body, module.check_mode)
     if updated_raw is None:
         # check_mode: synthesize the projected after-state by merging
         merged = dict(existing_raw)
-        merged.update(payload)
+        merged.update(update_body)
         updated_raw = merged
 
     before = utils.to_ansible(existing_raw, PAYLOAD_FIELDS_MAPPING)

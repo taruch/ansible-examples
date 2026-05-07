@@ -19,9 +19,9 @@ DOCUMENTATION = r'''
       instance:
         description:
           - TDX host. Three accepted forms.
-          - bare subdomain (C(myorg)) -- expands to C(https://myorg.teamdynamix.com/TDWebApi/api).
-          - scheme + host (C(https://myorg.teamdynamix.com)) -- C(/TDWebApi/api) appended.
-          - full base URL with API path (C(https://tdx.example.com/sbtdwebapi/api)) -- used verbatim, for sandboxes or custom-domain tenants whose API path differs from C(/TDWebApi/api).
+          - bare subdomain (C(myorg)) -- expands to C(https://myorg.teamdynamix.com/api).
+          - scheme + host (C(https://myorg.teamdynamix.com)) -- C(/api) appended.
+          - full base URL with API path (C(https://tdx.example.com/sbtdwebapi/api)) -- used verbatim, for sandboxes or custom-domain tenants whose API path differs from C(/api).
         required: true
         type: str
         env:
@@ -110,18 +110,18 @@ from ansible.plugins.inventory import BaseInventoryPlugin
 def _resolve_base_url(instance):
     """Build a TDX API base URL from one of three input forms.
 
-    * bare subdomain (``myorg``) -> ``https://myorg.teamdynamix.com/TDWebApi/api``
-    * scheme + host (``https://myorg.teamdynamix.com``) -> ``.../TDWebApi/api``
+    * bare subdomain (``myorg``) -> ``https://myorg.teamdynamix.com/api``
+    * scheme + host (``https://myorg.teamdynamix.com``) -> ``.../api``
     * full base URL with API path -> used verbatim (for sandbox or
-      custom-domain tenants whose API path isn't ``/TDWebApi/api``)
+      custom-domain tenants whose API path isn't ``/api``)
     """
     if "://" not in instance:
-        return f"https://{instance}.teamdynamix.com/TDWebApi/api"
+        return f"https://{instance}.teamdynamix.com/api"
     cleaned = instance.rstrip("/")
     parsed = urlparse(cleaned)
     if parsed.path and parsed.path != "/":
         return cleaned
-    return f"{cleaned}/TDWebApi/api"
+    return f"{cleaned}/api"
 
 
 class InventoryModule(BaseInventoryPlugin):
@@ -223,7 +223,7 @@ class InventoryModule(BaseInventoryPlugin):
         """Authenticate against TDX /auth and return a bearer token."""
         payload = json.dumps({'username': username, 'password': password}).encode()
         req = urllib.request.Request(
-            f"{base_url}/auth",
+            f"{base_url}/auth/login",
             data=payload,
             headers={'Content-Type': 'application/json'},
             method='POST',

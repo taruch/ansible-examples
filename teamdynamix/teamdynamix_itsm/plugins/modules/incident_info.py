@@ -28,7 +28,7 @@ options:
           - TDX host. Accepts a bare subdomain (e.g. C(myorg)), a
             scheme + host (e.g. C(https://myorg.teamdynamix.com)), or a
             full base URL with API path for sandbox / custom-domain
-            tenants whose API path differs from C(/TDWebApi/api)
+            tenants whose API path differs from C(/api)
             (e.g. C(https://tdx.example.com/sbtdwebapi/api)).
           - Falls back to C(TDX_HOST).
         type: str

@@ -28,10 +28,10 @@
         state: present
         title: "{{ ticket_title }}"
         description: "{{ ticket_description }}"
-        type_id: "{{ ticket_type_id | int }}"
-        account_id: "{{ ticket_account_id | int }}"
-        status_id: "{{ ticket_status_id | int }}"
-        priority_id: "{{ ticket_priority_id | int }}"
+        type_id: "{{ ticket_type_id }}"
+        account_id: "{{ ticket_account_id | default(omit) }}"
+        status_id: "{{ ticket_status_id }}"
+        priority_id: "{{ ticket_priority_id }}"
       register: created
 
     - name: Display created ticket

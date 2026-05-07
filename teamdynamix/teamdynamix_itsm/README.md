@@ -25,7 +25,7 @@ ansible-galaxy collection install .
 
 # Or build and install
 ansible-galaxy collection build
-ansible-galaxy collection install teamdynamix-itsm-1.1.0.tar.gz
+ansible-galaxy collection install teamdynamix-itsm-1.1.1.tar.gz
 ```
 
 ---
@@ -34,8 +34,8 @@ ansible-galaxy collection install teamdynamix-itsm-1.1.0.tar.gz
 
 The `incident` and `incident_info` modules authenticate with TDX using **either**:
 
-1. **Username + password** — the module POSTs to `/api/auth` and caches the returned bearer token for the duration of the run.
-2. **Token** — a bearer token you've already obtained out-of-band; the module uses it directly without calling `/auth`.
+1. **Username + password** — the module POSTs to `/api/auth/login` and caches the returned bearer token for the duration of the run.
+2. **Token** — a bearer token you've already obtained out-of-band; the module uses it directly without calling `/auth/login`.
 
 The user (or whoever issued the token) needs at minimum *create / edit* access to the Ticketing application. For `requestor`/`responsible` name lookup, *view* access to People is also required.
 
@@ -210,11 +210,11 @@ Connection parameters can also come from the environment — see the [Authentica
 
 | Input | Resolved base URL |
 |-------|-------------------|
-| `myorg` | `https://myorg.teamdynamix.com/TDWebApi/api` |
-| `https://myorg.teamdynamix.com` | `https://myorg.teamdynamix.com/TDWebApi/api` |
+| `myorg` | `https://myorg.teamdynamix.com/api` |
+| `https://myorg.teamdynamix.com` | `https://myorg.teamdynamix.com/api` |
 | `https://tdx.example.com/sbtdwebapi/api` | used verbatim |
 
-Use the third form when the tenant doesn't live under `*.teamdynamix.com` or its API path isn't `/TDWebApi/api` (sandboxes typically use `/sbtdwebapi/api`).
+Use the third form when the tenant doesn't live under `*.teamdynamix.com` or its API path isn't `/api` (sandboxes typically use `/sbtdwebapi/api`).
 
 Returns:
 - `record` — the created/updated ticket as a dict (snake_case keys)
@@ -345,7 +345,7 @@ Endpoints touched by this collection:
 
 | Endpoint | Used by |
 |----------|---------|
-| `POST /auth` | `incident`, `incident_info`, `tdx_cmdb` (when supplying `username`+`password`) |
+| `POST /auth/login` | `incident`, `incident_info`, `tdx_cmdb` (when supplying `username`+`password`) |
 | `GET /{appId}/tickets/{id}` | `incident` (fetch for update/delete diff), `incident_info` (lookup by ID) |
 | `POST /{appId}/tickets` | `incident` (create) |
 | `POST /{appId}/tickets/{id}` | `incident` (update) |
@@ -382,23 +382,23 @@ Retrieve them programmatically:
 
 ```bash
 TOKEN=$(curl -s -X POST \
-  https://myorg.teamdynamix.com/TDWebApi/api/auth \
+  https://myorg.teamdynamix.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d "{\"username\":\"$TDX_USERNAME\",\"password\":\"$TDX_PASSWORD\"}" | tr -d '"')
 
 # Ticket types
 curl -s -H "Authorization: Bearer $TOKEN" \
-  https://myorg.teamdynamix.com/TDWebApi/api/35/tickets/types | python3 -m json.tool
+  https://myorg.teamdynamix.com/api/35/tickets/types | python3 -m json.tool
 
 # Ticket statuses
 curl -s -H "Authorization: Bearer $TOKEN" \
-  https://myorg.teamdynamix.com/TDWebApi/api/35/tickets/statuses | python3 -m json.tool
+  https://myorg.teamdynamix.com/api/35/tickets/statuses | python3 -m json.tool
 
 # Priorities
 curl -s -H "Authorization: Bearer $TOKEN" \
-  https://myorg.teamdynamix.com/TDWebApi/api/35/tickets/priorities | python3 -m json.tool
+  https://myorg.teamdynamix.com/api/35/tickets/priorities | python3 -m json.tool
 
 # Asset custom attributes (to find host_attr_id)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  https://myorg.teamdynamix.com/TDWebApi/api/attributes/custom?componentId=63 | python3 -m json.tool
+  https://myorg.teamdynamix.com/api/attributes/custom?componentId=63 | python3 -m json.tool
 ```

@@ -64,7 +64,7 @@ class Client(object):
         if "://" not in host:
             # Bare subdomain -- assume the standard hosted-tenant URL shape.
             self.host = "https://{0}.teamdynamix.com".format(host)
-            self.base_url = "{0}/TDWebApi/api".format(self.host)
+            self.base_url = "{0}/api".format(self.host)
         else:
             cleaned = host.rstrip("/")
             parsed = urlparse(cleaned)
@@ -77,7 +77,7 @@ class Client(object):
             else:
                 # Scheme + host only -- append the standard API path.
                 self.host = cleaned
-                self.base_url = "{0}/TDWebApi/api".format(cleaned)
+                self.base_url = "{0}/api".format(cleaned)
         self.app_id = app_id
         self.username = username
         self.password = password
@@ -96,7 +96,7 @@ class Client(object):
         body = json.dumps(
             {"username": self.username, "password": self.password}
         )
-        url = "{0}/auth".format(self.base_url)
+        url = "{0}/auth/login".format(self.base_url)
         try:
             raw = self._client.open(
                 "POST",
