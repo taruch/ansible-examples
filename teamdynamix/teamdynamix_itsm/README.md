@@ -13,8 +13,6 @@ Ansible collection for integrating with the [TeamDynamix](https://www.teamdynami
 | Playbook | `teamdynamix.itsm.update_incident` | Example: read with `incident_info`, update with `incident` |
 | Playbook | `teamdynamix.itsm.get_incident_info` | Example: look up a ticket by ID or search by query |
 
-The two modules mirror the pattern used by `servicenow.itsm` (`incident` + `incident_info`), backed by shared `module_utils/` (client, errors, arguments, utils, payload mapping).
-
 ---
 
 ## Installation
