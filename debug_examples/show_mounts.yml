@@ -1,0 +1,29 @@
+---
+- name: Show all mount points like df -h
+  hosts: "{{ _hosts | default('localhost') }}"
+  gather_facts: true
+  vars:
+    fmt: '%-40s %10s %10s %10s %5s  %s'
+  tasks:
+
+    - name: Initialize df report with header row
+      ansible.builtin.set_fact:
+        df_report:
+          - "{{ fmt | format('Filesystem', 'Size', 'Used', 'Avail', 'Use%', 'Mounted on') }}"
+
+    - name: Append a formatted row for each mount
+      ansible.builtin.set_fact:
+        df_report: "{{ df_report + [fmt | format(
+                         item.device,
+                         item.size_total | human_readable,
+                         (item.size_total - item.size_available) | human_readable,
+                         item.size_available | human_readable,
+                         ((((item.size_total - item.size_available) / item.size_total) * 100) | round(0, 'ceil') | int | string) ~ '%',
+                         item.mount)] }}"
+      loop: "{{ ansible_facts['mounts'] }}"
+      loop_control:
+        label: "{{ item.mount }}"
+
+    - name: Print mount table once per host
+      ansible.builtin.debug:
+        var: df_report
