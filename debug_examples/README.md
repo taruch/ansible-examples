@@ -78,3 +78,29 @@ ansible-playbook run_until_one_succeeds.yml \
 |-------------|--------|
 | `meta: end_play` | Stops the play for ALL remaining hosts — correct for this pattern |
 | `meta: end_host` | Removes only the current host; others continue — use when you want every host to attempt regardless |
+
+---
+
+## show_mounts.yml
+
+Prints all mount points on the target host in a `df -h` style format using gathered facts (`ansible_facts['mounts']`) — no shell commands required.
+
+### Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `_hosts` | `localhost` | Target host or group |
+
+### Usage
+
+```bash
+ansible-playbook show_mounts.yml -i "<host>," -e "_hosts=<host>"
+```
+
+### What it does
+
+- Iterates `ansible_facts['mounts']` with `set_fact` to accumulate one formatted line per mount into a `df_report` list (header row + data rows)
+- Prints `df_report` in a **single debug task per host**, so the full table appears as one consolidated block instead of one debug message per mount
+- Uses the `human_readable` filter to convert bytes to GB/MB for the Size/Used/Avail columns
+
+Note: facts only populate `mounts` on hosts where the setup module can collect them (Linux/Unix). For Windows, use `ansible_facts['disks']` or run `win_disk_facts`.
