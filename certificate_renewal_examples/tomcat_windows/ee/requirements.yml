@@ -1,0 +1,24 @@
+---
+# Collections required by all four roles under ../roles.
+# Versions pinned to the lowest known-good for the modules we call;
+# bump as collections release fixes.
+collections:
+  # Windows host management (win_get_url, win_package, win_shell, win_service,
+  # win_service_info, win_file, win_copy, win_acl, win_template, win_wait_for,
+  # win_stat).
+  - name: ansible.windows
+    version: ">=2.3.0"
+
+  # community.windows.win_xml — used by the renewal play (renew_tomcat_cert.yml).
+  # Kept in the EE so a single image covers initial install + renewals.
+  - name: community.windows
+    version: ">=2.2.0"
+
+  # acme_certificate, openssl_privatekey, openssl_csr, openssl_pkcs12,
+  # get_certificate.
+  - name: community.crypto
+    version: ">=2.20.0"
+
+  # amazon.aws.route53 (A record + ACME DNS-01 TXT records).
+  - name: amazon.aws
+    version: ">=8.0.0"

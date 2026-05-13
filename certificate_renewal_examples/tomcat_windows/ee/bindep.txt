@@ -1,0 +1,6 @@
+# System packages the EE needs in addition to the base image.
+# Format: <package> [platform:<family> ...]
+# ee-minimal-rhel9 is RPM-based → use [platform:rpm].
+
+# demo_prep builds hello.war by zipping the webapp/ directory.
+zip [platform:rpm]

@@ -1,0 +1,27 @@
+---
+# Execution Environment for the Tomcat-on-Windows certificate-renewal demo.
+# Built with ansible-builder >= 3.0 (ansible-builder build -t ... -v3).
+#
+# Base: AAP 2.5 minimal RHEL9 EE. ansible-core, ansible-runner, and a tested
+# python environment are already provided by the base; this file layers on
+# the collections, python deps, and one system package the roles need.
+
+version: 3
+
+images:
+  base_image:
+    # Requires a Red Hat subscription on the build host (podman login to
+    # registry.redhat.io with your offline token before building).
+    name: registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel9:latest
+
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+
+options:
+  # ee-minimal uses microdnf, not dnf — package installs fail otherwise.
+  package_manager_path: /usr/bin/microdnf
+  # Tag the resulting image so you can identify it later.
+  tags:
+    - tomcat-windows-cert-renewal:latest

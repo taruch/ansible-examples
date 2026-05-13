@@ -1,0 +1,17 @@
+# Python deps the collections need at runtime.
+# ansible-builder reads this during the galaxy stage and installs into the
+# image's site-packages.
+
+# amazon.aws.route53
+boto3>=1.28.0
+botocore>=1.31.0
+
+# ansible.windows / community.windows — WinRM transport.
+# [credssp] pulls requests-credssp; AAP demos typically use ntlm or kerberos,
+# but credssp gives the broadest out-of-the-box compatibility.
+pywinrm[credssp]>=0.4.3
+
+# community.crypto — used by every cert-handling module the roles call.
+# Pinned to a recent cryptography release so PKCS12 export + ACME v2 paths
+# behave consistently.
+cryptography>=41.0.0
