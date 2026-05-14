@@ -1,6 +1,3 @@
-# System packages the EE needs in addition to the base image.
-# Format: <package> [platform:<family> ...]
-# ee-minimal-rhel9 is RPM-based → use [platform:rpm].
-
-# demo_prep builds hello.war by zipping the webapp/ directory.
-zip [platform:rpm]
+# No extra system packages needed at the moment.
+# Keep this file so ansible-builder reads the (empty) bindep stage without
+# warning; add packages here as the roles grow new system dependencies.

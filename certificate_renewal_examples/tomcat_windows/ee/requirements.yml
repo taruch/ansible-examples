@@ -19,6 +19,7 @@ collections:
   - name: community.crypto
     version: ">=2.20.0"
 
-  # amazon.aws.route53 (A record + ACME DNS-01 TXT records).
-  - name: amazon.aws
+  # community.general.archive (builds hello.war without a zip binary) and
+  # community.general.cloudflare_dns (A record + ACME DNS-01 TXT records).
+  - name: community.general
     version: ">=8.0.0"

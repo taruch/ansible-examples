@@ -1,15 +1,21 @@
 # Execution Environment — Tomcat-on-Windows cert renewal
 
-Definition for an Ansible Execution Environment that runs the playbooks and roles in this directory tree (`../roles/`, `../demo/setup_demo.yml`, `../renew_tomcat_cert.yml`).
+Definition for an Ansible Execution Environment that runs the playbooks and roles in this directory tree (`../roles/`, `../demo/demo_host_init.yml`, `../renew_tomcat_cert.yml`).
 
 ## What's in the image
 
 | Layer | Source |
 |---|---|
-| Base | `registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel9:latest` — ships with ansible-core + ansible-runner |
-| Collections | `requirements.yml` — `ansible.windows`, `community.windows`, `community.crypto`, `amazon.aws` |
-| Python deps | `requirements.txt` — `boto3`, `botocore`, `pywinrm[credssp]`, `cryptography` |
-| System packages | `bindep.txt` — `zip` (used by `demo_prep` to build `hello.war`) |
+| Base | `registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel9:latest` — ships with ansible-core + ansible-runner, Python 3.11 at `/usr/bin/python3.11` |
+| Collections | `requirements.yml` — `ansible.windows`, `community.windows`, `community.crypto`, `community.general` |
+| Python deps | `requirements.txt` — `pywinrm[credssp]`, `cryptography`, `requests` |
+| System packages | `bindep.txt` — none currently (`demo_prep` builds the WAR with `community.general.archive`, not a shelled-out `zip`) |
+
+DNS work uses `community.general.cloudflare_dns` (already in the `community.general` collection above) — no AWS SDK / boto3 needed.
+
+### Why python_interpreter is pinned to 3.11
+
+The minimal RHEL 9 EE base has Python 3.11 installed at `/usr/bin/python3.11` but the default `/usr/bin/python3` symlink points at the system Python 3.9, which doesn't have `pip`. Without `python_interpreter` in `execution-environment.yml`, the build fails at the pip stage with `No module named pip`. Setting it makes ansible-builder use the correct interpreter.
 
 ## Build
 
@@ -28,9 +34,27 @@ ansible-builder build \
 
 Build artifacts (the generated `Containerfile`, intermediate context) land in `./context/` by default.
 
-## Push to a registry
+## Pre-built image (public)
 
-If you're going to use this from AAP controller, push to a registry the controller can reach:
+A pre-built copy of this EE is published on Quay:
+
+```
+quay.io/truch/tomcat-windows-cert-renewal:latest
+```
+
+Pull it directly if you don't want to build locally:
+
+```bash
+podman pull quay.io/truch/tomcat-windows-cert-renewal:latest
+```
+
+In AAP, register it as an Execution Environment with that pull spec — no
+credential needed since the repo is public. For your own use, prefer a pinned
+tag (e.g. `:2026-05-14`) over `:latest` so controller job runs are reproducible.
+
+## Push to your own registry
+
+To rebuild and publish under a different namespace:
 
 ```bash
 podman tag tomcat-windows-cert-renewal:latest \
@@ -45,12 +69,13 @@ Then register it in AAP as an Execution Environment pointing at that pull spec, 
 `ansible-navigator` is the easiest way to run a playbook inside the EE from a workstation:
 
 ```bash
-ansible-navigator run ../demo/setup_demo.yml \
-  --eei tomcat-windows-cert-renewal:latest \
+ansible-navigator run ../demo/demo_host_init.yml \
+  --eei quay.io/truch/tomcat-windows-cert-renewal:latest \
   --pae false \
   -i ../demo/inventory/hosts.yml \
-  -e cert_fqdn=tomcat-demo.example.com \
-  -e route53_zone=example.com \
+  --penv CLOUDFLARE_API_TOKEN \
+  -e cert_fqdn=tomcat-demo.entrenchedrealist.dev \
+  -e cloudflare_zone=entrenchedrealist.dev \
   -e instance_public_ip=203.0.113.10 \
   -e ansible_password="$WIN_ADMIN_PASSWORD"
 ```
@@ -59,11 +84,11 @@ ansible-navigator run ../demo/setup_demo.yml \
 
 ## Credential handoff
 
-When you run from an EE you no longer have host-side AWS env vars or kubeconfig — everything has to be passed in:
+When you run from an EE you no longer have host-side env vars — everything has to be passed in:
 
 | Need | How |
 |---|---|
-| AWS creds for Route 53 | Mount `~/.aws` into the EE (`--eev ~/.aws:/runner/.aws:Z`), or set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` via `--penv` / extra-vars. In AAP, attach an AWS credential to the job template. |
+| Cloudflare API token | `export CLOUDFLARE_API_TOKEN=...` then `--penv CLOUDFLARE_API_TOKEN`, or `-e cloudflare_api_token=...`. In AAP, store as a Vault credential (or a custom Cloudflare credential type) and inject as an env var or extra var. |
 | Windows admin password | `-e ansible_password=...` (or AAP Machine credential with username `Administrator`). |
 | Keystore passphrase | `-e vault_keystore_password=...` (or AAP Vault credential). |
 
