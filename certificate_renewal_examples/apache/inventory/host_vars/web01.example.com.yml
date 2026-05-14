@@ -1,0 +1,8 @@
+---
+# Override per-host distro defaults here.
+# Debian/Ubuntu example:
+# cert_dir: /etc/ssl/certs
+# key_dir:  /etc/ssl/private
+# vhost_conf: /etc/apache2/sites-available/ssl_example_com.conf
+# apache_service: apache2
+# apache_user: www-data

@@ -1,0 +1,4 @@
+---
+# Source vault_pfx_password from ansible-vault or an AAP Vault credential.
+# Example: ansible-vault encrypt_string 'p@ssword' --name vault_pfx_password
+vault_pfx_password: "REPLACE_ME"

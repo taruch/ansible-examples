@@ -1,0 +1,112 @@
+---
+# Renew an SSL cert on IIS without touching the binding twice.
+# Pattern: copy .pfx -> import into LocalMachine\My -> rebind site by
+#          new thumbprint -> leave the old cert in place for rollback.
+
+- name: Renew IIS SSL certificate
+  hosts: iis_servers
+  gather_facts: true
+
+  vars:
+    cert_name: "wildcard_example_com"
+    cert_version: "{{ ansible_date_time.date }}"
+    site_name: "Default Web Site"
+    binding_host_header: "www.example.com"
+    binding_port: 443
+    binding_ip: "*"
+
+    pfx_local_path: "files/{{ cert_name }}.pfx"
+    pfx_remote_dir: 'C:\inetpub\certs'
+    pfx_remote_path: "{{ pfx_remote_dir }}\\{{ cert_name }}_{{ cert_version }}.pfx"
+
+    # Source from a vault or AAP custom credential in production.
+    pfx_password: "{{ vault_pfx_password }}"
+
+  pre_tasks:
+    - name: Verify the .pfx exists on the control node
+      ansible.builtin.stat:
+        path: "{{ pfx_local_path }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: pfx_stat
+      failed_when: not pfx_stat.stat.exists
+
+  tasks:
+    - name: Ensure cert staging directory exists on the IIS host
+      ansible.windows.win_file:
+        path: "{{ pfx_remote_dir }}"
+        state: directory
+
+    - name: Copy renewed .pfx to the IIS host (versioned filename)
+      ansible.windows.win_copy:
+        src: "{{ pfx_local_path }}"
+        dest: "{{ pfx_remote_path }}"
+      no_log: true
+
+    - name: Import the .pfx into LocalMachine\My (web hosting store)
+      community.windows.win_certificate_store:
+        path: "{{ pfx_remote_path }}"
+        password: "{{ pfx_password }}"
+        state: present
+        store_location: LocalMachine
+        store_name: My
+        key_storage: machine
+        key_exportable: false
+      register: cert_import
+      no_log: true
+
+    - name: Capture the new cert thumbprint
+      ansible.builtin.set_fact:
+        new_thumbprint: "{{ cert_import.thumbprints[0] }}"
+
+    - name: Show new thumbprint
+      ansible.builtin.debug:
+        var: new_thumbprint
+
+    - name: Look up the existing HTTPS binding (to detect a real change)
+      community.windows.win_iis_webbinding:
+        name: "{{ site_name }}"
+        protocol: https
+        port: "{{ binding_port }}"
+        ip: "{{ binding_ip }}"
+        host_header: "{{ binding_host_header }}"
+      check_mode: true
+      register: current_binding
+
+    - name: Bind site to the new certificate (atomic swap)
+      community.windows.win_iis_webbinding:
+        name: "{{ site_name }}"
+        protocol: https
+        port: "{{ binding_port }}"
+        ip: "{{ binding_ip }}"
+        host_header: "{{ binding_host_header }}"
+        certificate_hash: "{{ new_thumbprint }}"
+        certificate_store_name: My
+        state: present
+      register: rebind
+
+    - name: Verify the live binding now uses the new thumbprint
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module WebAdministration
+          $b = Get-WebBinding -Name "{{ site_name }}" -Protocol https `
+                -Port {{ binding_port }} -HostHeader "{{ binding_host_header }}"
+          $b.certificateHash
+      register: live_thumb
+      changed_when: false
+
+    - name: Assert binding matches the renewed cert
+      ansible.builtin.assert:
+        that:
+          - (live_thumb.output | first | upper) == (new_thumbprint | upper)
+        fail_msg: >-
+          Live binding thumbprint
+          {{ live_thumb.output | first }} does not match renewed cert
+          {{ new_thumbprint }}.
+        success_msg: "IIS is serving the renewed cert."
+
+    - name: Remove the staged .pfx (cert is in the store now)
+      ansible.windows.win_file:
+        path: "{{ pfx_remote_path }}"
+        state: absent

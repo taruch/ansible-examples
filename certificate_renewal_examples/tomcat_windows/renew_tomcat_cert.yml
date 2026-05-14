@@ -1,0 +1,121 @@
+---
+# Renew a Tomcat SSL cert on Windows.
+# Pattern: ship versioned .p12 keystore -> update server.xml Connector to
+#          point at it -> restart Tomcat service -> verify on :8443.
+#
+# Tomcat does NOT hot-reload SSL config, so a service restart is required.
+# This is the one platform here where the cutover is not zero-downtime.
+# Plan a maintenance window or take the node out of the load balancer first.
+
+- name: Renew Tomcat SSL certificate on Windows
+  hosts: tomcat_windows
+  gather_facts: true
+
+  vars:
+    cert_name: "wildcard_example_com"
+    cert_version: "{{ ansible_date_time.date }}"
+
+    # Tomcat install + service
+    tomcat_home: 'C:\Program Files\Apache Software Foundation\Tomcat 10.1'
+    tomcat_service: "Tomcat10"
+    tomcat_user: "NT SERVICE\\Tomcat10"
+    server_xml: "{{ tomcat_home }}\\conf\\server.xml"
+    keystore_dir: "{{ tomcat_home }}\\conf"
+    connector_port: 8443
+
+    # PKCS12 keystore renewal material
+    p12_local_path: "files/{{ cert_name }}.p12"
+    p12_remote_path: "{{ keystore_dir }}\\{{ cert_name }}_{{ cert_version }}.p12"
+
+    # Source from vault / AAP Vault credential in production.
+    keystore_password: "{{ vault_keystore_password }}"
+
+  pre_tasks:
+    - name: Verify the .p12 exists on the control node
+      ansible.builtin.stat:
+        path: "{{ p12_local_path }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: p12_stat
+      failed_when: not p12_stat.stat.exists
+
+    - name: Confirm Tomcat install path exists
+      ansible.windows.win_stat:
+        path: "{{ tomcat_home }}"
+      register: tomcat_stat
+      failed_when: not tomcat_stat.stat.exists
+
+  tasks:
+    - name: Back up server.xml before editing
+      ansible.windows.win_copy:
+        src: "{{ server_xml }}"
+        dest: "{{ server_xml }}.bak_{{ cert_version }}"
+        remote_src: true
+
+    - name: Copy renewed .p12 to the Tomcat conf dir (versioned filename)
+      ansible.windows.win_copy:
+        src: "{{ p12_local_path }}"
+        dest: "{{ p12_remote_path }}"
+      no_log: true
+
+    - name: Ensure Tomcat service account can read the keystore
+      ansible.windows.win_acl:
+        path: "{{ p12_remote_path }}"
+        user: "{{ tomcat_user }}"
+        rights: Read
+        type: allow
+        state: present
+
+    - name: Update Connector to use new keystore (Tomcat 8.5+ SSLHostConfig style)
+      community.windows.win_xml:
+        path: "{{ server_xml }}"
+        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
+        attribute: certificateKeystoreFile
+        fragment: "{{ p12_remote_path }}"
+        type: attribute
+      register: xml_update
+
+    - name: Update keystore password attribute
+      community.windows.win_xml:
+        path: "{{ server_xml }}"
+        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
+        attribute: certificateKeystorePassword
+        fragment: "{{ keystore_password }}"
+        type: attribute
+      no_log: true
+
+    - name: Ensure keystore type is PKCS12
+      community.windows.win_xml:
+        path: "{{ server_xml }}"
+        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
+        attribute: certificateKeystoreType
+        fragment: "PKCS12"
+        type: attribute
+
+    - name: Restart Tomcat to pick up the new cert
+      ansible.windows.win_service:
+        name: "{{ tomcat_service }}"
+        state: restarted
+      when: xml_update is changed
+
+    - name: Wait for Tomcat to start listening on the SSL connector
+      ansible.windows.win_wait_for:
+        port: "{{ connector_port }}"
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        delay: 5
+        timeout: 120
+
+    - name: Fetch the live cert from :{{ connector_port }} and confirm renewal
+      community.crypto.get_certificate:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ connector_port }}"
+      delegate_to: localhost
+      become: false
+      register: live_cert
+
+    - name: Show live cert details
+      ansible.builtin.debug:
+        msg: >-
+          subject={{ live_cert.subject.commonName | default('?') }}
+          not_after={{ live_cert.not_after }}

@@ -1,0 +1,3 @@
+# Drop the renewed PFX bundle here:
+#   wildcard_example_com.pfx
+# Do NOT commit real PFX files.

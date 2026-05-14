@@ -1,0 +1,5 @@
+# Drop renewed cert material here:
+#   wildcard_example_com.crt
+#   wildcard_example_com.key
+#   wildcard_example_com_chain.crt
+# Do NOT commit real keys.

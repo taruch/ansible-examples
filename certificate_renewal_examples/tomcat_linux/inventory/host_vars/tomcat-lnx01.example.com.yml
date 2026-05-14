@@ -1,0 +1,10 @@
+---
+# Source vault_keystore_password from ansible-vault or an AAP Vault credential.
+# Example: ansible-vault encrypt_string 'changeit' --name vault_keystore_password
+vault_keystore_password: "REPLACE_ME"
+
+# Override distro/install defaults here. Common alternatives:
+#   tomcat_home: /var/lib/tomcat9
+#   tomcat_service: tomcat9
+#   tomcat_user: tomcat9
+#   tomcat_group: tomcat9

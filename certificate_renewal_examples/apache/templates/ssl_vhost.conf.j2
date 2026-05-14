@@ -1,0 +1,23 @@
+{# Minimal SSL vhost — adapt to your existing config.
+   The point of this template is that the cert paths are variables,
+   so renewal is a config swap + reload, not an in-place file overwrite. #}
+<VirtualHost *:443>
+    ServerName {{ server_name }}
+{% for alias in server_aliases | default([]) %}
+    ServerAlias {{ alias }}
+{% endfor %}
+
+    SSLEngine on
+    SSLCertificateFile      {{ remote_cert }}
+    SSLCertificateKeyFile   {{ remote_key }}
+    SSLCertificateChainFile {{ remote_chain }}
+
+    SSLProtocol             all -SSLv3 -TLSv1 -TLSv1.1
+    SSLCipherSuite          HIGH:!aNULL:!MD5
+    SSLHonorCipherOrder     on
+
+    DocumentRoot /var/www/html
+
+    ErrorLog  logs/{{ server_name }}_ssl_error.log
+    CustomLog logs/{{ server_name }}_ssl_access.log combined
+</VirtualHost>

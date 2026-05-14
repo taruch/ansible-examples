@@ -1,0 +1,135 @@
+---
+# Renew an Apache (httpd) SSL cert without dropping connections.
+# Pattern: ship versioned cert files -> render vhost pointing at them ->
+#          validate with apachectl -t -> graceful reload.
+
+- name: Renew Apache SSL certificate
+  hosts: webservers
+  become: true
+
+  vars:
+    cert_name: "wildcard_example_com"
+    cert_version: "{{ ansible_date_time.date }}"
+    vhost_name: "ssl_example_com"
+
+    # Local (control node) sources
+    cert_src:  "files/{{ cert_name }}.crt"
+    key_src:   "files/{{ cert_name }}.key"
+    chain_src: "files/{{ cert_name }}_chain.crt"
+
+    # Remote layout (RHEL/CentOS defaults; override for Debian/Ubuntu)
+    cert_dir: "/etc/pki/tls/certs"
+    key_dir:  "/etc/pki/tls/private"
+    vhost_conf: "/etc/httpd/conf.d/{{ vhost_name }}.conf"
+    apache_service: "httpd"
+    apache_user: "apache"
+
+    # Resulting versioned filenames on the target
+    remote_cert:  "{{ cert_dir }}/{{ cert_name }}_{{ cert_version }}.crt"
+    remote_key:   "{{ key_dir }}/{{ cert_name }}_{{ cert_version }}.key"
+    remote_chain: "{{ cert_dir }}/{{ cert_name }}_{{ cert_version }}_chain.crt"
+
+    server_name: "example.com"
+    server_aliases:
+      - "www.example.com"
+
+  pre_tasks:
+    - name: Verify local cert/key files exist on control node
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: src_files
+      failed_when: not src_files.stat.exists
+      loop:
+        - "{{ cert_src }}"
+        - "{{ key_src }}"
+
+    - name: Sanity-check the cert and key match
+      community.crypto.x509_certificate_info:
+        path: "{{ cert_src }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: cert_info
+
+    - name: Show new cert validity
+      ansible.builtin.debug:
+        msg: >-
+          New cert subject={{ cert_info.subject.commonName | default('?') }}
+          not_after={{ cert_info.not_after }}
+      run_once: true
+
+  tasks:
+    - name: Ensure cert/key directories exist with safe perms
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ cert_dir }}", mode: "0755" }
+        - { path: "{{ key_dir }}",  mode: "0700" }
+
+    - name: Install new certificate (versioned filename)
+      ansible.builtin.copy:
+        src: "{{ cert_src }}"
+        dest: "{{ remote_cert }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install new private key (versioned filename)
+      ansible.builtin.copy:
+        src: "{{ key_src }}"
+        dest: "{{ remote_key }}"
+        owner: root
+        group: "{{ apache_user }}"
+        mode: "0640"
+      no_log: true
+
+    - name: Install new chain (versioned filename)
+      ansible.builtin.copy:
+        src: "{{ chain_src }}"
+        dest: "{{ remote_chain }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: chain_src is defined
+
+    - name: Render vhost config pointing at the new cert
+      ansible.builtin.template:
+        src: ssl_vhost.conf.j2
+        dest: "{{ vhost_conf }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      register: vhost_render
+
+    - name: Validate apache config before reloading
+      ansible.builtin.command: apachectl -t
+      changed_when: false
+
+    - name: Graceful reload (no dropped connections)
+      ansible.builtin.service:
+        name: "{{ apache_service }}"
+        state: reloaded
+      when: vhost_render is changed
+
+    - name: Confirm the cert served on :443 matches the renewed one
+      community.crypto.get_certificate:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 443
+      register: live_cert
+      delegate_to: localhost
+      become: false
+
+    - name: Assert the served cert is the renewed one
+      ansible.builtin.assert:
+        that:
+          - live_cert.not_after == cert_info.not_after
+        fail_msg: "Served cert does not match the renewed cert on disk."
+        success_msg: "Live cert matches the renewed cert."

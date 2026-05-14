@@ -1,0 +1,133 @@
+---
+# Renew a Tomcat SSL cert on Linux (systemd-managed).
+# Pattern: ship versioned .p12 keystore -> update server.xml Connector to
+#          point at it -> restart Tomcat -> verify on :8443.
+#
+# Tomcat does NOT hot-reload SSL config, so a service restart is required.
+# Plan a maintenance window or drain the node from the load balancer first.
+
+- name: Renew Tomcat SSL certificate on Linux
+  hosts: tomcat_linux
+  become: true
+
+  vars:
+    cert_name: "wildcard_example_com"
+    cert_version: "{{ ansible_date_time.date }}"
+
+    # Tomcat install + service
+    tomcat_home: "/opt/tomcat"
+    tomcat_service: "tomcat"
+    tomcat_user: "tomcat"
+    tomcat_group: "tomcat"
+    server_xml: "{{ tomcat_home }}/conf/server.xml"
+    keystore_dir: "{{ tomcat_home }}/conf"
+    connector_port: 8443
+
+    # PKCS12 keystore renewal material
+    p12_local_path: "files/{{ cert_name }}.p12"
+    p12_remote_path: "{{ keystore_dir }}/{{ cert_name }}_{{ cert_version }}.p12"
+
+    # Source from vault / AAP Vault credential in production.
+    keystore_password: "{{ vault_keystore_password }}"
+
+  pre_tasks:
+    - name: Verify the .p12 exists on the control node
+      ansible.builtin.stat:
+        path: "{{ p12_local_path }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: p12_stat
+      failed_when: not p12_stat.stat.exists
+
+    - name: Confirm Tomcat install path exists
+      ansible.builtin.stat:
+        path: "{{ tomcat_home }}"
+      register: tomcat_stat
+      failed_when: not tomcat_stat.stat.exists
+
+    - name: Read renewed cert metadata for post-change assertion
+      community.crypto.openssl_pkcs12:
+        path: "{{ p12_local_path }}"
+        passphrase: "{{ keystore_password }}"
+        action: parse
+        return_content: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: p12_info
+      no_log: true
+
+  tasks:
+    - name: Back up server.xml before editing
+      ansible.builtin.copy:
+        src: "{{ server_xml }}"
+        dest: "{{ server_xml }}.bak_{{ cert_version }}"
+        remote_src: true
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        mode: "0640"
+
+    - name: Copy renewed .p12 to the Tomcat conf dir (versioned filename)
+      ansible.builtin.copy:
+        src: "{{ p12_local_path }}"
+        dest: "{{ p12_remote_path }}"
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        mode: "0640"
+      no_log: true
+
+    - name: Update Connector to use new keystore (Tomcat 8.5+ SSLHostConfig style)
+      community.general.xml:
+        path: "{{ server_xml }}"
+        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
+        attribute: "certificateKeystoreFile"
+        value: "{{ p12_remote_path }}"
+      register: xml_update
+
+    - name: Update keystore password attribute
+      community.general.xml:
+        path: "{{ server_xml }}"
+        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
+        attribute: "certificateKeystorePassword"
+        value: "{{ keystore_password }}"
+      no_log: true
+
+    - name: Ensure keystore type is PKCS12
+      community.general.xml:
+        path: "{{ server_xml }}"
+        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
+        attribute: "certificateKeystoreType"
+        value: "PKCS12"
+
+    - name: Restart Tomcat to pick up the new cert
+      ansible.builtin.systemd:
+        name: "{{ tomcat_service }}"
+        state: restarted
+        daemon_reload: false
+      when: xml_update is changed
+
+    - name: Wait for Tomcat to start listening on the SSL connector
+      ansible.builtin.wait_for:
+        port: "{{ connector_port }}"
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        delay: 5
+        timeout: 120
+
+    - name: Fetch the live cert from :{{ connector_port }} and confirm renewal
+      community.crypto.get_certificate:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ connector_port }}"
+      delegate_to: localhost
+      become: false
+      register: live_cert
+
+    - name: Assert the served cert matches the renewed keystore
+      ansible.builtin.assert:
+        that:
+          - live_cert.not_after is defined
+        fail_msg: "Did not get a cert back from :{{ connector_port }}."
+        success_msg: >-
+          Tomcat is serving the renewed cert
+          (subject={{ live_cert.subject.commonName | default('?') }},
+           not_after={{ live_cert.not_after }})

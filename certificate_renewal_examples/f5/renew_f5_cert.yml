@@ -1,0 +1,98 @@
+---
+# Renew an SSL cert on BIG-IP without taking the VIP down.
+# Pattern: import as new versioned object -> swap the profile -> keep old for rollback.
+
+- name: Renew SSL certificate on F5 BIG-IP
+  hosts: bigip
+  gather_facts: false
+  connection: local
+
+  vars:
+    cert_name: "wildcard_example_com"
+    cert_version: "{{ ansible_date_time.date | default(lookup('pipe','date +%Y%m%d')) }}"
+    new_cert_object: "{{ cert_name }}_{{ cert_version }}"
+    cert_src: "/etc/ansible/certs/{{ cert_name }}.crt"
+    key_src:  "/etc/ansible/certs/{{ cert_name }}.key"
+    chain_src: "/etc/ansible/certs/{{ cert_name }}_chain.crt"
+    clientssl_profile: "clientssl_{{ cert_name }}"
+    partition: "Common"
+
+    provider:
+      server: "{{ inventory_hostname }}"
+      server_port: 443
+      user: "{{ f5_user }}"
+      password: "{{ f5_password }}"
+      validate_certs: "{{ f5_validate_certs | default(true) }}"
+      transport: rest
+
+  tasks:
+    - name: Verify local cert/key files exist before touching the device
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: cert_files
+      failed_when: not cert_files.stat.exists
+      loop:
+        - "{{ cert_src }}"
+        - "{{ key_src }}"
+
+    - name: Save a UCS backup before changes
+      f5networks.f5_modules.bigip_ucs_fetch:
+        src: "pre_cert_renewal_{{ cert_version }}.ucs"
+        dest: "/var/backups/f5/{{ inventory_hostname }}_pre_cert_renewal_{{ cert_version }}.ucs"
+        provider: "{{ provider }}"
+
+    - name: Import new private key (versioned name so we can roll back)
+      f5networks.f5_modules.bigip_ssl_key:
+        name: "{{ new_cert_object }}.key"
+        content: "{{ lookup('file', key_src) }}"
+        partition: "{{ partition }}"
+        state: present
+        provider: "{{ provider }}"
+      no_log: true
+
+    - name: Import new certificate
+      f5networks.f5_modules.bigip_ssl_certificate:
+        name: "{{ new_cert_object }}.crt"
+        content: "{{ lookup('file', cert_src) }}"
+        partition: "{{ partition }}"
+        state: present
+        provider: "{{ provider }}"
+
+    - name: Import intermediate chain
+      f5networks.f5_modules.bigip_ssl_certificate:
+        name: "{{ new_cert_object }}_chain.crt"
+        content: "{{ lookup('file', chain_src) }}"
+        partition: "{{ partition }}"
+        state: present
+        provider: "{{ provider }}"
+      when: chain_src is defined
+
+    - name: Point client-SSL profile at the new cert/key (atomic swap)
+      f5networks.f5_modules.bigip_profile_client_ssl:
+        name: "{{ clientssl_profile }}"
+        partition: "{{ partition }}"
+        cert_key_chain:
+          - cert: "{{ new_cert_object }}.crt"
+            key:  "{{ new_cert_object }}.key"
+            chain: "{{ new_cert_object }}_chain.crt"
+        state: present
+        provider: "{{ provider }}"
+      register: profile_update
+
+    - name: Validate the profile now references the new cert
+      f5networks.f5_modules.bigip_command:
+        commands:
+          - "tmsh list ltm profile client-ssl {{ clientssl_profile }} cert-key-chain"
+        provider: "{{ provider }}"
+      register: verify
+      changed_when: false
+
+    - name: Show the live profile binding
+      ansible.builtin.debug:
+        var: verify.stdout_lines
+
+    - name: Save running config so changes survive reboot
+      f5networks.f5_modules.bigip_config:
+        save: true
+        provider: "{{ provider }}"
+      when: profile_update is changed

@@ -1,0 +1,3 @@
+# Drop the renewed PKCS12 keystore here:
+#   wildcard_example_com.p12
+# Do NOT commit real keystores.

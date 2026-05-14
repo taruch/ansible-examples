@@ -1,0 +1,5 @@
+---
+# Source these from a vault or AAP credential in production.
+f5_user: "{{ lookup('env', 'F5_USER') }}"
+f5_password: "{{ lookup('env', 'F5_PASSWORD') }}"
+f5_validate_certs: true
