@@ -32,7 +32,11 @@
   hosts: tomcat_windows_demo
   gather_facts: true
   vars:
-    cert_fqdn: "{{ inventory_hostname }}"
+    # If the inventory host is already an FQDN (has a dot), use it as-is.
+    # Otherwise treat it as a short name and append cloudflare_zone — so both
+    # `wincerttest2.entrenchedrealist.dev` and `wincerttest2` (with
+    # cloudflare_zone=entrenchedrealist.dev) resolve to the same cert FQDN.
+    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
 
   pre_tasks:
     - name: Probe the live cert on the Tomcat connector
