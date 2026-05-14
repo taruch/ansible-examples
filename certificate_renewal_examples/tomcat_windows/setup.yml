@@ -1,0 +1,171 @@
+---
+# Configuration-as-code for deploying the Tomcat-on-Windows certificate-
+# renewal solution to Ansible Automation Platform 2.6.
+#
+# Apply with ../../controller_setup/configure_aap.yml (or any wrapper that
+# `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
+#
+# Required pre-existing artifacts in AAP:
+#   - A Machine credential for the Windows hosts (the user said it's already
+#     present). Set its name below in `windows_machine_credential` so the
+#     job templates can reference it.
+#
+# After applying:
+#   1. Open the "Cloudflare - entrenchedrealist.dev" credential in AAP and
+#      paste the actual Cloudflare API token (left blank intentionally).
+#   2. (Optional) Adjust host IPs in `controller_hosts` below to match your
+#      current EC2 instances.
+
+# ---------------------------------------------------------------------------
+# Tunables — change these without touching the rest of this file.
+# ---------------------------------------------------------------------------
+windows_machine_credential: "Windows - Tomcat Demo"   # MUST already exist in AAP
+cloudflare_zone: "entrenchedrealist.dev"
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+project_scm_branch: "master"
+ee_image: "quay.io/truch/tomcat-windows-cert-renewal:1.1"
+target_organization: "Default"
+
+# ---------------------------------------------------------------------------
+# Custom credential type — Cloudflare API token.
+# Injects both the env var (CLOUDFLARE_API_TOKEN — preferred by the role) and
+# the extra-var (cloudflare_api_token — overrides the role default lookup).
+# ---------------------------------------------------------------------------
+controller_credential_types:
+  - name: "Cloudflare API Token"
+    description: "Cloudflare API token scoped to a single zone (Zone:Zone:Read + Zone:DNS:Edit). Used by letsencrypt_cloudflare for DNS-01 challenges."
+    kind: "cloud"
+    inputs:
+      fields:
+        - id: cloudflare_api_token
+          type: string
+          label: API Token
+          secret: true
+      required:
+        - cloudflare_api_token
+    injectors:
+      env:
+        CLOUDFLARE_API_TOKEN: !unsafe '{{ cloudflare_api_token }}'
+      extra_vars:
+        cloudflare_api_token: !unsafe '{{ cloudflare_api_token }}'
+
+# ---------------------------------------------------------------------------
+# Credentials — Cloudflare only. Machine credential is assumed pre-existing.
+# Token left blank; populate after import via the AAP UI or controller API.
+# ---------------------------------------------------------------------------
+aap_credentials:
+  - name: "Cloudflare - entrenchedrealist.dev"
+    description: "Cloudflare API token, zone-scoped to entrenchedrealist.dev"
+    credential_type: "Cloudflare API Token"
+    organization: "{{ target_organization }}"
+    inputs:
+      cloudflare_api_token: ''   # paste real token in AAP UI after deploy
+
+# ---------------------------------------------------------------------------
+# Execution Environment — Quay-hosted public image.
+# Switch to a private-registry pinned tag for production use.
+# ---------------------------------------------------------------------------
+controller_execution_environments:
+  - name: "Tomcat Windows Cert Renewal EE"
+    description: "EE with ansible.windows, community.windows, community.crypto, community.general plus pywinrm[credssp] + cryptography. Built on AAP 2.5 ee-minimal-rhel9."
+    image: "{{ ee_image }}"
+    pull: "missing"
+    organization: "{{ target_organization }}"
+
+# ---------------------------------------------------------------------------
+# Project — git-synced from this repository.
+# Setting scm_update_on_launch keeps the project current on every job.
+# ---------------------------------------------------------------------------
+controller_projects:
+  - name: "Tomcat Windows Cert Renewal"
+    description: "Tomcat-on-Windows certificate renewal example (Pattern A: in-band LE issuance)."
+    organization: "{{ target_organization }}"
+    scm_type: "git"
+    scm_url: "{{ project_scm_url }}"
+    scm_branch: "{{ project_scm_branch }}"
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: true
+    allow_override: false
+
+# ---------------------------------------------------------------------------
+# Inventory + hosts + groups.
+# The renewal play targets `tomcat_windows_demo`; the inventory hostname IS
+# the cert FQDN. ansible_host on each host is the EC2 public IP — that's the
+# only per-run value, and it lives in inventory so AAP doesn't need extra-vars.
+# ---------------------------------------------------------------------------
+controller_inventories:
+  - name: "Tomcat Windows Demo"
+    description: "Windows hosts running Tomcat for the cert-renewal demo. Inventory hostname = cert FQDN; ansible_host = public IP."
+    organization: "{{ target_organization }}"
+    variables:
+      ansible_connection: winrm
+      ansible_port: 5986
+      ansible_winrm_transport: credssp
+      # EC2 Windows ships a self-signed WinRM cert; ignore for the demo.
+      ansible_winrm_server_cert_validation: ignore
+      ansible_user: Administrator
+
+controller_groups:
+  - name: tomcat_windows_demo
+    inventory: "Tomcat Windows Demo"
+
+# ---------------------------------------------------------------------------
+# Job templates.
+# Two templates: initial bootstrap + recurring renewal. Both pass
+# cloudflare_zone as a baked-in extra-var and allow per-launch overrides so a
+# user can flip acme_env or cert_remaining_days when needed.
+# ---------------------------------------------------------------------------
+controller_templates:
+  - name: "Tomcat Windows / Bootstrap demo host"
+    description: "Initial demo bootstrap: build WAR, register Cloudflare A record, install Tomcat + Java, issue LE cert, configure TLS connector. Runs against ALL hosts in tomcat_windows_demo."
+    organization: "{{ target_organization }}"
+    project: "Tomcat Windows Cert Renewal"
+    inventory: "Tomcat Windows Demo"
+    playbook: "certificate_renewal_examples/tomcat_windows/demo_host_init.yml"
+    execution_environment: "Tomcat Windows Cert Renewal EE"
+    credentials:
+      - "Cloudflare - entrenchedrealist.dev"
+      - "{{ windows_machine_credential }}"
+    extra_vars: |
+      cloudflare_zone: {{ cloudflare_zone }}
+      acme_env: production
+    ask_variables_on_launch: true   # flip acme_env / cert_remaining_days at launch
+    ask_limit_on_launch: true       # target a single host with --limit
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    allow_simultaneous: false
+
+  - name: "Tomcat Windows / Renew certificate"
+    description: "Pattern A renewal: pre-flight probes the live cert and ends play if > cert_remaining_days from expiry. Otherwise re-issues via LE, ships the keystore, and restarts Tomcat. Idempotent — safe to schedule."
+    organization: "{{ target_organization }}"
+    project: "Tomcat Windows Cert Renewal"
+    inventory: "Tomcat Windows Demo"
+    playbook: "certificate_renewal_examples/tomcat_windows/renew_tomcat_cert.yml"
+    execution_environment: "Tomcat Windows Cert Renewal EE"
+    credentials:
+      - "Cloudflare - entrenchedrealist.dev"
+      - "{{ windows_machine_credential }}"
+    extra_vars: |
+      cloudflare_zone: {{ cloudflare_zone }}
+      acme_env: production
+    ask_variables_on_launch: true   # for forcing re-issue: cert_remaining_days=999
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    allow_simultaneous: false
+
+# ---------------------------------------------------------------------------
+# Schedule — runs the renewal template daily. Because the pre-flight check
+# no-ops when the cert is fresh, daily is cheap; the actual issuance only
+# fires when a host is within cert_remaining_days (default 30) of expiry.
+# Adjust the rrule to your maintenance window.
+# ---------------------------------------------------------------------------
+controller_schedules:
+  - name: "Tomcat Windows / Daily renewal check"
+    description: "Daily idempotent check — runs the renewal play, which no-ops unless a cert is close to expiry."
+    unified_job_template: "Tomcat Windows / Renew certificate"
+    rrule: "DTSTART;TZID=Etc/UTC:20260514T080000 RRULE:FREQ=DAILY;INTERVAL=1"
+    enabled: true
