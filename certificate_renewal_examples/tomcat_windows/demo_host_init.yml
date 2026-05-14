@@ -28,7 +28,11 @@
   hosts: tomcat_windows_demo
   gather_facts: true
   vars:
-    cert_fqdn: "{{ inventory_hostname }}"
+    # If the inventory host is already an FQDN (has a dot), use it as-is.
+    # Otherwise treat the inventory hostname as a short name and append the
+    # Cloudflare zone — that way both `tomcat-demo.entrenchedrealist.dev`
+    # and `tomcat-demo` (with cloudflare_zone=entrenchedrealist.dev) work.
+    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
   roles:
     - role: demo_prep
     - role: tomcat_windows_install
