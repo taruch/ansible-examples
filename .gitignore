@@ -24,5 +24,44 @@ mitchell_issue
 .claude
 .github
 token_testing.yml
-setup_demo.yml
+/setup_demo.yml
 filetree_import_25_workflow.yml_orig
+
+# Common secret-bearing filenames
+.env
+.env.*
+id_rsa
+id_ecdsa*
+id_ed25519*
+*.token
+*.tfvars
+credentials*.json
+credentials*.csv
+accessKeys.csv
+*.kdbx
+
+# Certificate / key material and build artifacts in certificate_renewal_examples
+certificate_renewal_examples/*/files/*
+!certificate_renewal_examples/*/files/.gitkeep
+certificate_renewal_examples/*/.acme/
+certificate_renewal_examples/*/.route53/
+certificate_renewal_examples/*/demo/.acme/
+certificate_renewal_examples/*/demo/.route53/
+certificate_renewal_examples/*/demo/register_domain.vars.yml
+
+# Per-host secrets — gitignore real host_vars, keep the *.example.com.yml templates.
+certificate_renewal_examples/*/inventory/host_vars/*
+!certificate_renewal_examples/*/inventory/host_vars/*.example.com.yml
+
+# ansible-builder generated context
+certificate_renewal_examples/*/ee/context/
+*.war
+*.pem
+*.key
+*.csr
+*.pfx
+*.p12
+*.crt
+*.cer
+*.jks
+*.keystore

@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: tomcat_windows_install
+  description: Install Temurin JDK, Apache Tomcat as a Windows service, and deploy a WAR as ROOT
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Windows
+      versions:
+        - 2019
+        - 2022
+
+collections:
+  - ansible.windows
+
+dependencies: []

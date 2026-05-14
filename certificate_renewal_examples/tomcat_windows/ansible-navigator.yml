@@ -1,0 +1,5 @@
+ansible-navigator:
+  execution-environment:
+    environment-variables:
+      set:
+        PYTHONWARNINGS: "ignore"

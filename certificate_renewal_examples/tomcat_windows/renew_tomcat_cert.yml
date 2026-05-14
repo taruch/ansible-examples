@@ -1,121 +1,77 @@
 ---
-# Renew a Tomcat SSL cert on Windows.
-# Pattern: ship versioned .p12 keystore -> update server.xml Connector to
-#          point at it -> restart Tomcat service -> verify on :8443.
+# Renew (or, when due, re-issue) the Tomcat SSL cert on Windows via Let's
+# Encrypt (DNS-01 against Cloudflare).
 #
-# Tomcat does NOT hot-reload SSL config, so a service restart is required.
-# This is the one platform here where the cutover is not zero-downtime.
-# Plan a maintenance window or take the node out of the load balancer first.
+# Architecture — Pattern A (in-band issuance):
+#   1. Pre-flight: read the live cert from the Tomcat connector and compute
+#      days until expiry. If more than `cert_remaining_days` left, end the
+#      play. This check works regardless of whether any cert artifacts exist
+#      on the control node — critical for AAP, where the project filesystem
+#      is ephemeral per job and `.acme/` never persists between runs.
+#   2. Otherwise, run `letsencrypt_cloudflare` (issues a fresh LE cert via a
+#      DNS-01 challenge written to the Cloudflare zone) and
+#      `tomcat_windows_tls` (builds the .p12, ships it to Windows, updates
+#      server.xml, restarts Tomcat only if the cert actually changed).
+#
+# Required vars (from caller, an inventory file, or AAP credential injectors):
+#   cloudflare_zone         Cloudflare-managed zone (e.g. entrenchedrealist.dev)
+#   cloudflare_api_token    Token with Zone:Zone:Read + Zone:DNS:Edit on the zone
+#                           (or set the CLOUDFLARE_API_TOKEN env var)
+#   ansible_password        Windows admin password (via inventory / vault)
+#
+# Optional vars:
+#   cert_fqdn               Defaults to `inventory_hostname` — the play assumes
+#                           the inventory hostname IS the cert FQDN.
+#   acme_env                staging (default) or production
+#   cert_remaining_days     30 (default). Skip renewal if live cert has more
+#                           than this many days left. Set to 0 to force re-issue.
+#   vault_keystore_password Keystore passphrase. Defaults to "changeit".
+#   connector_port          8443 (default). TLS port on the Windows host.
 
-- name: Renew Tomcat SSL certificate on Windows
-  hosts: tomcat_windows
+- name: Renew Tomcat SSL cert via Let's Encrypt
+  hosts: tomcat_windows_demo
   gather_facts: true
-
   vars:
-    cert_name: "wildcard_example_com"
-    cert_version: "{{ ansible_date_time.date }}"
-
-    # Tomcat install + service
-    tomcat_home: 'C:\Program Files\Apache Software Foundation\Tomcat 10.1'
-    tomcat_service: "Tomcat10"
-    tomcat_user: "NT SERVICE\\Tomcat10"
-    server_xml: "{{ tomcat_home }}\\conf\\server.xml"
-    keystore_dir: "{{ tomcat_home }}\\conf"
-    connector_port: 8443
-
-    # PKCS12 keystore renewal material
-    p12_local_path: "files/{{ cert_name }}.p12"
-    p12_remote_path: "{{ keystore_dir }}\\{{ cert_name }}_{{ cert_version }}.p12"
-
-    # Source from vault / AAP Vault credential in production.
-    keystore_password: "{{ vault_keystore_password }}"
+    cert_fqdn: "{{ inventory_hostname }}"
 
   pre_tasks:
-    - name: Verify the .p12 exists on the control node
-      ansible.builtin.stat:
-        path: "{{ p12_local_path }}"
-      delegate_to: localhost
-      become: false
-      run_once: true
-      register: p12_stat
-      failed_when: not p12_stat.stat.exists
-
-    - name: Confirm Tomcat install path exists
-      ansible.windows.win_stat:
-        path: "{{ tomcat_home }}"
-      register: tomcat_stat
-      failed_when: not tomcat_stat.stat.exists
-
-  tasks:
-    - name: Back up server.xml before editing
-      ansible.windows.win_copy:
-        src: "{{ server_xml }}"
-        dest: "{{ server_xml }}.bak_{{ cert_version }}"
-        remote_src: true
-
-    - name: Copy renewed .p12 to the Tomcat conf dir (versioned filename)
-      ansible.windows.win_copy:
-        src: "{{ p12_local_path }}"
-        dest: "{{ p12_remote_path }}"
-      no_log: true
-
-    - name: Ensure Tomcat service account can read the keystore
-      ansible.windows.win_acl:
-        path: "{{ p12_remote_path }}"
-        user: "{{ tomcat_user }}"
-        rights: Read
-        type: allow
-        state: present
-
-    - name: Update Connector to use new keystore (Tomcat 8.5+ SSLHostConfig style)
-      community.windows.win_xml:
-        path: "{{ server_xml }}"
-        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
-        attribute: certificateKeystoreFile
-        fragment: "{{ p12_remote_path }}"
-        type: attribute
-      register: xml_update
-
-    - name: Update keystore password attribute
-      community.windows.win_xml:
-        path: "{{ server_xml }}"
-        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
-        attribute: certificateKeystorePassword
-        fragment: "{{ keystore_password }}"
-        type: attribute
-      no_log: true
-
-    - name: Ensure keystore type is PKCS12
-      community.windows.win_xml:
-        path: "{{ server_xml }}"
-        xpath: "/Server/Service/Connector[@port='{{ connector_port }}']/SSLHostConfig/Certificate"
-        attribute: certificateKeystoreType
-        fragment: "PKCS12"
-        type: attribute
-
-    - name: Restart Tomcat to pick up the new cert
-      ansible.windows.win_service:
-        name: "{{ tomcat_service }}"
-        state: restarted
-      when: xml_update is changed
-
-    - name: Wait for Tomcat to start listening on the SSL connector
-      ansible.windows.win_wait_for:
-        port: "{{ connector_port }}"
-        host: "{{ ansible_host | default(inventory_hostname) }}"
-        delay: 5
-        timeout: 120
-
-    - name: Fetch the live cert from :{{ connector_port }} and confirm renewal
+    - name: Probe the live cert on the Tomcat connector
       community.crypto.get_certificate:
-        host: "{{ ansible_host | default(inventory_hostname) }}"
-        port: "{{ connector_port }}"
+        host: "{{ cert_fqdn }}"
+        port: "{{ connector_port | default(8443) }}"
       delegate_to: localhost
       become: false
-      register: live_cert
+      register: live_cert_probe
+      failed_when: false
+      changed_when: false
 
-    - name: Show live cert details
+    - name: Compute days remaining on the live cert
+      ansible.builtin.set_fact:
+        live_cert_days_remaining: >-
+          {{ (
+              (live_cert_probe.not_after | to_datetime('%Y%m%d%H%M%SZ'))
+              - (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%SZ'))
+             ).days }}
+      when: live_cert_probe.not_after is defined
+
+    - name: Renewal decision
       ansible.builtin.debug:
         msg: >-
-          subject={{ live_cert.subject.commonName | default('?') }}
-          not_after={{ live_cert.not_after }}
+          {% if live_cert_days_remaining is defined -%}
+          Live cert valid for {{ live_cert_days_remaining }} more day(s);
+          threshold is {{ cert_remaining_days | default(30) }} —
+          {{ 'skipping renewal.' if (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
+             else 'renewing.' }}
+          {%- else -%}
+          No reachable cert on {{ cert_fqdn }}:{{ connector_port | default(8443) }} — proceeding with issuance.
+          {%- endif %}
+
+    - name: End play if the live cert is still fresh enough
+      ansible.builtin.meta: end_play
+      when:
+        - live_cert_days_remaining is defined
+        - (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
+
+  roles:
+    - role: letsencrypt_cloudflare
+    - role: tomcat_windows_tls

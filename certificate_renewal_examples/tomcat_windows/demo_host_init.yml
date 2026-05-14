@@ -1,0 +1,41 @@
+---
+# Stand up the Tomcat-on-Windows certificate-renewal demo environment.
+#
+# Multi-host capable. The play targets the `tomcat_windows_demo` group; add as
+# many host entries as you like to inventory/demo.yml (each with its own
+# `ansible_host: <public IP>`). The WAR is built once on the control node and
+# reused; the Cloudflare A record + Tomcat install + LE cert flow runs per
+# host.
+#
+# Four roles run in order, all in the same play:
+#   1. demo_prep               (localhost) build hello.war (once), upsert the
+#                              per-host Cloudflare A record (uses ansible_host)
+#   2. tomcat_windows_install  (Windows)   install Java + Tomcat, deploy WAR
+#   3. letsencrypt_cloudflare  (delegated) acquire LE cert via DNS-01
+#   4. tomcat_windows_tls      (Windows)   build keystore, configure
+#                                          server.xml, restart, verify HTTPS
+#
+# Required runtime inputs:
+#   cloudflare_zone         Cloudflare-managed zone (e.g. entrenchedrealist.dev)
+#   cloudflare_api_token    via -e @secrets.yml, env CLOUDFLARE_API_TOKEN, or AAP credential
+#   ansible_password        Windows admin password (via inventory / vault / secrets.yml)
+#
+# Optional:
+#   cert_fqdn               Defaults to inventory_hostname per Windows host.
+#   acme_env                staging (default) or production
+
+- name: Bootstrap Tomcat-on-Windows demo host(s)
+  hosts: tomcat_windows_demo
+  gather_facts: true
+  vars:
+    cert_fqdn: "{{ inventory_hostname }}"
+  roles:
+    - role: demo_prep
+    - role: tomcat_windows_install
+    - role: letsencrypt_cloudflare
+    - role: tomcat_windows_tls
+
+  post_tasks:
+    - name: Next steps
+      ansible.builtin.debug:
+        msg: "Demo up — run renew_tomcat_cert.yml against this host to demo the renewal flow."

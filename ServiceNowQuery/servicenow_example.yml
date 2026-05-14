@@ -4,12 +4,14 @@
 
   tasks:
 
+  # Provide credentials via vault / extra-vars / AAP credential, e.g.:
+  #   ansible-vault encrypt_string 'YOUR_SN_PASSWORD' --name vault_servicenow_password
+  #   ansible-playbook servicenow_example.yml -e servicenow_host=https://YOURINSTANCE.service-now.com
   - name: Query ServiceNow for ci record
     servicenow.servicenow.snow_record_find:
-      username: admin
-      password: 75wePjTNkUfT
-      #instance: https://dev114222.service-now.com
-      host: https://dev114222.service-now.com
+      username: "{{ servicenow_username | default('admin') }}"
+      password: "{{ vault_servicenow_password }}"
+      host: "{{ servicenow_host }}"
       table: cmdb_ci_computer
       query:
         sn_sys_class_name: "Server"

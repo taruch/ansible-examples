@@ -1,129 +1,208 @@
 # Tomcat on Windows Certificate Renewal
 
-Renews an SSL certificate on Apache Tomcat running as a Windows service. Ships
-a renewed PKCS12 keystore, updates the SSL Connector in `server.xml` to point
-at it, restarts the Tomcat service, and verifies the live cert on the SSL port.
+Renews an SSL certificate on Apache Tomcat running as a Windows service.
+Designed to run on a schedule (AAP, cron, etc.) and **issue the cert in-band**
+via Let's Encrypt — no pre-staged `.p12` file required.
 
-## Important: Tomcat requires a restart
+## Architecture (Pattern A — in-band LE issuance)
 
-Unlike Apache `httpd` (graceful reload) or IIS (rebind by thumbprint), Tomcat
-does **not** hot-reload SSL configuration. The connector picks up the new
-keystore only on service restart. Schedule a maintenance window or take the
-node out of the load balancer rotation before running this play.
+`renew_tomcat_cert.yml` is a thin orchestrator over two roles:
 
-## What it does
+1. **Pre-flight on the Windows host.** Probe the live TLS connector
+   (`{{ cert_fqdn }}:{{ connector_port }}`) and read the cert's expiry. If
+   the live cert has more than `cert_remaining_days` left (default `30`),
+   the play ends early — no ACME order, no restart. This check is what
+   makes the play idempotent in **AAP**, where the project filesystem is
+   ephemeral and `.acme/` never persists between job runs.
 
-1. Backs up `server.xml` to `server.xml.bak_<date>`.
-2. Copies the renewed `.p12` into the Tomcat `conf/` directory with a
-   date-versioned filename and grants the Tomcat service account read access.
-3. Edits the `Connector` element in `server.xml` via `community.windows.win_xml`
-   — updating only the `certificateKeystoreFile`, `certificateKeystorePassword`,
-   and `certificateKeystoreType` attributes on the matching SSLHostConfig
-   Certificate. The rest of `server.xml` is left untouched.
-4. Restarts the Tomcat Windows service.
-5. Waits for the SSL connector to come back up, then fetches the live cert
-   from the control node and prints the renewed subject + expiry.
+2. **Issue (or refresh) the cert.** `letsencrypt_cloudflare` runs a DNS-01
+   challenge against your Cloudflare zone. The new cert lives only inside
+   the EE's ephemeral filesystem.
 
-## Rollback
+3. **Ship and rotate.** `tomcat_windows_tls` builds a PKCS12 keystore,
+   ships it to `conf/`, opens the Windows firewall for the connector port,
+   re-templates `server.xml`, and restarts Tomcat **only if** the keystore
+   or `server.xml` actually changed.
 
-The previous `.p12` is still on disk; `server.xml.bak_<date>` is the
-pre-change config. Roll back by restoring the backup and restarting:
+Tomcat does not hot-reload SSL config — the restart is unavoidable on a
+real renewal — but the play won't restart on no-op runs.
 
-```yaml
-- ansible.windows.win_copy:
-    src: 'C:\...\server.xml.bak_2026-04-11'
-    dest: 'C:\...\server.xml'
-    remote_src: true
-- ansible.windows.win_service:
-    name: Tomcat10
-    state: restarted
-```
+## Schedule it
 
-## Tomcat version compatibility
+Point an AAP job template (or any scheduler) at `renew_tomcat_cert.yml`
+and run it daily or weekly. Each run:
 
-The XPath in the playbook targets the **Tomcat 8.5+** connector schema:
+- Almost always no-ops (live cert is still fresh).
+- Becomes a real renewal once the live cert is within
+  `cert_remaining_days` of expiry — at which point it issues, ships,
+  and restarts in a single job.
 
-```xml
-<Connector port="8443">
-  <SSLHostConfig>
-    <Certificate certificateKeystoreFile="..."
-                 certificateKeystorePassword="..."
-                 certificateKeystoreType="PKCS12"/>
-  </SSLHostConfig>
-</Connector>
-```
+No need for a separate "is it time?" check; the play is the check.
 
-If you're on Tomcat 7 / older 8.0 using the legacy connector style:
+## Rate limits
 
-```xml
-<Connector port="8443" SSLEnabled="true"
-           keystoreFile="..."
-           keystorePass="..."
-           keystoreType="PKCS12"/>
-```
+Let's Encrypt production caps to remember:
+- **5 duplicate certs / week** per identical FQDN set
+- **5 failed validations / hour** per account+hostname
+- **50 certs / week** per registered domain (eTLD+1)
 
-then change the XPath to target the Connector itself and set `keystoreFile`
-instead of `certificateKeystoreFile`:
+The default `cert_remaining_days: 30` keeps you well clear: a single host
+issues ~4 certs/year against production. Iterating against the same FQDN
+under production should use `-e acme_env=production -e cert_remaining_days=999`
+only when you genuinely want a fresh issuance — and even then only
+intentionally. The default `acme_env=staging` gives you effectively
+unlimited issuances for development.
 
-```yaml
-xpath: "/Server/Service/Connector[@port='8443']"
-attribute: keystoreFile
-```
+## Required vars
+
+| Var | Source | Notes |
+|---|---|---|
+| `cloudflare_zone` | extra-var / inventory | Zone the cert FQDN lives in |
+| `cloudflare_api_token` | env `CLOUDFLARE_API_TOKEN`, extra-var, or AAP credential injector | `Zone:Zone:Read` + `Zone:DNS:Edit`, zone-scoped |
+| `ansible_password` | inventory / vault / AAP machine credential | Windows admin password |
+
+## Optional vars (with defaults)
+
+| Var | Default | Purpose |
+|---|---|---|
+| `cert_fqdn` | `inventory_hostname` | FQDN to issue for. The inventory hostname IS the cert by default. |
+| `acme_env` | `staging` | Set to `production` for a real trusted cert. |
+| `cert_remaining_days` | `30` | Skip renewal when live cert has more than this many days left. Set to `999` to force re-issue (the semantics are "cert must have at least N days left"; `0` means "never renew"). |
+| `vault_keystore_password` | `changeit` | Keystore passphrase. Override via AAP Vault credential. |
+| `connector_port` | `8443` | Tomcat TLS connector. |
+| `tomcat_home` | `C:\Program Files\Apache Software Foundation\Tomcat 10.1` | Install path. |
+| `tomcat_service` | `Tomcat10` | Windows service name. |
 
 ## Layout
 
 ```
 tomcat_windows/
-├── README.md
-├── renew_tomcat_cert.yml
-├── requirements.yml
-├── files/
-│   └── wildcard_example_com.p12       # not committed
-└── inventory/
-    ├── hosts.yml
-    └── host_vars/
-        └── tomcat-win01.example.com.yml
+├── README.md                       # this file — production renewal flow
+├── DEMO.md                         # demo bootstrap walkthrough
+├── renew_tomcat_cert.yml           # Pattern A orchestrator (LE issuance + ship)
+├── demo_host_init.yml              # initial bootstrap: prep + install + LE + tls
+├── requirements.yml                # only used when running with system ansible
+├── ansible.cfg                     # roles_path = ./roles
+├── secrets.yml                     # gitignored — Cloudflare token + Windows password
+├── inventory/
+│   ├── hosts.yml                   # production-style inventory (Kerberos, etc.)
+│   └── demo.yml                    # demo-style inventory (CredSSP, untrusted WinRM cert)
+├── files/                          # gitignored — generated artifacts (hello.war, *.p12)
+├── ee/                             # Execution Environment definition
+└── roles/
+    ├── demo_prep/                  # localhost: hello.war + Cloudflare A record
+    ├── tomcat_windows_install/     # Windows: install Java + Tomcat
+    ├── letsencrypt_cloudflare/     # localhost: ACME DNS-01 via Cloudflare
+    └── tomcat_windows_tls/         # Windows: build .p12, ship, configure, restart
 ```
 
-## Prerequisites
+## Execution Environment
+
+A pre-built image is published on Quay:
+
+```
+quay.io/truch/tomcat-windows-cert-renewal:1.1   # current
+quay.io/truch/tomcat-windows-cert-renewal:latest
+```
+
+Source for the EE definition lives in [`ee/`](ee/README.md). It bundles the
+required collections (`ansible.windows`, `community.windows`,
+`community.crypto`, `community.general`), Python deps (`pywinrm[credssp]`,
+`cryptography`, `requests`), and is built on
+`registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel9:latest`.
+
+To rebuild from source:
 
 ```bash
-ansible-galaxy collection install -r requirements.yml
+cd ee
+ansible-builder build --tag tomcat-windows-cert-renewal:<tag> -v3
 ```
 
-Place the renewed PKCS12 keystore under `files/`:
-
-```
-files/wildcard_example_com.p12
-```
-
-Encrypt the keystore password with ansible-vault (or use an AAP Vault credential):
+## Running locally with ansible-navigator
 
 ```bash
-ansible-vault encrypt_string 'changeit' --name vault_keystore_password
+ansible-navigator run renew_tomcat_cert.yml \
+  --eei quay.io/truch/tomcat-windows-cert-renewal:1.1 \
+  --pull-policy missing \
+  --mode stdout \
+  --pae false \
+  -i inventory/demo.yml \
+  -e @secrets.yml \
+  -e cloudflare_zone=entrenchedrealist.dev
 ```
 
-## Usage
+`secrets.yml` (gitignored) holds the Cloudflare token + Windows admin
+password. Each host's public IP lives in `inventory/demo.yml` as
+`ansible_host`. The play targets the `tomcat_windows_demo` group; for
+production hosts, point at `inventory/hosts.yml` and adjust the play's
+`hosts:` line (or rename the group there) to match.
 
-```bash
-ansible-playbook -i inventory/hosts.yml renew_tomcat_cert.yml --ask-vault-pass
-```
-
-Targeting a different Tomcat install:
-
-```bash
-ansible-playbook -i inventory/hosts.yml renew_tomcat_cert.yml \
-  -e "tomcat_home=C:\\Program Files\\Apache Software Foundation\\Tomcat 9.0" \
-  -e tomcat_service=Tomcat9 \
-  -e connector_port=8443
-```
+Defaults to LE staging. For a real trusted cert add `-e acme_env=production`.
 
 ## AAP / Controller
 
-Use a **Machine** credential for WinRM and a **Vault** credential for the
-keystore password. For zero-downtime renewals, build a workflow template:
+The fastest path is the configuration-as-code file shipped with this
+example: [`setup.yml`](setup.yml). It defines the credential type, the
+Cloudflare credential, the EE, the project, the inventory + hosts + group,
+the two job templates, and a daily schedule. Apply it via
+`../../controller_setup/configure_aap.yml` (which runs
+`infra.aap_configuration.dispatch`):
+
+```bash
+ansible-navigator run ../../controller_setup/configure_aap.yml \
+  -e aap_hostname=aap.example.com \
+  -e aap_username=admin \
+  -e aap_password='...' \
+  -e aap_validate_certs=true
+```
+
+You then only need to:
+
+1. Create a **Machine credential** for the Windows hosts (username
+   `Administrator`, password). `setup.yml` references it by name via the
+   `windows_machine_credential` tunable at the top of the file — set that
+   to whatever you named your credential.
+2. Open the **Cloudflare** credential in AAP and paste the actual API
+   token (it's left blank in the import).
+3. (Optional) **Vault credential** for `vault_keystore_password` if you
+   want something other than the default `changeit`.
+
+What `setup.yml` creates:
+
+- A custom credential type `Cloudflare API Token` that injects both
+  `CLOUDFLARE_API_TOKEN` (env) and `cloudflare_api_token` (extra-var)
+- An execution environment pointing at the Quay image
+- A git project at `https://github.com/taruch/ansible-examples.git`
+- An inventory `Tomcat Windows Demo` with hosts under
+  `tomcat_windows_demo`
+- Two job templates: `Tomcat Windows / Bootstrap demo host` and
+  `Tomcat Windows / Renew certificate`
+- A daily schedule on the renewal template (cheap since the pre-flight
+  no-ops when certs are fresh)
+
+### Workflow for zero-downtime production renewals
+
+When a renewal is due, Tomcat restarts. For HA deployments wrap the play
+in a workflow template:
 
 1. Drain node from load balancer
-2. Run this play
+2. Run `renew_tomcat_cert.yml`
 3. Health-check the node
 4. Return node to load balancer
+
+## Rollback
+
+If a renewal goes bad and you need to revert, the previous keystore is
+still on disk (the play writes `conf/<cert>.p12` and overwrites on next
+renewal; the *previous* `.p12` is whatever existed before this run, kept
+under the same filename only if the next run hasn't happened yet). For
+real rollback safety in production, take a `conf/` snapshot before the
+workflow drains the node and restore that snapshot on failure.
+
+## Demo environment
+
+To exercise this against a real host, `demo_host_init.yml` provisions one
+end-to-end (Tomcat 10.1, hello.war, initial LE cert). You bring a Windows EC2
+instance and a Cloudflare-managed zone; everything else is automated. See
+[`DEMO.md`](DEMO.md). The same `renew_tomcat_cert.yml` then runs against the
+demo host to exercise the renewal flow.

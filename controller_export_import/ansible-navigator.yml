@@ -6,11 +6,11 @@ ansible-navigator:
       - inventory
   execution-environment:
     container-engine: podman
-    enabled: false
+    enabled: true
     # image: quay.io/ansible-product-demos/apd-ee-25:latest
-    image: quay.io/truch/export24:1.0
+    image: quay.io/truch/ee25:1.4
     pull:
-      policy: missing
+      policy: always
   logging:
     level: debug
   playbook-artifact:

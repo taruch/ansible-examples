@@ -1,4 +1,4 @@
-Ansible example implementing the following SSH key management (layers as defined in earlier mail):
+Ansible example implementing the following SSH key management:
  
 This is intended to demonstrate the following use cases (IT used loosely here):
  

@@ -1,0 +1,66 @@
+---
+# ---------------------------------------------------------------- Java
+- name: Download Temurin JDK installer
+  ansible.windows.win_get_url:
+    url: "{{ java_msi_url }}"
+    dest: 'C:\Windows\Temp\temurin-jdk.msi'
+
+- name: Install Temurin JDK (sets JAVA_HOME, adds java to PATH)
+  ansible.windows.win_package:
+    path: 'C:\Windows\Temp\temurin-jdk.msi'
+    arguments: ADDLOCAL=FeatureMain,FeatureEnvironment,FeatureJavaHome
+    state: present
+
+- name: Read JAVA_HOME set by the JDK installer
+  ansible.windows.win_shell: '[Environment]::GetEnvironmentVariable("JAVA_HOME","Machine")'
+  register: java_home_raw
+  changed_when: false
+
+- name: Fail early if JAVA_HOME was not set
+  ansible.builtin.fail:
+    msg: >-
+      JAVA_HOME is not set after the JDK install. A reboot is sometimes
+      needed for the machine environment to settle — reboot the host and
+      re-run, or set JAVA_HOME manually.
+  when: java_home_raw.stdout | trim | length == 0
+
+- name: Pin JAVA_HOME for this play
+  ansible.builtin.set_fact:
+    java_home: "{{ java_home_raw.stdout | trim }}"
+
+# -------------------------------------------------------------- Tomcat
+- name: Download Tomcat {{ tomcat_version }} Windows service installer
+  ansible.windows.win_get_url:
+    url: "{{ tomcat_installer_url }}"
+    dest: 'C:\Windows\Temp\apache-tomcat-{{ tomcat_version }}.exe'
+
+- name: Install Tomcat silently (creates the "{{ tomcat_service }}" service)
+  ansible.windows.win_shell: |
+    $env:JAVA_HOME = "{{ java_home }}"
+    Start-Process -FilePath 'C:\Windows\Temp\apache-tomcat-{{ tomcat_version }}.exe' -ArgumentList '/S' -Wait
+  args:
+    creates: '{{ tomcat_home }}\bin\tomcat10.exe'
+
+- name: Wait for the Tomcat service to be registered
+  ansible.windows.win_service_info:
+    name: "{{ tomcat_service }}"
+  register: tomcat_svc
+  until: tomcat_svc.exists
+  retries: 10
+  delay: 3
+
+# ------------------------------------------------------- deploy the WAR
+- name: Remove the stock ROOT webapp so our app owns "/"
+  ansible.windows.win_file:
+    path: '{{ tomcat_home }}\webapps\ROOT'
+    state: absent
+
+- name: Remove any stale ROOT.war
+  ansible.windows.win_file:
+    path: '{{ tomcat_home }}\webapps\ROOT.war'
+    state: absent
+
+- name: Deploy hello.war as the ROOT webapp
+  ansible.windows.win_copy:
+    src: "{{ war_path }}"
+    dest: '{{ tomcat_home }}\webapps\ROOT.war'

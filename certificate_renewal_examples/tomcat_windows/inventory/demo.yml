@@ -1,0 +1,40 @@
+---
+# The inventory hostname IS the cert FQDN (also used as the Cloudflare record
+# name). Each host's ansible_host is its public IP — set per-host below.
+# demo_prep reads ansible_host to upsert the Cloudflare A record, so the play
+# scales naturally across multiple hosts without per-run extra-vars.
+#
+# Example invocation:
+#
+#   ansible-navigator run demo_host_init.yml \
+#     --eei quay.io/truch/tomcat-windows-cert-renewal:1.1 \
+#     --pae false \
+#     -i inventory/demo.yml \
+#     -e @secrets.yml \
+#     -e cloudflare_zone=entrenchedrealist.dev
+#
+# tomcat_windows is the group that renew_tomcat_cert.yml targets, so the
+# demo hosts sit under tomcat_windows > tomcat_windows_demo. Both group names
+# match these hosts.
+all:
+  children:
+    tomcat_windows:
+      children:
+        tomcat_windows_demo:
+          hosts:
+            # Each host's inventory_hostname IS the cert FQDN and must live
+            # inside the Cloudflare-managed zone. ansible_host is the public
+            # IP. ansible_password is set per host via inventory/host_vars/
+            # or an AAP Machine credential — NOT here, NOT in secrets.yml.
+            tomcat-demo.entrenchedrealist.dev:
+              ansible_host: 18.224.139.152
+            wincerttest2.entrenchedrealist.dev:
+              ansible_host: 18.221.186.85
+          vars:
+            ansible_connection: winrm
+            ansible_port: 5986
+            ansible_winrm_transport: credssp
+            # EC2 Windows ships a self-signed WinRM cert; ignore for the demo.
+            ansible_winrm_server_cert_validation: ignore
+            ansible_user: ec2-user
+            ansible_password: MTIxMjUz_1

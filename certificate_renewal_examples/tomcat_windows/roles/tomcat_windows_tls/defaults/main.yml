@@ -1,0 +1,35 @@
+---
+# Tomcat install paths (must match what tomcat_windows_install put on disk).
+tomcat_home: 'C:\Program Files\Apache Software Foundation\Tomcat 10.1'
+tomcat_service: "Tomcat10"
+tomcat_user: "NT SERVICE\\Tomcat10"
+
+# Connectors.
+http_port: 8080
+connector_port: 8443
+
+# Cert identity. cert_fqdn is required from the caller.
+cert_name: "{{ cert_fqdn | replace('.', '_') }}"
+
+# Keystore password. Override via a Vault credential in production.
+keystore_password: "{{ vault_keystore_password | default('changeit') }}"
+
+# Where letsencrypt_cloudflare dropped the cert artifacts on the control node.
+acme_work_dir: "{{ playbook_dir }}/.acme"
+cert_key_path: "{{ acme_work_dir }}/{{ cert_name }}.key"
+cert_path: "{{ acme_work_dir }}/{{ cert_name }}.crt"
+chain_path: "{{ acme_work_dir }}/{{ cert_name }}.chain.pem"
+
+# PKCS12 keystore staging on the control node (also re-used by the renewal play).
+p12_local_path: "{{ playbook_dir }}/files/{{ cert_name }}.p12"
+
+# Where the keystore + server.xml live on the Windows host.
+server_xml: "{{ tomcat_home }}\\conf\\server.xml"
+p12_remote_path: "{{ tomcat_home }}\\conf\\{{ cert_name }}.p12"
+
+# ACME directory — passed through so the verification step knows whether to
+# trust the live cert (LE staging is not in the public trust store).
+acme_directory: "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+# Required from the caller:
+#   cert_fqdn  - FQDN of the cert (used for the keystore friendly_name and verification)

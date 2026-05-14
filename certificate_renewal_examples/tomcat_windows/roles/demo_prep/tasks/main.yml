@@ -1,0 +1,54 @@
+---
+# Run from a Windows-host-targeting play. Tasks delegate to localhost where
+# needed. `ansible_host` is the per-host IP (set in inventory) — used both
+# for the Cloudflare A record and (transparently) for the WinRM connection.
+
+- name: Sanity-check required inputs
+  ansible.builtin.assert:
+    that:
+      - cloudflare_zone is defined and cloudflare_zone | length > 0
+      - cert_fqdn | default(none) is not none
+      - cloudflare_api_token | length > 0
+      - ansible_host is defined and ansible_host | length > 0
+    fail_msg: >-
+      Provide cloudflare_zone, cert_fqdn, and a cloudflare_api_token (or set
+      CLOUDFLARE_API_TOKEN in your env). Each Windows host must have
+      ansible_host set in the inventory — the A record points at it.
+      cert_fqdn must live inside cloudflare_zone, e.g.
+      cert_fqdn=tomcat-demo.entrenchedrealist.dev cloudflare_zone=entrenchedrealist.dev.
+
+# ---------------------------------------------- shared one-shot WAR build
+- name: Ensure build output directory exists (gitignored)
+  ansible.builtin.file:
+    path: "{{ war_path | dirname }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Package webapp/ into hello.war (a WAR is just a zip)
+  community.general.archive:
+    path: "{{ role_path }}/files/webapp/*"
+    dest: "{{ war_path }}"
+    format: zip
+    force_archive: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+# ---------------------------------------------- per-host A record
+- name: Upsert the A record {{ cert_fqdn }} -> {{ ansible_host }}
+  community.general.cloudflare_dns:
+    api_token: "{{ cloudflare_api_token }}"
+    zone: "{{ cloudflare_zone }}"
+    record: "{{ cert_fqdn }}"
+    type: A
+    value: "{{ ansible_host }}"
+    ttl: 60
+    # Replace any prior A record at this name so re-runs don't pile up entries.
+    solo: true
+    state: present
+  delegate_to: localhost
+  become: false
+  no_log: true

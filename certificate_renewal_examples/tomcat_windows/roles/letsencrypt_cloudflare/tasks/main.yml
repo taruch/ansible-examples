@@ -1,0 +1,158 @@
+---
+# All tasks run on the control node. The role is designed to be invoked from a
+# play targeting a remote host (e.g. the Windows host) with delegate_to set, or
+# from a play running on localhost directly.
+
+- name: Sanity-check required inputs
+  ansible.builtin.assert:
+    that:
+      - cloudflare_zone is defined and cloudflare_zone | length > 0
+      - cert_fqdn | default(none) is not none
+      - cloudflare_api_token | length > 0
+    fail_msg: >-
+      Provide cloudflare_zone, cert_fqdn, and a cloudflare_api_token (or set
+      CLOUDFLARE_API_TOKEN in your env). cert_fqdn must live inside
+      cloudflare_zone (e.g. cert_fqdn=tomcat-demo.entrenchedrealist.dev
+      cloudflare_zone=entrenchedrealist.dev).
+
+- name: Ensure ACME working directory exists on the control node
+  ansible.builtin.file:
+    path: "{{ acme_work_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Generate the ACME account key
+  community.crypto.openssl_privatekey:
+    path: "{{ acme_account_key }}"
+    type: RSA
+    size: 4096
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Generate the certificate private key
+  community.crypto.openssl_privatekey:
+    path: "{{ cert_key_path }}"
+    type: RSA
+    size: 2048
+  delegate_to: localhost
+  become: false
+
+- name: Build the CSR
+  community.crypto.openssl_csr:
+    path: "{{ csr_path }}"
+    privatekey_path: "{{ cert_key_path }}"
+    common_name: "{{ cert_fqdn }}"
+    subject_alt_name:
+      - "DNS:{{ cert_fqdn }}"
+  delegate_to: localhost
+  become: false
+
+- name: Start the ACME order and fetch the DNS-01 challenge
+  community.crypto.acme_certificate:
+    acme_directory: "{{ acme_directory }}"
+    acme_version: 2
+    account_key_src: "{{ acme_account_key }}"
+    account_email: "{{ acme_email }}"
+    terms_agreed: true
+    csr: "{{ csr_path }}"
+    challenge: dns-01
+    dest: "{{ cert_path }}"
+    chain_dest: "{{ chain_path }}"
+    fullchain_dest: "{{ fullchain_path }}"
+    # If the existing cert still has more than this many days, no new order
+    # is started and `changed` is false — the challenge block is skipped.
+    remaining_days: "{{ cert_remaining_days }}"
+  delegate_to: localhost
+  become: false
+  register: acme_order
+
+- name: Publish + validate + cleanup the DNS-01 challenge
+  when: acme_order is changed
+  block:
+    # LE caches authorizations for ~30 days. If a fresh authorization exists
+    # for the identifier, the new order is placed "ready" with no pending
+    # challenges — `challenge_data` comes back empty and we skip the DNS
+    # dance entirely. The retrieve step below still runs to finalize and
+    # download the cert.
+    - name: Upsert _acme-challenge TXT record(s) in Cloudflare
+      community.general.cloudflare_dns:
+        api_token: "{{ cloudflare_api_token }}"
+        zone: "{{ cloudflare_zone }}"
+        record: "{{ item.value['dns-01']['record'] }}"
+        type: TXT
+        value: "{{ item.value['dns-01']['resource_value'] }}"
+        ttl: 60
+        # Replace any leftover challenge TXT from a prior failed run.
+        solo: true
+        state: present
+      loop: "{{ acme_order.challenge_data | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: (acme_order.challenge_data | default({}) | length) > 0
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Wait for Cloudflare's edge to serve the _acme-challenge TXT
+      # The API write returns immediately, but Cloudflare's authoritative
+      # nameservers need a few seconds to serve the new record. We poll
+      # 1.1.1.1 (Cloudflare's recursive resolver, which has direct visibility
+      # into the authoritative side) over DoH until the record is visible,
+      # so we proceed only when LE will be able to see it.
+      ansible.builtin.uri:
+        url: "https://cloudflare-dns.com/dns-query?name=_acme-challenge.{{ cert_fqdn }}&type=TXT"
+        headers:
+          accept: application/dns-json
+        return_content: true
+      register: doh_check
+      until:
+        # Cloudflare returns Content-Type application/dns-json, so uri's auto
+        # JSON parse (which only triggers on application/json) is skipped —
+        # parse `.content` explicitly. `default([])` handles the NXDOMAIN
+        # case where no Answer key is present.
+        - doh_check.status == 200
+        - (doh_check.content | from_json).Answer | default([]) | length > 0
+      retries: "{{ acme_dns_propagation_retries | default(30) }}"
+      delay: "{{ acme_dns_propagation_delay | default(5) }}"
+      when: (acme_order.challenge_data | default({}) | length) > 0
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Tell the ACME server to validate, then retrieve the certificate
+      community.crypto.acme_certificate:
+        acme_directory: "{{ acme_directory }}"
+        acme_version: 2
+        account_key_src: "{{ acme_account_key }}"
+        account_email: "{{ acme_email }}"
+        terms_agreed: true
+        csr: "{{ csr_path }}"
+        challenge: dns-01
+        dest: "{{ cert_path }}"
+        chain_dest: "{{ chain_path }}"
+        fullchain_dest: "{{ fullchain_path }}"
+        remaining_days: "{{ cert_remaining_days }}"
+        data: "{{ acme_order }}"
+      delegate_to: localhost
+      become: false
+
+  always:
+    - name: Remove the _acme-challenge TXT records
+      community.general.cloudflare_dns:
+        api_token: "{{ cloudflare_api_token }}"
+        zone: "{{ cloudflare_zone }}"
+        record: "{{ item.value['dns-01']['record'] }}"
+        type: TXT
+        value: "{{ item.value['dns-01']['resource_value'] }}"
+        state: absent
+      loop: "{{ acme_order.challenge_data | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      delegate_to: localhost
+      become: false
+      when: acme_order is changed
+      no_log: true

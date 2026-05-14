@@ -1,0 +1,19 @@
+---
+# Where the built WAR lands on the control node. Consumed by tomcat_windows_install.
+war_path: "{{ playbook_dir }}/files/hello.war"
+
+# Cloudflare API token used to create the A record. Create a token at
+# https://dash.cloudflare.com/profile/api-tokens with permissions:
+#   - Zone:Zone:Read   (scoped to the target zone)
+#   - Zone:DNS:Edit    (scoped to the target zone)
+# Pass it at runtime via -e cloudflare_api_token=... or export CLOUDFLARE_API_TOKEN
+# and let this default pick it up.
+cloudflare_api_token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') }}"
+
+# Required when running this role (must be in scope when each task runs):
+#   cloudflare_zone   - Cloudflare-managed apex zone (e.g. entrenchedrealist.dev)
+#   cert_fqdn         - FQDN of the demo app (must be inside cloudflare_zone)
+#   ansible_host      - per-host public IP from inventory; written as the
+#                       A record value. The role is meant to be invoked from
+#                       a Windows-host-targeting play (tasks delegate to
+#                       localhost internally) so ansible_host is in scope.

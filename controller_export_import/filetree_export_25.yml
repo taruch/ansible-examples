@@ -96,7 +96,7 @@
           # # - hub_roles
         organization_filter: ""  # Specify the organization to filter the export, if needed
         secrets_as_variables: true
-        output_path: "./export_25_20260503_1"
+        output_path: "./export_25_20260511_1"
 
     - name: "Delete the Authentication Token used"
       ansible.builtin.uri:

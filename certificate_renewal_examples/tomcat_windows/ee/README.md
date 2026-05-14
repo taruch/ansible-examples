@@ -1,6 +1,6 @@
 # Execution Environment — Tomcat-on-Windows cert renewal
 
-Definition for an Ansible Execution Environment that runs the playbooks and roles in this directory tree (`../roles/`, `../demo/demo_host_init.yml`, `../renew_tomcat_cert.yml`).
+Definition for an Ansible Execution Environment that runs the playbooks and roles in this directory tree (`../roles/`, `../demo_host_init.yml`, `../renew_tomcat_cert.yml`).
 
 ## What's in the image
 
@@ -69,15 +69,13 @@ Then register it in AAP as an Execution Environment pointing at that pull spec, 
 `ansible-navigator` is the easiest way to run a playbook inside the EE from a workstation:
 
 ```bash
-ansible-navigator run ../demo/demo_host_init.yml \
-  --eei quay.io/truch/tomcat-windows-cert-renewal:latest \
+ansible-navigator run ../demo_host_init.yml \
+  --eei quay.io/truch/tomcat-windows-cert-renewal:1.1 \
   --pae false \
-  -i ../demo/inventory/hosts.yml \
+  -i ../inventory/demo.yml \
   --penv CLOUDFLARE_API_TOKEN \
-  -e cert_fqdn=tomcat-demo.entrenchedrealist.dev \
-  -e cloudflare_zone=entrenchedrealist.dev \
-  -e instance_public_ip=203.0.113.10 \
-  -e ansible_password="$WIN_ADMIN_PASSWORD"
+  -e @../secrets.yml \
+  -e cloudflare_zone=entrenchedrealist.dev
 ```
 
 `--pae false` disables ansible-navigator's playbook artifact recording (often the cause of file-permission surprises on first run).

@@ -1,0 +1,12 @@
+---
+# Java
+java_msi_url: "https://api.adoptium.net/v3/installer/latest/21/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk"
+
+# Tomcat
+tomcat_version: "10.1.55"
+tomcat_installer_url: "https://dlcdn.apache.org/tomcat/tomcat-10/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.exe"
+tomcat_home: 'C:\Program Files\Apache Software Foundation\Tomcat 10.1'
+tomcat_service: "Tomcat10"
+
+# WAR to deploy as ROOT. Built on the control node by the demo_prep role.
+war_path: "{{ playbook_dir }}/files/hello.war"

@@ -1,0 +1,107 @@
+---
+- name: Sanity-check required inputs
+  ansible.builtin.assert:
+    that:
+      - cert_fqdn | default(none) is not none
+    fail_msg: Provide cert_fqdn (and ensure cert artifacts exist under acme_work_dir on the control node).
+
+# ---------------------------------------------- bundle + install keystore
+- name: Build the PKCS12 keystore from the issued certificate
+  community.crypto.openssl_pkcs12:
+    action: export
+    path: "{{ p12_local_path }}"
+    friendly_name: "{{ cert_fqdn }}"
+    privatekey_path: "{{ cert_key_path }}"
+    certificate_path: "{{ cert_path }}"
+    other_certificates: "{{ chain_path }}"
+    other_certificates_parse_all: true
+    passphrase: "{{ keystore_password }}"
+    state: present
+  delegate_to: localhost
+  become: false
+
+- name: Ship the keystore into the Tomcat conf directory
+  ansible.windows.win_copy:
+    src: "{{ p12_local_path }}"
+    dest: "{{ p12_remote_path }}"
+  no_log: true
+  register: p12_ship
+
+- name: Grant the Tomcat service account read access to the keystore
+  ansible.windows.win_acl:
+    path: "{{ p12_remote_path }}"
+    user: "{{ tomcat_user }}"
+    rights: Read
+    type: allow
+    state: present
+
+# ---------------------------------------------------- server.xml + start
+- name: Template server.xml (HTTP :{{ http_port }}, TLS :{{ connector_port }})
+  ansible.windows.win_template:
+    src: server.xml.j2
+    dest: "{{ server_xml }}"
+  register: server_xml_template
+
+- name: Allow inbound {{ connector_port }}/tcp through the Windows firewall
+  # Windows Server defaults to "block inbound" with no rule for Tomcat. AWS
+  # Security Group opening alone isn't enough — the host's firewall has to
+  # let the connector port through too.
+  community.windows.win_firewall_rule:
+    name: "Tomcat HTTPS {{ connector_port }}"
+    localport: "{{ connector_port }}"
+    action: allow
+    direction: in
+    protocol: tcp
+    profiles: [domain, private, public]
+    state: present
+    enabled: true
+
+- name: Ensure Tomcat is running
+  ansible.windows.win_service:
+    name: "{{ tomcat_service }}"
+    state: started
+    start_mode: auto
+
+- name: Restart Tomcat to pick up the new cert/config
+  # Gated so a renewal job that no-ops on the cert doesn't bounce the service.
+  # Tomcat doesn't hot-reload SSL, but if nothing changed there's nothing to
+  # pick up — leave the running process alone.
+  ansible.windows.win_service:
+    name: "{{ tomcat_service }}"
+    state: restarted
+  when: p12_ship is changed or server_xml_template is changed
+
+- name: Wait for the TLS connector on :{{ connector_port }}
+  ansible.windows.win_wait_for:
+    port: "{{ connector_port }}"
+    delay: 5
+    timeout: 120
+
+# ------------------------------------------------------------- verify
+- name: Fetch the live certificate from :{{ connector_port }}
+  community.crypto.get_certificate:
+    host: "{{ cert_fqdn }}"
+    port: "{{ connector_port }}"
+  delegate_to: localhost
+  become: false
+  register: live_cert
+
+- name: Confirm the hello app is served over HTTPS
+  ansible.builtin.uri:
+    url: "https://{{ cert_fqdn }}:{{ connector_port }}/"
+    return_content: true
+    # Staging certs are not in the public trust store.
+    validate_certs: "{{ 'staging' not in acme_directory }}"
+  delegate_to: localhost
+  become: false
+  register: https_check
+  failed_when: "'Hello from Tomcat' not in https_check.content"
+
+- name: Demo environment summary
+  ansible.builtin.debug:
+    msg:
+      - "App:        https://{{ cert_fqdn }}:{{ connector_port }}/"
+      - "Cert CN:    {{ live_cert.subject.commonName | default('?') }}"
+      - "Issuer:     {{ live_cert.issuer.commonName | default('?') }}"
+      - "Expires:    {{ live_cert.not_after }}"
+      - "Keystore:   {{ p12_remote_path }} (password var: keystore_password)"

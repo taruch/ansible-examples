@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: demo_prep
+  description: Build hello.war and upsert the Cloudflare A record for the Tomcat-on-Windows demo
+  license: MIT
+  min_ansible_version: "2.14"
+
+collections:
+  - community.general
+
+dependencies: []

@@ -5,7 +5,9 @@
   vars:
     user: gitea
     repo: network-demos-repo
-    password: gitea
+    # Provide via -e or vault, e.g.:
+    #   ansible-playbook gitea.yml_orignetwork -e gitea_admin_password=$GITEA_PW
+    password: "{{ gitea_admin_password }}"
 
   tasks:
     - name: Install Podman
@@ -106,7 +108,7 @@
 
     - name: Clone network-demos-repo on Gitea server
       ansible.builtin.shell:
-        cmd: git clone http://gitea:gitea@ansible-1:3000/gitea/network-demos-repo.git /home/student/network-demos-repo
+        cmd: "git clone http://{{ user }}:{{ password }}@ansible-1:3000/gitea/network-demos-repo.git /home/student/network-demos-repo"
       become: true
       become_user: student
       ignore_errors: true
@@ -126,7 +128,7 @@
         - git config --global user.email admin@example.com
         - git config --global user.name gitea
         - git init
-        - git remote set-url origin http://gitea:gitea@ansible-1:3000/gitea/network-demos-repo.git
+        - "git remote set-url origin http://{{ user }}:{{ password }}@ansible-1:3000/gitea/network-demos-repo.git"
         - git add --all 
         - git commit --allow-empty -m 'setup'
         - git push --set-upstream origin master
