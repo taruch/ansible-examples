@@ -186,7 +186,7 @@ sets `roles_path = ./roles`):
 | [`demo_prep`](roles/demo_prep/README.md) | localhost (delegated, per-host) | Builds `hello.war` once at `files/hello.war`; upserts each host's Cloudflare A record `<cert_fqdn>` → `<ansible_host>`. |
 | [`tomcat_windows_install`](roles/tomcat_windows_install/README.md) | Windows host | Installs Temurin JDK (sets `JAVA_HOME`); silent-installs Tomcat `10.1.x` (service `Tomcat10`); replaces `webapps/ROOT` with `hello.war`. |
 | [`letsencrypt_cloudflare`](roles/letsencrypt_cloudflare/README.md) | delegated to localhost | Runs the ACME order; writes `_acme-challenge` TXT records via Cloudflare; pauses for DNS propagation; tells ACME to validate; retrieves cert/chain/fullchain to `.acme/`. TXT records are cleaned up in an `always` block. |
-| [`tomcat_windows_tls`](roles/tomcat_windows_tls/README.md) | Windows host (cert build delegated to localhost) | Builds `<fqdn>.p12`; ships it to `conf/`; opens the Windows firewall on the connector port; templates `server.xml` (HTTP `:8080`, TLS `:8443` → the keystore); restarts Tomcat (gated on actual change); verifies the cert on `:8443` and that the hello app responds. |
+| [`tomcat_windows_tls`](roles/tomcat_windows_tls/README.md) | Windows host (cert build delegated to localhost) | Builds `<fqdn>.p12`; ships it to `conf/`; templates `server.xml` (HTTP `:8080`, TLS `:8443` → the keystore); restarts Tomcat (gated on actual change); verifies the cert on `:8443` and that the hello app responds. |
 
 Each role has its own README documenting its variables and assumptions.
 

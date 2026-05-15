@@ -1,0 +1,113 @@
+---
+# Configuration-as-code for the service-validation example on AAP 2.6.
+#
+# Apply with ../controller_setup/configure_aap.yml (or any wrapper that
+# `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
+#
+# Required pre-existing artifacts in AAP (this file does NOT create them):
+#   - Machine credential named "Demo Credential"        (Windows admin)
+#   - Custom credential named "ServiceNow_Credential"   (SN_HOST/USERNAME/PASSWORD)
+# Adjust the tunables below if your credentials are named differently.
+
+# ---------------------------------------------------------------------------
+# Tunables
+# ---------------------------------------------------------------------------
+windows_machine_credential: "Demo Credential"          # must already exist
+snow_credential: "ServiceNow_Credential"               # must already exist
+target_organization: "Default"
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+project_scm_branch: "service_validation_examples"
+ee_image: "quay.io/truch/tomcat-windows-cert-renewal:1.1"   # change if your EE differs
+# servicenow.itsm collection must be present in the EE above. If you're
+# using a different EE that ships it (e.g. ee-supported-rhel9), point ee_image
+# at that instead.
+
+# ---------------------------------------------------------------------------
+# Execution Environment
+# ---------------------------------------------------------------------------
+controller_execution_environments:
+  - name: "Service Validation EE"
+    description: "EE for service-validation runs. Must include ansible.windows and servicenow.itsm."
+    image: "{{ ee_image }}"
+    pull: "missing"
+    organization: "{{ target_organization }}"
+
+# ---------------------------------------------------------------------------
+# Project
+# ---------------------------------------------------------------------------
+controller_projects:
+  - name: "Service Validation"
+    description: "Hourly drift check + SNOW auto-incident for Windows services"
+    organization: "{{ target_organization }}"
+    scm_type: "git"
+    scm_url: "{{ project_scm_url }}"
+    scm_branch: "{{ project_scm_branch }}"
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: true
+    allow_override: false
+
+# ---------------------------------------------------------------------------
+# Inventory
+# ---------------------------------------------------------------------------
+controller_inventories:
+  - name: "Service Validation Demo"
+    description: "Windows hosts checked by the hourly service-validation schedule"
+    organization: "{{ target_organization }}"
+    variables:
+      ansible_connection: winrm
+      ansible_port: 5986
+      ansible_winrm_transport: credssp
+      ansible_winrm_server_cert_validation: ignore
+      ansible_user: Administrator
+      service_name: Tomcat10
+
+controller_hosts:
+  - name: tomcat-demo.entrenchedrealist.dev
+    inventory: "Service Validation Demo"
+    enabled: true
+    variables:
+      ansible_host: 18.224.139.152
+  - name: wincerttest2.entrenchedrealist.dev
+    inventory: "Service Validation Demo"
+    enabled: true
+    variables:
+      ansible_host: 18.221.186.85
+
+controller_groups:
+  - name: service_validation_demo
+    inventory: "Service Validation Demo"
+    hosts:
+      - tomcat-demo.entrenchedrealist.dev
+      - wincerttest2.entrenchedrealist.dev
+
+# ---------------------------------------------------------------------------
+# Job template
+# ---------------------------------------------------------------------------
+controller_templates:
+  - name: "Service Validation / Ensure service running"
+    description: "Hourly drift check: starts the service if stopped and opens a SNOW incident describing what was done plus the last interactive user. Runs against ALL hosts in service_validation_demo in parallel."
+    organization: "{{ target_organization }}"
+    project: "Service Validation"
+    inventory: "Service Validation Demo"
+    playbook: "service_validation_examples/ensure_service.yml"
+    execution_environment: "Service Validation EE"
+    credentials:
+      - "{{ snow_credential }}"
+      - "{{ windows_machine_credential }}"
+    ask_variables_on_launch: false
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 10                  # most hosts will end_host fast; parallel ok
+    allow_simultaneous: false
+
+# ---------------------------------------------------------------------------
+# Schedule — every hour, on the hour.
+# ---------------------------------------------------------------------------
+controller_schedules:
+  - name: "Service Validation / Hourly check"
+    description: "Runs the service-validation template every hour. Healthy hosts no-op (end_host); only drift triggers SNOW."
+    unified_job_template: "Service Validation / Ensure service running"
+    rrule: "DTSTART;TZID=Etc/UTC:20260515T000000 RRULE:FREQ=HOURLY;INTERVAL=1"
+    enabled: true

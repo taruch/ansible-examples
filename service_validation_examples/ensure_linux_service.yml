@@ -1,0 +1,79 @@
+---
+# Hourly service-drift check for Linux hosts (systemd-managed services).
+# Mirror of ensure_service.yml for Windows.
+#
+# Behavior:
+#   - Try to start `service_name`. systemd_service is idempotent: if the
+#     service is already active, it returns changed=false.
+#   - If changed=false: end_host (no SNOW work).
+#   - If changed=true: we just remediated drift. Read the last user logon
+#     from wtmp and open a ServiceNow incident with what was done.
+#
+# Tuned for scheduled, parallel, hourly execution:
+#   - gather_facts: false — saves a setup roundtrip per host.
+#   - end_host fires for every healthy host so SNOW is never touched.
+#   - servicenow.itsm.incident reads SN_HOST / SN_USERNAME / SN_PASSWORD
+#     from env vars (injected by the AAP "ServiceNow" credential type).
+
+- name: Ensure a Linux service is running; SNOW incident if remediated
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    # Override per-host / per-group / per-run. Defaults to the fake service
+    # deploy_service_demo.yml installs.
+    service_name: "AnsibleDemoSvc"
+    snow_caller: "aap_system"
+
+  tasks:
+    - name: Ensure {{ service_name }} is started
+      ansible.builtin.systemd_service:
+        name: "{{ service_name }}"
+        state: started
+      register: svc
+
+    - name: End host if the service was already active (the common path)
+      ansible.builtin.meta: end_host
+      when: svc is not changed
+
+    # ----- Below this point: service was inactive; we just started it. -----
+
+    - name: Find the last user logon (from wtmp)
+      # `last -F` gives a full timestamp; `-i` prefers IPs over hostnames.
+      # We filter out reboot/wtmp/blank lines to get a real user login.
+      # `failed_when: false` keeps the remediation path complete even if
+      # wtmp is missing or unreadable.
+      ansible.builtin.shell: |
+        line=$(last -F -i 2>/dev/null | grep -vE '^(reboot|wtmp|$)' | head -n 1)
+        if [ -n "$line" ]; then
+          printf '%s\n' "$line"
+        else
+          printf '(no user logons in wtmp)\n'
+        fi
+      register: last_logon
+      changed_when: false
+      failed_when: false
+
+    - name: Open a ServiceNow incident describing the auto-remediation
+      servicenow.itsm.incident:
+        state: new
+        short_description: "Auto-remediated: service '{{ service_name }}' restarted on {{ inventory_hostname }}"
+        description: |
+          The scheduled service-validation playbook found service
+          '{{ service_name }}' inactive on {{ inventory_hostname }}
+          and started it.
+
+          Current ActiveState:  {{ svc.status.ActiveState | default('?') }}
+          Current SubState:     {{ svc.status.SubState | default('?') }}
+          Unit file:            {{ svc.status.FragmentPath | default('?') }}
+
+          Last user logon (from wtmp):
+          {{ last_logon.stdout | trim }}
+
+          Reported by Ansible Automation Platform.
+        impact: low
+        urgency: low
+        caller: "{{ snow_caller }}"
+      delegate_to: localhost
+      # Override the play-level become: API call on the control node, not root.
+      become: false

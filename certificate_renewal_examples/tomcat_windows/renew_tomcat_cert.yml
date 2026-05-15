@@ -1,81 +1,19 @@
 ---
-# Renew (or, when due, re-issue) the Tomcat SSL cert on Windows via Let's
-# Encrypt (DNS-01 against Cloudflare).
+# Single-shot wrapper for the renewal flow:
+#   1. cert_check.yml — per-host pre-flight; sets cert_renewal_needed.
+#   2. cert_renew.yml — runs the LE + ship + restart roles, skipping any host
+#      where cert_renewal_needed is false (set by step 1).
 #
-# Architecture — Pattern A (in-band issuance):
-#   1. Pre-flight: read the live cert from the Tomcat connector and compute
-#      days until expiry. If more than `cert_remaining_days` left, end the
-#      play. This check works regardless of whether any cert artifacts exist
-#      on the control node — critical for AAP, where the project filesystem
-#      is ephemeral per job and `.acme/` never persists between runs.
-#   2. Otherwise, run `letsencrypt_cloudflare` (issues a fresh LE cert via a
-#      DNS-01 challenge written to the Cloudflare zone) and
-#      `tomcat_windows_tls` (builds the .p12, ships it to Windows, updates
-#      server.xml, restarts Tomcat only if the cert actually changed).
+# Use this for local / ad-hoc runs. In AAP workflows, run the two playbooks
+# as separate job templates with a ServiceNow change-request creation step
+# wedged between them — see DEMO.md and README.md for the workflow pattern.
 #
-# Required vars (from caller, an inventory file, or AAP credential injectors):
-#   cloudflare_zone         Cloudflare-managed zone (e.g. entrenchedrealist.dev)
-#   cloudflare_api_token    Token with Zone:Zone:Read + Zone:DNS:Edit on the zone
-#                           (or set the CLOUDFLARE_API_TOKEN env var)
-#   ansible_password        Windows admin password (via inventory / vault)
+# Required vars (extra-vars, inventory, or AAP credential injectors):
+#   cloudflare_zone, cloudflare_api_token, ansible_password
 #
 # Optional vars:
-#   cert_fqdn               Defaults to `inventory_hostname` — the play assumes
-#                           the inventory hostname IS the cert FQDN.
-#   acme_env                staging (default) or production
-#   cert_remaining_days     30 (default). Skip renewal if live cert has more
-#                           than this many days left. Set to 0 to force re-issue.
-#   vault_keystore_password Keystore passphrase. Defaults to "changeit".
-#   connector_port          8443 (default). TLS port on the Windows host.
+#   cert_remaining_days (default 30) — renew if live cert has fewer days left.
+#   acme_env            (default staging) — set to `production` for trusted certs.
 
-- name: Renew Tomcat SSL cert via Let's Encrypt
-  hosts: tomcat_windows_demo
-  gather_facts: true
-  vars:
-    # If the inventory host is already an FQDN (has a dot), use it as-is.
-    # Otherwise treat it as a short name and append cloudflare_zone — so both
-    # `wincerttest2.entrenchedrealist.dev` and `wincerttest2` (with
-    # cloudflare_zone=entrenchedrealist.dev) resolve to the same cert FQDN.
-    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
-
-  pre_tasks:
-    - name: Probe the live cert on the Tomcat connector
-      community.crypto.get_certificate:
-        host: "{{ cert_fqdn }}"
-        port: "{{ connector_port | default(8443) }}"
-      delegate_to: localhost
-      become: false
-      register: live_cert_probe
-      failed_when: false
-      changed_when: false
-
-    - name: Compute days remaining on the live cert
-      ansible.builtin.set_fact:
-        live_cert_days_remaining: >-
-          {{ (
-              (live_cert_probe.not_after | to_datetime('%Y%m%d%H%M%SZ'))
-              - (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%SZ'))
-             ).days }}
-      when: live_cert_probe.not_after is defined
-
-    - name: Renewal decision
-      ansible.builtin.debug:
-        msg: >-
-          {% if live_cert_days_remaining is defined -%}
-          Live cert valid for {{ live_cert_days_remaining }} more day(s);
-          threshold is {{ cert_remaining_days | default(30) }} —
-          {{ 'skipping renewal.' if (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
-             else 'renewing.' }}
-          {%- else -%}
-          No reachable cert on {{ cert_fqdn }}:{{ connector_port | default(8443) }} — proceeding with issuance.
-          {%- endif %}
-
-    - name: End play if the live cert is still fresh enough
-      ansible.builtin.meta: end_play
-      when:
-        - live_cert_days_remaining is defined
-        - (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
-
-  roles:
-    - role: letsencrypt_cloudflare
-    - role: tomcat_windows_tls
+- import_playbook: cert_check.yml
+- import_playbook: cert_renew.yml

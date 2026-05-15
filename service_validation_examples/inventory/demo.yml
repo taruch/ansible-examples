@@ -1,0 +1,23 @@
+---
+# Demo inventory for the service-validation example. Same hosts as the
+# Tomcat-on-Windows demo (../certificate_renewal_examples/tomcat_windows/),
+# but kept separate so each example is self-contained.
+#
+# ansible_password is NOT set here — provide it via inventory/host_vars/<fqdn>.yml
+# (gitignored) or via an AAP Machine credential attached to the job template.
+all:
+  children:
+    service_validation_demo:
+      hosts:
+        tomcat-demo.entrenchedrealist.dev:
+          ansible_host: 18.224.139.152
+        wincerttest2.entrenchedrealist.dev:
+          ansible_host: 18.221.186.85
+      vars:
+        ansible_connection: winrm
+        ansible_port: 5986
+        ansible_winrm_transport: credssp
+        ansible_winrm_server_cert_validation: ignore
+        ansible_user: Administrator
+        # The service to validate. Override per-host if hosts run different services.
+        service_name: Tomcat10

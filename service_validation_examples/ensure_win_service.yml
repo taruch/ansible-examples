@@ -1,0 +1,90 @@
+---
+# Hourly service-drift check for Windows hosts.
+#
+# Behavior:
+#   - Check whether `service_name` is running.
+#   - If running: end_host (no SNOW work, no further tasks).
+#   - If stopped: start it, then open a ServiceNow incident with what was
+#     done + the last interactive user (from Security log event 4624).
+#
+# Tuned for scheduled, parallel, hourly execution:
+#   - gather_facts: false — saves a Win32_* roundtrip per host.
+#   - end_host fires for every healthy host so SNOW is never touched.
+#   - servicenow.itsm.incident reads SN_HOST / SN_USERNAME / SN_PASSWORD
+#     from env vars (injected by the AAP "ServiceNow" credential type),
+#     so there's no extra API call to fetch credentials.
+
+- name: Ensure a Windows service is running; SNOW incident if remediated
+  hosts: all
+  gather_facts: false
+  vars:
+    # Override per-host (host_vars), per-group (group_vars), or per-run
+    # (extra-vars). Defaults to Tomcat10 to match the existing demo hosts.
+    service_name: "Tomcat10"
+    # Who to file the incident as. Override per environment.
+    snow_caller: "aap_system"
+
+  tasks:
+    - name: Read current service state
+      ansible.windows.win_service_info:
+        name: "{{ service_name }}"
+      register: svc
+
+    - name: Fail if the service is not installed
+      ansible.builtin.fail:
+        msg: "Service '{{ service_name }}' is not installed on {{ inventory_hostname }}."
+      when: not svc.exists
+
+    - name: End host if the service is already running (the common path)
+      ansible.builtin.meta: end_host
+      when: svc.services[0].state == "running"
+
+    # ----- Below this point: the service was found stopped. Remediate. -----
+
+    - name: Start {{ service_name }}
+      ansible.windows.win_service:
+        name: "{{ service_name }}"
+        state: started
+      register: svc_start
+
+    - name: Find the last interactive user (Security log event 4624)
+      # One-shot PowerShell query; cheap (reads up to 50 events, filters in-process).
+      # Falls back to a benign string if the Security log isn't accessible —
+      # never failing here keeps the remediation path complete.
+      ansible.windows.win_shell: |
+        try {
+          $e = Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624} -MaxEvents 50 -ErrorAction Stop |
+            Where-Object { $_.Properties[5].Value -notmatch '^(SYSTEM|LOCAL SERVICE|NETWORK SERVICE|DWM-|UMFD-|ANONYMOUS LOGON)$' } |
+            Select-Object -First 1
+          if ($e) {
+            "{0} | {1}\{2}" -f $e.TimeCreated.ToString('u'), $e.Properties[6].Value, $e.Properties[5].Value
+          } else { "(no recent non-system 4624 events)" }
+        } catch {
+          "(security log unavailable: $($_.Exception.Message))"
+        }
+      register: last_logon
+      changed_when: false
+
+    - name: Open a ServiceNow incident describing the auto-remediation
+      servicenow.itsm.incident:
+        state: new
+        short_description: "Auto-remediated: service '{{ service_name }}' restarted on {{ inventory_hostname }}"
+        description: |
+          The scheduled service-validation playbook found service
+          '{{ service_name }}' stopped on {{ inventory_hostname }}
+          and started it.
+
+          Prior state:    {{ svc.services[0].state }}
+          Current state:  running
+          Start mode:     {{ svc.services[0].start_mode }}
+          Display name:   {{ svc.services[0].display_name }}
+
+          Last interactive user (Security event 4624):
+          {{ last_logon.stdout | trim }}
+
+          Reported by Ansible Automation Platform.
+        impact: low
+        urgency: low
+        caller: "{{ snow_caller }}"
+      delegate_to: localhost
+      become: false

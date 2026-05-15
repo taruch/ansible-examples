@@ -1,6 +1,6 @@
 # tomcat_windows_install
 
-Installs Temurin JDK and Apache Tomcat as a Windows service, then deploys a WAR file as the ROOT webapp.
+Installs Temurin JDK and Apache Tomcat as a Windows service, deploys a WAR file as the ROOT webapp, and opens the Windows firewall for the TLS connector port.
 
 ## What it does
 
@@ -8,8 +8,9 @@ Installs Temurin JDK and Apache Tomcat as a Windows service, then deploys a WAR 
 2. Fails fast if `JAVA_HOME` isn't set after install (sometimes needs a reboot).
 3. Downloads and silently installs Tomcat — creates the `Tomcat10` Windows service.
 4. Removes the stock `webapps/ROOT` and deploys `{{ war_path }}` as `ROOT.war`.
+5. Opens the Windows firewall for inbound TCP on `{{ connector_port }}` (all profiles). An AWS Security Group rule alone doesn't make the host reachable — the OS firewall has to allow it too.
 
-The TLS connector is **not** configured here — see the `tomcat_windows_tls` role for the cert/keystore/server.xml wiring.
+The TLS connector itself is **not** configured here — see the `tomcat_windows_tls` role for the cert/keystore/server.xml wiring.
 
 ## Variables
 
@@ -21,6 +22,7 @@ The TLS connector is **not** configured here — see the `tomcat_windows_tls` ro
 | `tomcat_home` | `C:\Program Files\Apache Software Foundation\Tomcat 10.1` | Install path used by all Tomcat roles |
 | `tomcat_service` | `Tomcat10` | Windows service name created by the installer |
 | `war_path` | `{{ playbook_dir }}/files/hello.war` | WAR file on the control node, built by `demo_prep` |
+| `connector_port` | `8443` | TLS port the firewall rule opens; matches the same default in `tomcat_windows_tls` |
 
 ## Requirements
 

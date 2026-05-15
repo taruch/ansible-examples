@@ -138,7 +138,7 @@ controller_templates:
     allow_simultaneous: false
 
   - name: "Tomcat Windows / Renew certificate"
-    description: "Pattern A renewal: pre-flight probes the live cert and ends play if > cert_remaining_days from expiry. Otherwise re-issues via LE, ships the keystore, and restarts Tomcat. Idempotent — safe to schedule."
+    description: "Single-shot renewal: pre-flight (cert_check) + LE issue + ship + restart, all in one playbook. Idempotent — fresh certs short-circuit. Use this for scheduled runs that don't need a CR step."
     organization: "{{ target_organization }}"
     project: "Tomcat Windows Cert Renewal"
     inventory: "Tomcat Windows Demo"
@@ -151,6 +151,45 @@ controller_templates:
       cloudflare_zone: {{ cloudflare_zone }}
       acme_env: production
     ask_variables_on_launch: true   # for forcing re-issue: cert_remaining_days=999
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    allow_simultaneous: false
+
+  # ------- workflow building blocks (split for CR-in-the-middle pattern) -------
+  - name: "Tomcat Windows / Check certs"
+    description: "Determination only: probe each host's live cert and set workflow artifacts (renewal_targets, renewal_targets_csv, renewal_count, renewal_needed). Read-only — no LE traffic, no Tomcat restart. Drives downstream CR-creation + renewal nodes."
+    organization: "{{ target_organization }}"
+    project: "Tomcat Windows Cert Renewal"
+    inventory: "Tomcat Windows Demo"
+    playbook: "certificate_renewal_examples/tomcat_windows/cert_check.yml"
+    execution_environment: "Tomcat Windows Cert Renewal EE"
+    credentials:
+      - "{{ windows_machine_credential }}"
+    extra_vars: |
+      cloudflare_zone: {{ cloudflare_zone }}
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    allow_simultaneous: false
+
+  - name: "Tomcat Windows / Renew certs (no pre-flight)"
+    description: "Update only: LE issuance + ship + restart. No pre-flight — caller is responsible for limiting to hosts that need renewal. In a workflow, set this node's `limit` to `{{ '{{' }} renewal_targets_csv {{ '}}' }}` so only hosts identified by the upstream cert_check node are touched."
+    organization: "{{ target_organization }}"
+    project: "Tomcat Windows Cert Renewal"
+    inventory: "Tomcat Windows Demo"
+    playbook: "certificate_renewal_examples/tomcat_windows/cert_renew.yml"
+    execution_environment: "Tomcat Windows Cert Renewal EE"
+    credentials:
+      - "Cloudflare - entrenchedrealist.dev"
+      - "{{ windows_machine_credential }}"
+    extra_vars: |
+      cloudflare_zone: {{ cloudflare_zone }}
+      acme_env: production
+    ask_variables_on_launch: true
     ask_limit_on_launch: true
     job_type: "run"
     verbosity: 0
