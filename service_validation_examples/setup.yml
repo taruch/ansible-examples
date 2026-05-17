@@ -5,14 +5,17 @@
 # `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
 #
 # Required pre-existing artifacts in AAP (this file does NOT create them):
-#   - Machine credential named "Demo Credential"        (Windows admin)
+#   - Machine credential named "Demo Credential"        (Windows admin and/or Linux SSH)
 #   - Custom credential named "ServiceNow_Credential"   (SN_HOST/USERNAME/PASSWORD)
-# Adjust the tunables below if your credentials are named differently.
+# If your Linux SSH credential differs from the Windows one, set
+# `linux_machine_credential` below to its name. Adjust the other tunables
+# similarly if any credential is named differently.
 
 # ---------------------------------------------------------------------------
 # Tunables
 # ---------------------------------------------------------------------------
 windows_machine_credential: "Demo Credential"          # must already exist
+linux_machine_credential: "Demo Credential"            # must already exist (set to your Linux SSH credential)
 snow_credential: "ServiceNow_Credential"               # must already exist
 target_organization: "Default"
 project_scm_url: "https://github.com/taruch/ansible-examples.git"
@@ -62,35 +65,31 @@ controller_inventories:
       ansible_user: Administrator
       service_name: Tomcat10
 
-controller_hosts:
-  - name: tomcat-demo.entrenchedrealist.dev
-    inventory: "Service Validation Demo"
-    enabled: true
+  - name: "Service Validation Demo (Linux)"
+    description: "Linux hosts checked by the hourly service-validation schedule"
+    organization: "{{ target_organization }}"
     variables:
-      ansible_host: 18.224.139.152
-  - name: wincerttest2.entrenchedrealist.dev
-    inventory: "Service Validation Demo"
-    enabled: true
-    variables:
-      ansible_host: 18.221.186.85
+      ansible_connection: ssh
+      ansible_user: ec2-user           # override per host_vars if your AMI uses a different default
+      ansible_become: true
+      service_name: AnsibleDemoSvc     # what deploy_service_demo.yml installs
 
 controller_groups:
   - name: service_validation_demo
     inventory: "Service Validation Demo"
-    hosts:
-      - tomcat-demo.entrenchedrealist.dev
-      - wincerttest2.entrenchedrealist.dev
+  - name: service_validation_demo_linux
+    inventory: "Service Validation Demo (Linux)"
 
 # ---------------------------------------------------------------------------
 # Job template
 # ---------------------------------------------------------------------------
 controller_templates:
-  - name: "Service Validation / Ensure service running"
-    description: "Hourly drift check: starts the service if stopped and opens a SNOW incident describing what was done plus the last interactive user. Runs against ALL hosts in service_validation_demo in parallel."
+  - name: "Service Validation / Ensure service running (Windows)"
+    description: "Hourly drift check (Windows): starts the service if stopped and opens a SNOW incident describing what was done plus the last interactive user (Security event 4624). Runs against ALL hosts in service_validation_demo in parallel."
     organization: "{{ target_organization }}"
     project: "Service Validation"
     inventory: "Service Validation Demo"
-    playbook: "service_validation_examples/ensure_service.yml"
+    playbook: "service_validation_examples/ensure_win_service.yml"
     execution_environment: "Service Validation EE"
     credentials:
       - "{{ snow_credential }}"
@@ -102,12 +101,35 @@ controller_templates:
     forks: 10                  # most hosts will end_host fast; parallel ok
     allow_simultaneous: false
 
+  - name: "Service Validation / Ensure service running (Linux)"
+    description: "Hourly drift check (Linux): starts the systemd unit if inactive and opens a SNOW incident describing what was done plus the last user logon (from wtmp). Runs against ALL hosts in service_validation_demo_linux in parallel."
+    organization: "{{ target_organization }}"
+    project: "Service Validation"
+    inventory: "Service Validation Demo (Linux)"
+    playbook: "service_validation_examples/ensure_linux_service.yml"
+    execution_environment: "Service Validation EE"
+    credentials:
+      - "{{ snow_credential }}"
+      - "{{ linux_machine_credential }}"
+    ask_variables_on_launch: false
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 10
+    allow_simultaneous: false
+
 # ---------------------------------------------------------------------------
-# Schedule — every hour, on the hour.
+# Schedule — every hour, on the hour. Currently commented out; uncomment to
+# enable. Both templates can share the cadence; each gets its own schedule.
 # ---------------------------------------------------------------------------
 controller_schedules:
-  - name: "Service Validation / Hourly check"
-    description: "Runs the service-validation template every hour. Healthy hosts no-op (end_host); only drift triggers SNOW."
-    unified_job_template: "Service Validation / Ensure service running"
+  - name: "Service Validation / Hourly check (Windows)"
+    description: "Runs the Windows service-validation template every hour. Healthy hosts no-op (end_host); only drift triggers SNOW."
+    unified_job_template: "Service Validation / Ensure service running (Windows)"
+    rrule: "DTSTART;TZID=Etc/UTC:20260515T000000 RRULE:FREQ=HOURLY;INTERVAL=1"
+    enabled: true
+  - name: "Service Validation / Hourly check (Linux)"
+    description: "Runs the Linux service-validation template every hour. Healthy hosts no-op (end_host); only drift triggers SNOW."
+    unified_job_template: "Service Validation / Ensure service running (Linux)"
     rrule: "DTSTART;TZID=Etc/UTC:20260515T000000 RRULE:FREQ=HOURLY;INTERVAL=1"
     enabled: true
