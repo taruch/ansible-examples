@@ -12,7 +12,7 @@ images:
   base_image:
     # Requires a Red Hat subscription on the build host (podman login to
     # registry.redhat.io with your offline token before building).
-    name: registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel9:latest
+    name: registry.redhat.io/ansible-automation-platform-26/ee-minimal-rhel9:latest
 
 dependencies:
   galaxy: requirements.yml
@@ -24,12 +24,32 @@ dependencies:
   # pip — pip-installs fail with "No module named pip" unless we redirect
   # ansible-builder at the right interpreter explicitly.
   python_interpreter:
-    package_system: python3.11
-    python_path: /usr/bin/python3.11
+    package_system: python3.12
+    python_path: /usr/bin/python3.12
+
+additional_build_files:
+  - src: files/ansible.cfg
+    dest: configs
 
 options:
-  # ee-minimal uses microdnf, not dnf — package installs fail otherwise.
   package_manager_path: /usr/bin/microdnf
-  # Tag the resulting image so you can identify it later.
-  tags:
-    - tomcat-windows-cert-renewal:latest
+
+additional_build_steps:
+  prepend_base:
+    - RUN echo This is a prepend base command!
+    - RUN microdnf clean all
+    - RUN microdnf install -y python3.12-pip python3.12-devel systemd-devel gcc
+    - RUN python3.12 -m pip install --upgrade pip setuptools wheel
+  prepend_galaxy:
+    - ADD _build/configs/ansible.cfg /etc/ansible/ansible.cfg
+    - RUN cat /etc/ansible/ansible.cfg
+    - ADD _build/configs/ansible.cfg /etc/ansible/ansible.cfg                                                                                                                                                  
+    - ARG ANSIBLE_GALAXY_SERVER_CERTIFIED_TOKEN
+    - ARG ANSIBLE_GALAXY_SERVER_VALIDATED_TOKEN
+    - ENV ANSIBLE_GALAXY_SERVER_CERTIFIED_TOKEN=${ANSIBLE_GALAXY_SERVER_CERTIFIED_TOKEN}
+    - ENV ANSIBLE_GALAXY_SERVER_VALIDATED_TOKEN=${ANSIBLE_GALAXY_SERVER_VALIDATED_TOKEN}
+    - RUN echo $ANSIBLE_GALAXY_SERVER_CERTIFIED_TOKEN
+    - RUN echo $ANSIBLE_GALAXY_SERVER_VALIDATED_TOKEN
+  prepend_final: |
+    RUN whoami
+    RUN cat /etc/os-release

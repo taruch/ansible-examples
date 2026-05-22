@@ -13,13 +13,17 @@
     aap_hostname: "{{ vault_aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     aap_validate_certs: "{{ vault_aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
     ansible_no_log: false
+<<<<<<< Updated upstream
     import_path: "./export_25_20260511_1"
+=======
+    import_path: "./export_25_20260503_1"
+>>>>>>> Stashed changes
   
   # You can set 'file_path' to have a specific file read in and processed for troubleshooting.  Typically you would do this by adding it as an extra var when running the playbook.
 
   tasks:
-    # - name: Import vaulted variables
-    #   ansible.builtin.include_vars: "{{ import_path }}/vaulted_variables.yml"
+    - name: Import vaulted variables
+      ansible.builtin.include_vars: "{{ import_path }}/vaulted_variables.yml"
 
     - name: "Setup authentication (block)"
       when: controller_oauthtoken is not defined
