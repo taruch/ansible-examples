@@ -1,0 +1,64 @@
+---
+
+- name: Create ServiceNow incident ticket
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # _start_date: "2024-08-14 15:05:51"
+    # _change_number: "CHG0000015"
+    _job_template: "Mark ServiceNow Change Request as Implementing"
+  tasks:
+
+    - name: Create schedule for task
+      tags:
+        - create
+        - never
+      block:
+        - name: Retrieve change requests by number
+          tags:
+            - info
+          servicenow.itsm.change_request_info:
+            instance:
+              host: "{{ SN_HOST }}"
+              username: "{{ SN_USERNAME }}"
+              password: "{{ SN_PASSWORD }}"
+            number: "{{ change_number }}"
+          register: result
+
+        - name: Get the start date for the scheduled start time
+          ansible.builtin.set_fact:
+            _start_date: "{{ result.records.start_date }}"
+
+        - name: Create the schedule
+          ansible.controller.schedule:
+            name: "Schedule for Change Request: {{ _change_number }}"
+            state: present
+            unified_job_template: "{{ _job_template }}"
+            rrule: "{{ query('ansible.controller.schedule_rrule', 'none', start_date=_start_date) }}"
+            extra_data:
+              change_number: "{{ _change_number }}"
+          register: result
+
+        # - name: Build a complex schedule for every day except sunday using the rruleset plugin
+        #   schedule:
+        #     name: "{{ sched1 }}"
+        #     state: present
+        #     unified_job_template: "Demo Job Template"
+        #     rrule: "{{ query(awx.awx.schedule_rruleset, '2022-04-30 10:30:45', rules=rrules, timezone='UTC' ) }}"
+        #   vars:
+        #     rrules:
+        #       - frequency: 'day'
+        #         every: 1
+        #       - frequency: 'day'
+        #         every: 1
+        #         on_days: 'sunday'
+        #         include: False
+
+    - name: Delete 'my_schedule' schedule for my_workflow
+      tags:
+        - delete
+        - never
+      ansible.controller.schedule:
+        name: "Schedule for Change Request: {{ _change_number }}"
+        state: absent
+        unified_job_template: "{{ _job_template }}"

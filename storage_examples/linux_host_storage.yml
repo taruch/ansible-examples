@@ -1,0 +1,20 @@
+- name: Extend Linux Raw Partition and Filesystem
+  hosts: "{{ _hosts }}"
+  become: true
+  tasks:
+    - name: Extend the partition to 100% of the block device
+      community.general.parted:
+        device: /dev/sdb
+        number: 1
+        part_end: 100%
+        resize: true
+        state: present
+
+    - name: Resize the ext4 filesystem to match the partition size
+      community.general.filesystem:
+        fstype: ext4
+        dev: /dev/sdb1
+        resizefs: true
+        state: present
+
+...

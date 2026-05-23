@@ -1,0 +1,4 @@
+ansible-navigator:
+  execution-environment:
+    container-options:
+      - "--network=host"

@@ -1,0 +1,15 @@
+- name: Provision and Attach an Azure Managed Disk
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Create a 128 GiB Premium SSD data disk and attach to a VM
+      azure.azcollection.azure_rm_manageddisk:
+        resource_group: "myResourceGroup"
+        name: "data-disk-01"
+        location: "eastus"
+        storage_account_type: "Premium_LRS"
+        disk_size_gb: 128
+        create_option: empty
+        managed_by: "myVirtualMachineName"
+        lun: 1
+        state: present

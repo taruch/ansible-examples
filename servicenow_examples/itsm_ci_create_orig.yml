@@ -1,0 +1,241 @@
+---
+- name: Create a ServiceNow CMDB CI for a new Virtual Machine
+  hosts: "{{ _hosts }}"
+  gather_facts: false
+  # serial: 5
+  vars:
+    # --- ServiceNow Connection Details ---
+    instance_data:
+      host: "{{ lookup('env', 'SN_HOST') | default(omit) }}"
+      username: "{{ lookup('env', 'SN_USERNAME') | default(omit) }}"
+      password: "{{ lookup('env', 'SN_PASSWORD') | default(omit) }}"
+    sn_user_name: "ansible"
+    sn_user_email: "ansible@example.com"
+
+  vars_files:
+    - ./vars.yml
+
+  tasks:
+    # --- Get details for the user who created the VM ---
+    - name: Get details for the user who created the VM '{{ created_by }}'
+      delegate_to: localhost
+      run_once: true
+      tags:
+        - never
+        - new_host
+      block:
+        - name: "Query ServiceNow for user '{{ created_by }}'"
+          servicenow.itsm.api_info:
+            instance: "{{ instance_data }}"
+            resource: sys_user  # The table for user records
+            sysparm_query: "user_name={{ created_by }}" # Find the user by their username
+            columns: "email,name" # Specify which fields to return
+          register: user_details
+
+        - name: Fail if user was not found
+          ansible.builtin.fail:
+            msg: "Could not find a user with the username '{{ created_by }}' in ServiceNow."
+          when: user_details.record | length == 0
+
+        - name: "Display the discovered email address"
+          ansible.builtin.debug:
+            msg: "The email address for '{{ user_details.record[0].name }}' is: {{ user_details.record[0].email }}"
+
+        - name: Pass user details to next playbook
+          ansible.builtin.set_fact:
+            sn_user_email: "{{ user_details.record[0].email }}"
+            sn_user_name: "{{ user_details.record[0].name }}"
+
+
+    # --- Task 1: Check if the CI already exists in the CMDB ---
+    - name: Check for existing CI
+      delegate_to: localhost
+      run_once: true
+      throttle: 1
+      block:
+        - name: "Check for existing CI with name '{{ vm_name }}'"
+          servicenow.itsm.api_info:
+            instance: "{{ instance_data }}"
+            resource: cmdb_ci_vm_instance  # The table for Virtual Machine CIs
+            sysparm_query: "name={{ vm_name }}"
+          register: existing_ci_check
+
+        - name: Debug existing CI check
+          ansible.builtin.debug:
+            var: existing_ci_check
+            verbosity: 3
+
+
+    # --- Task 2: Create the CI record if it was not found ---
+    # This is the key to idempotency: only run if the previous check found nothing.
+    - name: "Create the VM CI '{{ vm_name }}' in ServiceNow"
+      delegate_to: localhost
+      run_once: true
+      throttle: 1
+      when: existing_ci_check.record | length == 0
+      block: 
+        # - name: "Create new VM instance CI for '{{ vm_name }}'"
+        #   servicenow.itsm.api:
+        #     instance: "{{ instance_data }}"
+        #     action: post  # 'post' is the action to create a new record
+        #     resource: cmdb_ci_vm_instance
+        #     data:
+        #       # --- This is the payload for the new CI record ---
+        #       name: "{{ vm_name }}"
+        #       ip_address: "{{ new_vm_info.ipv4 | default('') }}"
+        #       os: "{{ new_vm_info.hw_guest_full_name | default('Unknown OS') }}"
+        #       cpus: "{{ ((new_vm_info.hw_processor_count | int) * (new_vm_info.hw_cores_per_socket | int)) | default(vm_cores) }}"
+        #       managed_by: "Ansible Automation"
+        #       owned_by: "{{ sn_user_email | default('') }}"
+        #       memory: "{{ memsize_MiB }}"
+        #       mac_address: "{{ new_vm_info.hw_eth0.macaddress | default('') }}"
+        #       short_description: "Production application server managed by Ansible."
+        #       correlation_id: "{{ new_vm_info.instance_uuid }}"
+        #       # 'install_status' 7 is typically 'Installed'
+        #       # 'operational_status' 1 is typically 'Operational'
+        #       # VERIFY these values in your instance!
+        #       install_status: "7"
+        #       operational_status: "1"
+        #       vm_inst_id: "{{ new_vm_info.instance_uuid }}"
+        #       manufacturer: "VMware"
+        #       model_id: "{{ new_vm_info.hw_guest_id | default('unknown') }}"
+        #   register: new_ci_result
+
+        - name: "Create new VM instance CI for VMware '{{ vm_name }}'"
+          servicenow.itsm.api:
+            instance: "{{ instance_data }}"
+            action: post  # 'post' is the action to create a new record
+            # resource: cmdb_ci_vm_instance
+            resource: cmdb_ci_vmware_instance
+            data:
+              # --- This is the payload for the new CI record ---
+              name: "{{ vm_name }}"
+              ip_address: "{{ new_vm_info.ipv4 | default('') }}"
+              os: "{{ new_vm_info.hw_guest_full_name | default('Unknown OS') }}"
+              cpus: "{{ ((new_vm_info.hw_processor_count | int) * (new_vm_info.hw_cores_per_socket | int)) | default(vm_cores) }}"
+              managed_by: "Ansible Automation"
+              owned_by: "{{ sn_user_email | default('') }}"
+              memory: "{{ memsize_MiB }}"
+              mac_address: "{{ new_vm_info.hw_eth0.macaddress | default('') }}"
+              short_description: "Production application server managed by Ansible."
+              correlation_id: "{{ new_vm_info.instance_uuid }}"
+              # 'install_status' 7 is typically 'Installed'
+              # 'operational_status' 1 is typically 'Operational'
+              # VERIFY these values in your instance!
+              install_status: "7"
+              operational_status: "1"
+              vm_inst_id: "{{ new_vm_info.instance_uuid }}"
+              manufacturer: "VMware"
+              cluster_id: "{{ new_vm_info.hw_cluster }}"
+              model_id: "{{ new_vm_info.hw_guest_id | default('unknown') }}"
+              comments: "Created by {{ sn_user_name }} via Ansible Automation"
+              guest_id: "{{ new_vm_info.hw_guest_id | default('unknown') }}"
+              guest_os_fullname: "{{ new_vm_info.hw_guest_full_name | default('unknown') }}"
+              dns_domain: "{{ domain_name }}"
+              attestation_status: "attested"
+              attested_by: "{{ sn_user_name }}"
+              serial_number: "{{ new_vm_info.hw_product_uuid }}"
+          register: new_ci_result
+
+        # - name: "Update a configuration item
+        #   servicenow.itsm.configuration_item:
+        #     name: HPE ProLiant BL465C G7
+        #     short_description: HPE ProLiant Server G7
+        #     serial_number: ECE-164-E10834-NO
+        #     asset_tag: P1000613
+        #     sys_class_name: cmdb_ci_server
+        #     assigned_to: some.user
+        #     environment: production
+        #     category: Hardware
+        #     attachments:
+        #       - path: path/to/attachment.txt
+        #     other:
+        #       model_number: BL465C G7
+        #   register: server_ci
+
+        # --- Task 3: Report the outcome ---
+        - name: "Report new CI creation"
+          ansible.builtin.debug:
+            msg: "Successfully created new CMDB CI for '{{ vm_name }}'."
+          when: new_ci_result.changed
+
+    - name: "Update the VM '{{ created_by }}'"
+      when: existing_ci_check.record | length >= 1
+      block:
+        - name: "Report that CI already exists"
+          ansible.builtin.debug:
+            msg: "A CMDB CI for '{{ vm_name }}' already exists. Updating existing record."
+          when: existing_ci_check.record | length > 0
+
+        - name: Update a configuration item
+          servicenow.itsm.configuration_item:
+            sys_id: "{{ existing_ci_check.record[0].sys_id }}"
+            install_status: installed
+            operational_status: operational
+            other:
+              name: "{{ vm_name }}"
+              ip_address: "{{ new_vm_info.ipv4 | default('') }}"
+              os: "{{ new_vm_info.hw_guest_full_name | default('Unknown OS') }}"
+              cpus: "{{ ((new_vm_info.hw_processor_count | int) * (new_vm_info.hw_cores_per_socket | int)) | default(vm_cores) }}"
+              managed_by: "Ansible Automation"
+              owned_by: "{{ sn_user_email | default('') }}"
+              memory: "{{ memsize_MiB }}"
+              mac_address: "{{ new_vm_info.hw_eth0.macaddress | default('') }}"
+              short_description: "Production application server managed by Ansible."
+              correlation_id: "{{ new_vm_info.instance_uuid }}"
+              # 'install_status' 7 is typically 'Installed'
+              # 'operational_status' 1 is typically 'Operational'
+              # VERIFY these values in your instance!
+              install_status: "7"
+              operational_status: "1"
+              vm_inst_id: "{{ new_vm_info.instance_uuid }}"
+              manufacturer: "VMware"
+              cluster_id: "{{ new_vm_info.hw_cluster }}"
+              model_id: "{{ new_vm_info.hw_guest_id | default('unknown') }}"
+              comments: "Created by {{ sn_user_name }} via Ansible Automation"
+              guest_id: "{{ new_vm_info.hw_guest_id | default('unknown') }}"
+              guest_os_fullname: "{{ new_vm_info.hw_guest_full_name | default('unknown') }}"
+              dns_domain: "{{ domain_name }}"
+              attestation_status: "attested"
+              attested_by: "{{ sn_user_name }}"
+              serial_number: "{{ new_vm_info.hw_product_uuid }}"
+
+        # - name: "Create new VM instance CI for VMware '{{ vm_name }}'"
+        #   servicenow.itsm.api:
+        #     instance: "{{ instance_data }}"
+        #     action: post  # 'post' is the action to create a new record
+        #     # resource: cmdb_ci_vm_instance
+        #     resource: cmdb_ci_vmware_instance
+        #     installed_status: installed
+        #     data:
+        #       # --- This is the payload for the new CI record ---
+        #       name: "{{ vm_name }}"
+        #       ip_address: "{{ new_vm_info.ipv4 | default('') }}"
+        #       os: "{{ new_vm_info.hw_guest_full_name | default('Unknown OS') }}"
+        #       cpus: "{{ ((new_vm_info.hw_processor_count | int) * (new_vm_info.hw_cores_per_socket | int)) | default(vm_cores) }}"
+        #       managed_by: "Ansible Automation"
+        #       owned_by: "{{ sn_user_email | default('') }}"
+        #       memory: "{{ memsize_MiB }}"
+        #       mac_address: "{{ new_vm_info.hw_eth0.macaddress | default('') }}"
+        #       short_description: "Production application server managed by Ansible."
+        #       correlation_id: "{{ new_vm_info.instance_uuid }}"
+        #       # 'install_status' 7 is typically 'Installed'
+        #       # 'operational_status' 1 is typically 'Operational'
+        #       # VERIFY these values in your instance!
+        #       install_status: "7"
+        #       operational_status: "1"
+        #       vm_inst_id: "{{ new_vm_info.instance_uuid }}"
+        #       manufacturer: "VMware"
+        #       cluster_id: "{{ new_vm_info.hw_cluster }}"
+        #       model_id: "{{ new_vm_info.hw_guest_id | default('unknown') }}"
+        #       comments: "Created by {{ sn_user_name }} via Ansible Automation"
+        #       guest_id: "{{ new_vm_info.hw_guest_id | default('unknown') }}"
+        #       guest_os_fullname: "{{ new_vm_info.hw_guest_full_name | default('unknown') }}"
+        #       dns_domain: "{{ domain_name }}"
+        #       attestation_status: "attested"
+        #       attested_by: "{{ sn_user_name }}"
+        #       serial_number: "{{ new_vm_info.hw_product_uuid }}"
+        #   register: new_ci_result
+
+
+...
