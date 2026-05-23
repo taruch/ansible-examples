@@ -1,0 +1,83 @@
+---
+- name: Install Tomcat and register as a service CI in ServiceNow CMDB
+  hosts: "{{ _hosts }}"
+  gather_facts: true
+  vars:
+    instance_data:
+      host: "{{ lookup('env', 'SN_HOST') | default(omit) }}"
+      username: "{{ lookup('env', 'SN_USERNAME') | default(omit) }}"
+      password: "{{ lookup('env', 'SN_PASSWORD') | default(omit) }}"
+    war_path: "{{ playbook_dir }}/../certificate_renewal_examples/tomcat_windows/files/hello.war"
+    service_ci_name: "Tomcat - {{ ansible_fqdn }}"
+
+  roles:
+    - role: ../certificate_renewal_examples/tomcat_windows/roles/tomcat_windows_install
+
+  tasks:
+    - name: Set Tomcat to auto-start
+      ansible.windows.win_service:
+        name: "{{ tomcat_service }}"
+        start_mode: auto
+
+    - name: Look up the VM CI in ServiceNow CMDB
+      delegate_to: localhost
+      servicenow.itsm.api_info:
+        instance: "{{ instance_data }}"
+        resource: cmdb_ci_vm_instance
+        sysparm_query: "name={{ ansible_fqdn }}"
+      register: vm_ci
+
+    - name: Fail if VM CI not found
+      ansible.builtin.fail:
+        msg: "No VM CI found for '{{ ansible_fqdn }}'. Run itsm_ci_create.yml first."
+      when: vm_ci.record | length == 0
+
+    - name: Check if service CI already exists
+      delegate_to: localhost
+      servicenow.itsm.configuration_item_info:
+        instance: "{{ instance_data }}"
+        sys_class_name: cmdb_ci_service
+        name: "{{ service_ci_name }}"
+      register: existing_service_ci
+
+    - name: Create service CI for Tomcat
+      delegate_to: localhost
+      when: existing_service_ci.record | length == 0
+      servicenow.itsm.configuration_item:
+        instance: "{{ instance_data }}"
+        name: "{{ service_ci_name }}"
+        sys_class_name: cmdb_ci_service
+        install_status: installed
+        operational_status: operational
+        short_description: "Apache Tomcat web application server"
+        other:
+          ip_address: "{{ ansible_ip_addresses[0] | default('') }}"
+      register: new_service_ci
+
+    - name: Set service CI sys_id
+      ansible.builtin.set_fact:
+        service_ci_sys_id: >-
+          {{ (existing_service_ci.record | length > 0)
+             | ternary(existing_service_ci.record[0].sys_id,
+                       new_service_ci.record.sys_id) }}
+
+    - name: Create Runs on relationship between service and VM
+      delegate_to: localhost
+      servicenow.itsm.configuration_item_relations:
+        instance: "{{ instance_data }}"
+        name: "Runs on::Runs"
+        direction: outbound
+        state: present
+        parent_sys_id: "{{ service_ci_sys_id }}"
+        parent_classname: cmdb_ci_service
+        targets:
+          - name: "{{ ansible_fqdn }}"
+            sys_id: "{{ vm_ci.record[0].sys_id }}"
+
+    - name: Display results
+      ansible.builtin.debug:
+        msg:
+          - "Tomcat installed and running as service '{{ tomcat_service }}'"
+          - "Service CI '{{ service_ci_name }}' registered in CMDB"
+          - "Relationship created: {{ service_ci_name }} → Runs on → {{ ansible_fqdn }}"
+...

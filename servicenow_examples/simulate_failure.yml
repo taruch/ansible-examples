@@ -1,0 +1,13 @@
+---
+- name: Simulate a service failure
+  hosts: "{{ _hosts }}"
+  gather_facts: false
+  vars:
+    tomcat_service: Tomcat10
+
+  tasks:
+    - name: Stop Tomcat to simulate failure
+      ansible.windows.win_service:
+        name: "{{ tomcat_service }}"
+        state: stopped
+...
