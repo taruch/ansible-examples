@@ -33,6 +33,19 @@
   become: false
   run_once: true
 
+- name: Register the ACME account
+  community.crypto.acme_account:
+    acme_directory: "{{ acme_directory }}"
+    acme_version: 2
+    account_key_src: "{{ acme_account_key }}"
+    contact:
+      - "mailto:{{ acme_email }}"
+    terms_agreed: true
+    state: present
+  delegate_to: localhost
+  become: false
+  run_once: true
+
 - name: Generate the certificate private key
   community.crypto.openssl_privatekey:
     path: "{{ cert_key_path }}"
@@ -56,15 +69,12 @@
     acme_directory: "{{ acme_directory }}"
     acme_version: 2
     account_key_src: "{{ acme_account_key }}"
-    account_email: "{{ acme_email }}"
-    terms_agreed: true
+    modify_account: false
     csr: "{{ csr_path }}"
     challenge: dns-01
     dest: "{{ cert_path }}"
     chain_dest: "{{ chain_path }}"
     fullchain_dest: "{{ fullchain_path }}"
-    # If the existing cert still has more than this many days, no new order
-    # is started and `changed` is false — the challenge block is skipped.
     remaining_days: "{{ cert_remaining_days }}"
   delegate_to: localhost
   become: false
@@ -128,8 +138,7 @@
         acme_directory: "{{ acme_directory }}"
         acme_version: 2
         account_key_src: "{{ acme_account_key }}"
-        account_email: "{{ acme_email }}"
-        terms_agreed: true
+        modify_account: false
         csr: "{{ csr_path }}"
         challenge: dns-01
         dest: "{{ cert_path }}"
