@@ -1,0 +1,217 @@
+---
+- name: Install and configure Microsoft SQL Server on Windows
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars_files:
+    - secrets.yml
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+    mssql_iso_url: "{{ mssql_iso_source }}"
+    mssql_iso_path: "C:\\Temp\\SQLServer.iso"
+    mssql_instance_name: MSSQLSERVER
+    mssql_edition: Developer
+    mssql_features: SQLENGINE
+    mssql_collation: SQL_Latin1_General_CP1_CI_AS
+    mssql_tcp_port: 1433
+    mssql_max_memory_mb: 4096
+    mssql_sysadmin_accounts: "BUILTIN\\Administrators"
+    mssql_auth_mode: Mixed
+    mssql_data_dir: "C:\\SQLData"
+    mssql_log_dir: "C:\\SQLLogs"
+    mssql_temp_dir: "C:\\SQLTemp"
+
+  tasks:
+    # --- STEP 1: Validate prerequisites ---
+    - name: Gather system memory
+      ansible.windows.win_shell: |
+        (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1MB
+      register: system_memory
+      changed_when: false
+
+    - name: Assert minimum memory requirement (2 GB)
+      ansible.builtin.assert:
+        that: system_memory.stdout | trim | float >= 2048
+        fail_msg: "SQL Server requires at least 2 GB RAM. Found {{ system_memory.stdout | trim }} MB."
+        success_msg: "Memory check passed ({{ system_memory.stdout | trim }} MB available)."
+
+    - name: Ensure .NET Framework 4.5+ is installed
+      ansible.windows.win_feature:
+        name: NET-Framework-45-Core
+        state: present
+
+    # --- STEP 2: Check for existing installation ---
+    - name: Check if SQL Server service already exists
+      ansible.windows.win_service:
+        name: "{{ 'MSSQL$' ~ mssql_instance_name if mssql_instance_name != 'MSSQLSERVER' else 'MSSQLSERVER' }}"
+      register: mssql_service_check
+      failed_when: false
+
+    # --- STEP 3: Prepare data directories ---
+    - name: Create SQL Server data directories
+      ansible.windows.win_file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ mssql_data_dir }}"
+        - "{{ mssql_log_dir }}"
+        - "{{ mssql_temp_dir }}"
+        - C:\Temp
+
+    # --- STEP 4: Download and mount the SQL Server ISO ---
+    - name: Download SQL Server ISO
+      ansible.windows.win_get_url:
+        url: "{{ mssql_iso_url }}"
+        dest: "{{ mssql_iso_path }}"
+      when: mssql_service_check.state is not defined
+
+    - name: Mount SQL Server ISO
+      ansible.windows.win_disk_image:
+        image_path: "{{ mssql_iso_path }}"
+        state: present
+      register: iso_mount
+      when: mssql_service_check.state is not defined
+
+    # --- STEP 5: Install SQL Server silently ---
+    - name: Install SQL Server
+      ansible.windows.win_package:
+        path: "{{ iso_mount.mount_paths[0] }}setup.exe"
+        arguments:
+          - /Q
+          - /ACTION=Install
+          - /FEATURES={{ mssql_features }}
+          - /INSTANCENAME={{ mssql_instance_name }}
+          - /SQLCOLLATION={{ mssql_collation }}
+          - /SQLSYSADMINACCOUNTS={{ mssql_sysadmin_accounts }}
+          - /SQLSVCACCOUNT=NT AUTHORITY\NETWORK SERVICE
+          - /AGTSVCACCOUNT=NT AUTHORITY\NETWORK SERVICE
+          - /AGTSVCSTARTUPTYPE=Automatic
+          - /SQLTEMPDBDIR={{ mssql_temp_dir }}
+          - /SQLUSERDBDIR={{ mssql_data_dir }}
+          - /SQLUSERDBLOGDIR={{ mssql_log_dir }}
+          - /SECURITYMODE={{ mssql_auth_mode == 'Mixed' | ternary('SQL', '') }}
+          - /SAPWD={{ mssql_sa_password }}
+          - /TCPENABLED=1
+          - /IACCEPTSQLSERVERLICENSETERMS
+        product_id: '{skip}'
+        expected_return_code: [0, 3010]
+      register: mssql_install
+      when: mssql_service_check.state is not defined
+
+    # --- STEP 6: Unmount the ISO ---
+    - name: Unmount SQL Server ISO
+      ansible.windows.win_disk_image:
+        image_path: "{{ mssql_iso_path }}"
+        state: absent
+      when: mssql_service_check.state is not defined
+
+    # --- STEP 7: Reboot if required by installer ---
+    - name: Reboot if SQL Server installer requires it
+      ansible.windows.win_reboot:
+        reboot_timeout: 600
+        post_reboot_delay: 30
+      when:
+        - mssql_install is defined
+        - mssql_install.rc | default(0) == 3010
+
+    # --- STEP 8: Configure TCP port ---
+    - name: Configure SQL Server TCP port
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module SqlServer -ErrorAction SilentlyContinue
+          $smo = 'Microsoft.SqlServer.Management.Smo'
+          $wmi = New-Object ("$smo.Wmi.ManagedComputer") $env:COMPUTERNAME
+          $instance = '{{ mssql_instance_name }}'
+          $tcp = $wmi.ServerInstances[$instance].ServerProtocols['Tcp']
+          $tcp.IsEnabled = $true
+          $ipAll = $tcp.IPAddresses | Where-Object { $_.Name -eq 'IPAll' }
+          $ipAll.IPAddressProperties['TcpPort'].Value = '{{ mssql_tcp_port }}'
+          $ipAll.IPAddressProperties['TcpDynamicPorts'].Value = ''
+          $tcp.Alter()
+      register: tcp_config
+      changed_when: true
+      notify: restart sql server
+
+    # --- STEP 9: Configure max server memory ---
+    - name: Set SQL Server max memory to {{ mssql_max_memory_mb }} MB
+      ansible.windows.win_powershell:
+        script: |
+          Invoke-Sqlcmd -Query "
+            EXEC sp_configure 'show advanced options', 1;
+            RECONFIGURE;
+            EXEC sp_configure 'max server memory', {{ mssql_max_memory_mb }};
+            RECONFIGURE;
+          " -ServerInstance "localhost\{{ mssql_instance_name if mssql_instance_name != 'MSSQLSERVER' else '' }}" -TrustServerCertificate
+      changed_when: true
+
+    # --- STEP 10: Open firewall for SQL Server ---
+    - name: Open firewall port for SQL Server
+      community.windows.win_firewall_rule:
+        name: SQL Server (TCP {{ mssql_tcp_port }})
+        localport: "{{ mssql_tcp_port }}"
+        protocol: tcp
+        direction: in
+        action: allow
+        enabled: true
+        state: present
+
+    - name: Open firewall port for SQL Server Browser
+      community.windows.win_firewall_rule:
+        name: SQL Server Browser (UDP 1434)
+        localport: 1434
+        protocol: udp
+        direction: in
+        action: allow
+        enabled: true
+        state: present
+
+    # --- STEP 11: Ensure services are running ---
+    - name: Ensure SQL Server service is running
+      ansible.windows.win_service:
+        name: "{{ 'MSSQL$' ~ mssql_instance_name if mssql_instance_name != 'MSSQLSERVER' else 'MSSQLSERVER' }}"
+        start_mode: auto
+        state: started
+
+    - name: Ensure SQL Server Agent is running
+      ansible.windows.win_service:
+        name: "{{ 'SQLAgent$' ~ mssql_instance_name if mssql_instance_name != 'MSSQLSERVER' else 'SQLSERVERAGENT' }}"
+        start_mode: auto
+        state: started
+
+    - name: Ensure SQL Server Browser is running
+      ansible.windows.win_service:
+        name: SQLBrowser
+        start_mode: auto
+        state: started
+
+    # --- STEP 12: Verify the installation ---
+    - name: Verify SQL Server is responding
+      ansible.windows.win_powershell:
+        script: |
+          $result = Invoke-Sqlcmd -Query "
+            SELECT
+              SERVERPROPERTY('ProductVersion') AS Version,
+              SERVERPROPERTY('Edition') AS Edition,
+              SERVERPROPERTY('InstanceName') AS Instance,
+              @@SERVERNAME AS ServerName
+          " -ServerInstance "localhost" -TrustServerCertificate
+          $result | Format-Table -AutoSize | Out-String
+      register: mssql_verify
+      changed_when: false
+
+    - name: Display SQL Server installation details
+      ansible.builtin.debug:
+        var: mssql_verify.output
+
+  handlers:
+    - name: Restart SQL Server
+      listen: restart sql server
+      ansible.windows.win_service:
+        name: "{{ 'MSSQL$' ~ mssql_instance_name if mssql_instance_name != 'MSSQLSERVER' else 'MSSQLSERVER' }}"
+        state: restarted
