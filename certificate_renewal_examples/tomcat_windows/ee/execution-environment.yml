@@ -19,13 +19,11 @@ dependencies:
   python: requirements.txt
   system: bindep.txt
 
-  # ee-minimal-rhel9 ships Python 3.11 at /usr/bin/python3.11. The default
-  # /usr/bin/python3 points at the RHEL 9 system python (3.9) which has no
-  # pip — pip-installs fail with "No module named pip" unless we redirect
-  # ansible-builder at the right interpreter explicitly.
+  # ee-minimal-rhel9:latest now ships Python 3.12. Point ansible-builder
+  # at the correct interpreter so pip-installs succeed.
   python_interpreter:
-    package_system: python3.11
-    python_path: /usr/bin/python3.11
+    package_system: python3.12
+    python_path: /usr/bin/python3
 
 options:
   # ee-minimal uses microdnf, not dnf — package installs fail otherwise.
