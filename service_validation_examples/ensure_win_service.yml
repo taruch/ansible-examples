@@ -37,7 +37,7 @@
 
     - name: End host if the service is already running (the common path)
       ansible.builtin.meta: end_host
-      when: svc.services[0].state == "running"
+      when: svc.services[0].state == "started"
 
     # ----- Below this point: the service was found stopped. Remediate. -----
 
