@@ -54,17 +54,23 @@
       changed_when: false
       failed_when: false
 
-    - name: Check auditd for the user who stopped {{ service_name }}
+    - name: Check auth log for the user who stopped {{ service_name }}
       ansible.builtin.shell: |
-        line=$(ausearch -m SERVICE_STOP -sv yes -i 2>/dev/null \
-          | grep '{{ service_name }}' \
-          | tail -n 1)
-        if [ -n "$line" ]; then
-          printf '%s\n' "$line"
+        auth_log=""
+        for f in /var/log/secure /var/log/auth.log; do
+          [ -f "$f" ] && auth_log="$f" && break
+        done
+        if [ -n "$auth_log" ]; then
+          line=$(grep -E "COMMAND=.*(systemctl stop|killall).*{{ service_name }}" "$auth_log" | tail -n 1)
+          if [ -n "$line" ]; then
+            printf '%s\n' "$line"
+          else
+            printf '(no sudo record found for stopping {{ service_name }})\n'
+          fi
         else
-          printf '(no auditd record found for {{ service_name }} stop)\n'
+          printf '(auth log not found)\n'
         fi
-      register: audit_stop
+      register: auth_stop
       changed_when: false
       failed_when: false
 
@@ -84,8 +90,8 @@
           Last user logon (from wtmp):
           {{ last_logon.stdout | trim }}
 
-          Auditd – last SERVICE_STOP for {{ service_name }}:
-          {{ audit_stop.stdout | trim }}
+          Auth log – last sudo stop command for {{ service_name }}:
+          {{ auth_stop.stdout | trim }}
 
           Reported by Ansible Automation Platform.
         impact: low
