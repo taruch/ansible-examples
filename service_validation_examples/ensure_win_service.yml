@@ -33,7 +33,7 @@
     - name: Fail if the service is not installed
       ansible.builtin.fail:
         msg: "Service '{{ service_name }}' is not installed on {{ inventory_hostname }}."
-      when: not svc.exists
+      when: svc.services | length == 0
 
     - name: End host if the service is already running (the common path)
       ansible.builtin.meta: end_host
