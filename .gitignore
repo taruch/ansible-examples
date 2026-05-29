@@ -26,6 +26,7 @@ mitchell_issue
 token_testing.yml
 /setup_demo.yml
 filetree_import_25_workflow.yml_orig
+context/*
 
 # Common secret-bearing filenames
 .env

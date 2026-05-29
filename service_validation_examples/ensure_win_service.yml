@@ -15,7 +15,7 @@
 #     so there's no extra API call to fetch credentials.
 
 - name: Ensure a Windows service is running; SNOW incident if remediated
-  hosts: all
+  hosts: os_windows
   gather_facts: false
   vars:
     # Override per-host (host_vars), per-group (group_vars), or per-run

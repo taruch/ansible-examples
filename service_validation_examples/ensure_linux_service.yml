@@ -16,7 +16,7 @@
 #     from env vars (injected by the AAP "ServiceNow" credential type).
 
 - name: Ensure a Linux service is running; SNOW incident if remediated
-  hosts: all
+  hosts: os_linux
   gather_facts: false
   become: true
   vars:

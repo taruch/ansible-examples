@@ -20,7 +20,7 @@ snow_credential: "ServiceNow_Credential"               # must already exist
 target_organization: "Default"
 project_scm_url: "https://github.com/taruch/ansible-examples.git"
 project_scm_branch: "service_validation_examples"
-ee_image: "quay.io/truch/tomcat-windows-cert-renewal:1.1"   # change if your EE differs
+ee_image: "quay.io/truch/tomcat-windows-cert-renewal:latest"   # change if your EE differs
 # servicenow.itsm collection must be present in the EE above. If you're
 # using a different EE that ships it (e.g. ee-supported-rhel9), point ee_image
 # at that instead.

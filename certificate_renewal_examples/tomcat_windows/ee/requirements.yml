@@ -26,4 +26,3 @@ collections:
 
   # Servicenow collection
   - name: servicenow.itsm
-  

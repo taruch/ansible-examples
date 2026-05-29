@@ -30,7 +30,7 @@ The role also expects cert artifacts to be present on the control node:
 | `tomcat_service` | `Tomcat10` | Service to restart |
 | `tomcat_user` | `NT SERVICE\\Tomcat10` | Service account that needs read on the keystore |
 | `http_port` | `8080` | HTTP connector port |
-| `connector_port` | `8443` | TLS connector port |
+| `connector_port` | `443` | TLS connector port |
 | `cert_name` | `cert_fqdn` with dots → underscores | Stem for cert files + keystore filename |
 | `keystore_password` | `{{ vault_keystore_password \| default('changeit') }}` | Override with a Vault credential in real use |
 | `acme_directory` | LE staging | Used to decide whether `validate_certs` is on during verification |

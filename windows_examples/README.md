@@ -61,6 +61,33 @@ Joins a Windows server to an existing Active Directory domain. Uses `microsoft.a
 
 **Survey variables**: `_hosts` (target server), `domain_controller` (hostname or IP of the DC — required, no default), `domain_name`, `domain_admin_user`, `domain_admin_password`
 
+### `deploy_mssql.yml`
+Installs and configures Microsoft SQL Server on Windows Server using `win_package` for silent unattended installation. Downloads and mounts a SQL Server ISO, runs `setup.exe` with fully configurable parameters, then applies post-install configuration (TCP port, max memory, firewall rules). Skips installation if the SQL Server service already exists.
+
+**Post-install configuration:**
+- Sets TCP port (default 1433) and disables dynamic ports
+- Configures max server memory via `sp_configure`
+- Opens Windows Firewall for SQL Server (TCP) and SQL Browser (UDP 1434)
+- Ensures SQL Server, SQL Agent, and Browser services are running with auto-start
+- Verifies the instance is responding and displays version/edition info
+
+**Survey variables**: `_hosts` (target server), `mssql_iso_source` (URL to SQL Server ISO), `mssql_sa_password` (SA password — stored in `secrets.yml`)
+
+**Optional overrides** (defaults shown):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `mssql_instance_name` | `MSSQLSERVER` | SQL Server instance name |
+| `mssql_edition` | `Developer` | Edition (Developer, Standard, Enterprise, Express) |
+| `mssql_features` | `SQLENGINE` | Features to install |
+| `mssql_collation` | `SQL_Latin1_General_CP1_CI_AS` | Server collation |
+| `mssql_tcp_port` | `1433` | TCP listener port |
+| `mssql_max_memory_mb` | `4096` | Max server memory in MB |
+| `mssql_auth_mode` | `Mixed` | Authentication mode (Mixed or Windows) |
+| `mssql_data_dir` | `C:\SQLData` | Default data file directory |
+| `mssql_log_dir` | `C:\SQLLogs` | Default log file directory |
+| `mssql_temp_dir` | `C:\SQLTemp` | TempDB directory |
+
 ## Requirements
 - WinRM configured on target Windows hosts (HTTP port 5985 or HTTPS port 5986)
 - Windows host variables: `ansible_user`, `ansible_password`, `ansible_connection: winrm`
