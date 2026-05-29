@@ -1,0 +1,41 @@
+---
+# Update step: issue (or re-issue) the Tomcat cert via Let's Encrypt and
+# ship it. No pre-flight live-cert check — this playbook assumes the caller
+# (the AAP workflow's preceding cert_check.yml node, or you on the CLI) has
+# already decided that renewal is warranted.
+#
+# Two ways this is typically driven:
+#
+#   1. AAP workflow: the upstream cert_check.yml node populates
+#      `renewal_targets_csv` via set_stats; the workflow node running this
+#      playbook sets its `limit` to `{{ renewal_targets_csv }}`, so only
+#      hosts that need renewal are touched.
+#
+#   2. Chained directly from cert_check.yml via renew_tomcat_cert.yml
+#      (import_playbook). In that mode, the per-host fact
+#      `cert_renewal_needed` is in scope, and the pre_task below skips
+#      hosts where it is false. Safe to run against the full inventory.
+#
+# Run this directly only when you intend to renew every targeted host
+# unconditionally (e.g. with cert_remaining_days=999 to force a re-issue).
+
+- name: Renew Tomcat SSL cert via Let's Encrypt and ship to host
+  hosts: tomcat_windows_demo
+  gather_facts: true
+  vars:
+    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
+
+  pre_tasks:
+    - name: Skip hosts marked as fresh by cert_check (when chained)
+      # cert_renewal_needed is set by cert_check.yml. If it is set and false,
+      # this host's live cert is fresh enough — short-circuit. When run
+      # standalone (cert_renewal_needed not defined), this is a no-op and the
+      # roles run unconditionally.
+      ansible.builtin.meta: end_host
+      when:
+        - cert_renewal_needed is defined
+        - not cert_renewal_needed
+
+  roles:
+    - role: letsencrypt_cloudflare
+    - role: tomcat_windows_tls

@@ -23,7 +23,7 @@
     # Override per-host / per-group / per-run. Defaults to the fake service
     # deploy_service_demo.yml installs.
     service_name: "AnsibleDemoSvc"
-    snow_caller: "aap_system"
+    snow_caller: "truch"
 
   tasks:
     - name: Ensure {{ service_name }} is started
@@ -54,6 +54,20 @@
       changed_when: false
       failed_when: false
 
+    - name: Check auditd for the user who stopped {{ service_name }}
+      ansible.builtin.shell: |
+        line=$(ausearch -m SERVICE_STOP -sv yes -i 2>/dev/null \
+          | grep '{{ service_name }}' \
+          | tail -n 1)
+        if [ -n "$line" ]; then
+          printf '%s\n' "$line"
+        else
+          printf '(no auditd record found for {{ service_name }} stop)\n'
+        fi
+      register: audit_stop
+      changed_when: false
+      failed_when: false
+
     - name: Open a ServiceNow incident describing the auto-remediation
       servicenow.itsm.incident:
         state: new
@@ -69,6 +83,9 @@
 
           Last user logon (from wtmp):
           {{ last_logon.stdout | trim }}
+
+          Auditd – last SERVICE_STOP for {{ service_name }}:
+          {{ audit_stop.stdout | trim }}
 
           Reported by Ansible Automation Platform.
         impact: low

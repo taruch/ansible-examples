@@ -65,6 +65,21 @@
       register: last_logon
       changed_when: false
 
+    - name: Check System event log for the user who stopped {{ service_name }}
+      ansible.windows.win_shell: |
+        try {
+          $e = Get-WinEvent -FilterHashtable @{LogName='System'; Id=7036} -MaxEvents 100 -ErrorAction Stop |
+            Where-Object { $_.Message -match '{{ service_name }}' -and $_.Message -match 'stopped' } |
+            Select-Object -First 1
+          if ($e) {
+            "{0} | EventRecordID {1} | {2}" -f $e.TimeCreated.ToString('u'), $e.RecordId, $e.Message.Trim()
+          } else { "(no System log record found for {{ service_name }} stop)" }
+        } catch {
+          "(System log unavailable: $($_.Exception.Message))"
+        }
+      register: event_stop
+      changed_when: false
+
     - name: Open a ServiceNow incident describing the auto-remediation
       servicenow.itsm.incident:
         state: new
@@ -81,6 +96,9 @@
 
           Last interactive user (Security event 4624):
           {{ last_logon.stdout | trim }}
+
+          System log – last service stop event for {{ service_name }}:
+          {{ event_stop.stdout | trim }}
 
           Reported by Ansible Automation Platform.
         impact: low

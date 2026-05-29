@@ -1,0 +1,87 @@
+---
+# Determination step: probe the live TLS connector on each Tomcat host,
+# decide whether the cert needs renewal, and expose the result to AAP
+# workflow artifacts so downstream jobs (e.g. a ServiceNow change-request
+# creator, then cert_renew.yml) can act on it.
+#
+# Outputs (via ansible.builtin.set_stats, picked up by AAP as artifacts):
+#   renewal_targets       List of inventory_hostname values that need renewal.
+#   renewal_targets_csv   Same list as a comma-separated string — use as the
+#                         `limit` parameter on the downstream renewal node.
+#   renewal_count         Integer count of hosts needing renewal.
+#   renewal_needed        Boolean — true if any host needs renewal. Drive the
+#                         workflow's "create CR / run renewal" branch on this.
+#
+# This playbook is read-only: no LE traffic, no Cloudflare writes, no Tomcat
+# restarts. Safe to run on a schedule independently of any renewal.
+
+- name: Determine whether each Tomcat host needs cert renewal
+  hosts: tomcat_windows_demo
+  gather_facts: true
+  vars:
+    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
+
+  tasks:
+    - name: Probe the live cert on the Tomcat connector
+      community.crypto.get_certificate:
+        host: "{{ cert_fqdn }}"
+        port: "{{ connector_port | default(443) }}"
+      delegate_to: localhost
+      become: false
+      register: live_cert_probe
+      failed_when: false
+      changed_when: false
+
+    - name: Compute days remaining on the live cert
+      # 0 days when the host is unreachable or has no cert — that path falls
+      # through to "needs renewal", which is the right answer for a fresh host.
+      ansible.builtin.set_fact:
+        live_cert_days_remaining: >-
+          {{ (
+              (live_cert_probe.not_after | to_datetime('%Y%m%d%H%M%SZ'))
+              - (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%SZ'))
+             ).days if live_cert_probe.not_after is defined else 0 }}
+
+    - name: Decide whether this host needs renewal
+      ansible.builtin.set_fact:
+        cert_renewal_needed: "{{ (live_cert_days_remaining | int) <= (cert_remaining_days | default(30) | int) }}"
+
+    - name: Per-host decision
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: live cert valid for
+          {{ live_cert_days_remaining }} day(s); threshold
+          {{ cert_remaining_days | default(30) }} —
+          {{ 'RENEWAL NEEDED' if cert_renewal_needed else 'fresh, skip' }}
+
+  post_tasks:
+    - name: Aggregate the hosts that need renewal
+      ansible.builtin.set_fact:
+        renewal_targets: >-
+          {{ ansible_play_hosts_all
+             | map('extract', hostvars)
+             | selectattr('cert_renewal_needed', 'true')
+             | map(attribute='inventory_hostname')
+             | list }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: Expose results to AAP workflow artifacts
+      ansible.builtin.set_stats:
+        data:
+          renewal_targets: "{{ renewal_targets }}"
+          renewal_targets_csv: "{{ renewal_targets | join(',') }}"
+          renewal_count: "{{ renewal_targets | length }}"
+          renewal_needed: "{{ (renewal_targets | length) > 0 }}"
+        aggregate: false
+        per_host: false
+      run_once: true
+      delegate_to: localhost
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "Hosts needing renewal ({{ renewal_targets | length }}):"
+          - "{{ renewal_targets if renewal_targets else '(none)' }}"
+      run_once: true
+      delegate_to: localhost
