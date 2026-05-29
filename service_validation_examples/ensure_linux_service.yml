@@ -83,8 +83,9 @@
           '{{ service_name }}' inactive on {{ inventory_hostname }}
           and started it.
 
-          Current ActiveState:  {{ svc.status.ActiveState | default('?') }}
-          Current SubState:     {{ svc.status.SubState | default('?') }}
+          Prior ActiveState:    {{ svc.status.ActiveState | default('?') }}
+          Prior SubState:       {{ svc.status.SubState | default('?') }}
+          Current state:        running (started by this playbook)
           Unit file:            {{ svc.status.FragmentPath | default('?') }}
 
           Last user logon (from wtmp):
