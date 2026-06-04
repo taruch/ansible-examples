@@ -1,0 +1,420 @@
+---
+# Infoblox NIOS dynamic inventory configuration
+# Plugin: infoblox.nios_modules.nios_inventory
+# Documentation: https://docs.ansible.com/ansible/latest/collections/infoblox/nios_modules/nios_inventory_inventory.html
+#
+# This plugin queries Infoblox NIOS (Network Identity Operating System) to discover
+# network objects (hosts, IP addresses, networks) and create dynamic inventory
+#
+# Authentication:
+#   Option 1: Environment variables (recommended)
+#     INFOBLOX_HOST (Infoblox grid manager IP/hostname)
+#     INFOBLOX_USERNAME
+#     INFOBLOX_PASSWORD
+#
+#   Option 2: Direct configuration (use vault for password)
+#     provider:
+#       host: nios.example.com
+#       username: admin
+#       password: "{{ lookup('env', 'INFOBLOX_PASSWORD') }}"
+
+plugin: infoblox.nios_modules.nios_inventory
+
+# Infoblox Grid Manager connection
+# provider:
+#   host: nios.example.com
+#   username: admin
+#   password: your_password
+#   wapi_version: "2.12"  # WAPI version (check your NIOS version)
+#   max_retries: 3
+#   max_results: 1000
+
+# SSL/TLS settings
+validate_certs: false
+
+# Object types to query
+# Options: host, hostrecord, ipv4address, ipv6address, network, networkcontainer, range
+object_types:
+  - hostrecord
+  - ipv4address
+  # - ipv6address
+
+# Return fields (reduces API overhead)
+return_fields:
+  - name
+  - ipv4addr
+  - ipv4addrs
+  - view
+  - zone
+  - comment
+  - extattrs
+  - network
+  - network_view
+  - usage
+  - disable
+  - discovered_data
+
+# Filters to reduce query scope
+# filters:
+#   - view: default
+#   - network: 10.0.0.0/8
+
+# Compose host variables
+compose:
+  # Use IP address as ansible_host
+  ansible_host: |
+    ipv4addrs[0].ipv4addr if ipv4addrs is defined and ipv4addrs | length > 0
+    else ipv4addr if ipv4addr is defined
+    else None
+
+  # Set ansible_user based on extensible attributes or defaults
+  ansible_user: |
+    extattrs.OS.value | default('linux') | lower | ternary(
+      'ansible' if extattrs.OS.value | default('') | lower in ['linux', 'rhel', 'ubuntu', 'centos']
+      else 'Administrator' if extattrs.OS.value | default('') | lower in ['windows', 'win']
+      else 'root',
+      'ansible'
+    )
+
+  # Extract extensible attributes (custom fields)
+  infoblox_name: name
+  infoblox_view: view | default('default')
+  infoblox_zone: zone | default('')
+  infoblox_comment: comment | default('')
+  infoblox_network: network | default('')
+  infoblox_network_view: network_view | default('default')
+
+  # Extensible attributes (customize based on your Infoblox schema)
+  environment: extattrs.Environment.value | default('untagged')
+  application: extattrs.Application.value | default('none')
+  owner: extattrs.Owner.value | default('unassigned')
+  location: extattrs.Location.value | default('unknown')
+  cost_center: extattrs.CostCenter.value | default('unassigned')
+  backup_policy: extattrs.BackupPolicy.value | default('none')
+  patch_group: extattrs.PatchGroup.value | default('none')
+  os_type: extattrs.OS.value | default('unknown')
+  os_version: extattrs.OSVersion.value | default('unknown')
+  vm_host: extattrs.VMHost.value | default('physical')
+  criticality: extattrs.Criticality.value | default('standard')
+  compliance: extattrs.Compliance.value | default('none')
+
+  # Discovered data (from network discovery)
+  discovered_name: discovered_data.device_model | default('')
+  mac_address: discovered_data.mac_address | default('')
+  vendor: discovered_data.vendor | default('')
+
+  # IP address usage type
+  ip_usage: usage[0] if usage is defined and usage | length > 0 else 'UNKNOWN'
+
+  # Is disabled
+  is_disabled: disable | default(false)
+
+  # FQDN construction
+  fqdn: |
+    name + '.' + zone if zone is defined and zone != ''
+    else name if name is defined
+    else None
+
+  # Subnet information
+  subnet_cidr: |
+    network | regex_replace('^([0-9.]+)/([0-9]+)$', '\\1') if network is defined
+    else None
+
+  subnet_mask_bits: |
+    network | regex_replace('^([0-9.]+)/([0-9]+)$', '\\2') | int if network is defined
+    else None
+
+  # IP address class
+  ip_class: |
+    'private' if (ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) | ipaddr('private')
+    else 'public'
+
+# Static groups
+groups:
+  # All Infoblox managed hosts
+  infoblox: true
+
+  # Enabled hosts only
+  infoblox_enabled: disable | default(false) == false
+
+  # Disabled hosts
+  infoblox_disabled: disable | default(false) == true
+
+  # Hosts with extensible attributes defined
+  infoblox_managed: extattrs is defined and extattrs | length > 0
+
+  # Private IP addresses
+  private_ips: |
+    (ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) | ipaddr('private')
+
+  # Public IP addresses
+  public_ips: |
+    not ((ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) | ipaddr('private'))
+
+  # RFC1918 networks
+  rfc1918_10: |
+    (ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) | ipaddr('10.0.0.0/8')
+
+  rfc1918_172: |
+    (ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) | ipaddr('172.16.0.0/12')
+
+  rfc1918_192: |
+    (ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) | ipaddr('192.168.0.0/16')
+
+  # Hosts with discovered data
+  discovered: discovered_data is defined
+
+  # Hosts without discovered data
+  not_discovered: discovered_data is not defined
+
+# Keyed groups - create groups dynamically
+keyed_groups:
+  # Group by DNS view
+  - key: view | default('default')
+    prefix: view
+
+  # Group by DNS zone
+  - key: zone | default('no_zone')
+    prefix: zone
+    separator: _
+
+  # Group by network
+  - key: network | default('no_network') | regex_replace('/', '_')
+    prefix: net
+
+  # Group by network view
+  - key: network_view | default('default')
+    prefix: netview
+
+  # Group by subnet (first 3 octets)
+  - key: |
+      (ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) |
+      regex_replace('^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+$', '\\1')
+    prefix: subnet
+
+  # Group by IP usage type
+  - key: usage[0] if usage is defined and usage | length > 0 else 'UNKNOWN'
+    prefix: usage
+
+  # Group by extensible attributes
+  - key: extattrs.Environment.value | default('untagged')
+    prefix: env
+
+  - key: extattrs.Application.value | default('none')
+    prefix: app
+
+  - key: extattrs.Owner.value | default('unassigned')
+    prefix: owner
+
+  - key: extattrs.Location.value | default('unknown')
+    prefix: location
+
+  - key: extattrs.CostCenter.value | default('unassigned')
+    prefix: costcenter
+
+  - key: extattrs.OS.value | default('unknown')
+    prefix: os
+
+  - key: extattrs.OSVersion.value | default('unknown')
+    prefix: osver
+    separator: _
+
+  - key: extattrs.PatchGroup.value | default('none')
+    prefix: patch
+
+  - key: extattrs.BackupPolicy.value | default('none')
+    prefix: backup
+
+  - key: extattrs.VMHost.value | default('physical')
+    prefix: vmhost
+
+  - key: extattrs.Criticality.value | default('standard')
+    prefix: criticality
+
+  - key: extattrs.Compliance.value | default('none')
+    prefix: compliance
+
+  # Group by discovered vendor
+  - key: discovered_data.vendor | default('unknown')
+    prefix: vendor
+
+  # Group by discovered device model
+  - key: discovered_data.device_model | default('unknown')
+    prefix: model
+    separator: _
+
+# Use hostname as inventory hostname
+hostnames:
+  - name
+  - ipv4addrs[0].ipv4addr
+  - ipv4addr
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Production hosts
+  production: |
+    extattrs.Environment.value | default('') == 'production' or
+    'prod' in (name | default('') | lower)
+
+  # Development hosts
+  development: |
+    extattrs.Environment.value | default('') in ['development', 'dev'] or
+    'dev' in (name | default('') | lower)
+
+  # Staging hosts
+  staging: |
+    extattrs.Environment.value | default('') == 'staging' or
+    'stage' in (name | default('') | lower)
+
+  # Test hosts
+  test: |
+    extattrs.Environment.value | default('') == 'test' or
+    'test' in (name | default('') | lower)
+
+  # Linux hosts
+  os_linux: |
+    extattrs.OS.value | default('') | lower in ['linux', 'rhel', 'ubuntu', 'centos', 'debian', 'fedora', 'suse']
+
+  # Windows hosts
+  os_windows: |
+    extattrs.OS.value | default('') | lower in ['windows', 'win', 'win2019', 'win2022']
+
+  # RHEL hosts
+  rhel: |
+    'rhel' in (extattrs.OS.value | default('') | lower) or
+    'red hat' in (extattrs.OS.value | default('') | lower)
+
+  # Ubuntu hosts
+  ubuntu: |
+    'ubuntu' in (extattrs.OS.value | default('') | lower)
+
+  # CentOS hosts
+  centos: |
+    'centos' in (extattrs.OS.value | default('') | lower)
+
+  # Windows Server 2022
+  windows_2022: |
+    '2022' in (extattrs.OSVersion.value | default(''))
+
+  # Windows Server 2019
+  windows_2019: |
+    '2019' in (extattrs.OSVersion.value | default(''))
+
+  # Web servers
+  webservers: |
+    extattrs.Application.value | default('') | lower in ['web', 'nginx', 'apache', 'iis', 'httpd'] or
+    'web' in (name | default('') | lower)
+
+  # Database servers
+  databases: |
+    extattrs.Application.value | default('') | lower in ['database', 'mysql', 'postgresql', 'oracle', 'mssql', 'mongodb'] or
+    'db' in (name | default('') | lower) or
+    'sql' in (name | default('') | lower)
+
+  # Application servers
+  appservers: |
+    extattrs.Application.value | default('') | lower in ['application', 'app', 'tomcat', 'jboss', 'websphere']
+
+  # Load balancers
+  loadbalancers: |
+    extattrs.Application.value | default('') | lower in ['loadbalancer', 'lb', 'haproxy', 'f5', 'netscaler'] or
+    'lb' in (name | default('') | lower)
+
+  # DNS servers
+  dns_servers: |
+    extattrs.Application.value | default('') | lower in ['dns', 'bind', 'named'] or
+    'dns' in (name | default('') | lower) or
+    usage is defined and 'DNS' in usage
+
+  # DHCP servers
+  dhcp_servers: |
+    extattrs.Application.value | default('') | lower in ['dhcp'] or
+    'dhcp' in (name | default('') | lower) or
+    usage is defined and 'DHCP' in usage
+
+  # Virtual machines
+  virtual_machines: |
+    extattrs.VMHost.value | default('physical') != 'physical'
+
+  # Physical servers
+  physical_servers: |
+    extattrs.VMHost.value | default('physical') == 'physical'
+
+  # Mission critical
+  mission_critical: |
+    extattrs.Criticality.value | default('') == 'critical' or
+    extattrs.Criticality.value | default('') == 'tier1'
+
+  # Patch groups
+  patch_group_a: extattrs.PatchGroup.value | default('') == 'A'
+  patch_group_b: extattrs.PatchGroup.value | default('') == 'B'
+  patch_group_c: extattrs.PatchGroup.value | default('') == 'C'
+
+  patch_sunday: extattrs.PatchGroup.value | default('') in ['A', 'Sunday']
+  patch_monday: extattrs.PatchGroup.value | default('') in ['B', 'Monday']
+  patch_tuesday: extattrs.PatchGroup.value | default('') in ['C', 'Tuesday']
+
+  # Backup policies
+  backup_daily: extattrs.BackupPolicy.value | default('') == 'daily'
+  backup_weekly: extattrs.BackupPolicy.value | default('') == 'weekly'
+  backup_monthly: extattrs.BackupPolicy.value | default('') == 'monthly'
+
+  # Compliance
+  compliance_pci: extattrs.Compliance.value | default('') == 'PCI'
+  compliance_hipaa: extattrs.Compliance.value | default('') == 'HIPAA'
+  compliance_sox: extattrs.Compliance.value | default('') == 'SOX'
+  compliance_gdpr: extattrs.Compliance.value | default('') == 'GDPR'
+
+  # Network segments
+  dmz: |
+    'dmz' in (zone | default('') | lower) or
+    'dmz' in (comment | default('') | lower) or
+    extattrs.NetworkSegment.value | default('') == 'DMZ'
+
+  internal: |
+    (ipv4addrs[0].ipv4addr if ipv4addrs is defined else ipv4addr | default('0.0.0.0')) | ipaddr('private') and
+    'dmz' not in (zone | default('') | lower)
+
+  # Data centers (based on location or network)
+  dc_east: |
+    extattrs.Location.value | default('') | lower in ['east', 'dc-east', 'us-east'] or
+    'east' in (network | default('') | lower)
+
+  dc_west: |
+    extattrs.Location.value | default('') | lower in ['west', 'dc-west', 'us-west'] or
+    'west' in (network | default('') | lower)
+
+  dc_central: |
+    extattrs.Location.value | default('') | lower in ['central', 'dc-central', 'us-central']
+
+  # Stale records (no discovered data or disabled)
+  stale: |
+    disable | default(false) == true or
+    discovered_data is not defined
+
+  # Active and discovered
+  active_discovered: |
+    disable | default(false) == false and
+    discovered_data is defined
+
+  # Records needing attention (missing extensible attributes)
+  needs_attention: |
+    extattrs is not defined or
+    extattrs.Owner.value is not defined or
+    extattrs.Environment.value is not defined or
+    comment | default('') == ''
+
+  # Reserved IPs (usage type)
+  reserved: |
+    usage is defined and 'RESERVED' in usage
+
+  # IPAM addresses (usage type)
+  ipam: |
+    usage is defined and 'IPAM' in usage
+
+# Caching (improves performance)
+# cache: yes
+# cache_plugin: jsonfile
+# cache_timeout: 3600
+# cache_connection: /tmp/infoblox_inventory_cache
+# cache_prefix: infoblox

@@ -1,0 +1,315 @@
+---
+# VMware vSphere dynamic inventory configuration
+# Plugin: community.vmware.vmware_vm_inventory
+# Documentation: https://docs.ansible.com/ansible/latest/collections/community/vmware/vmware_vm_inventory_inventory.html
+#
+# Authentication:
+#   Option 1: Environment variables (recommended)
+#     VMWARE_HOST (vCenter hostname)
+#     VMWARE_USER
+#     VMWARE_PASSWORD
+#
+#   Option 2: Direct configuration (use vault for password)
+#     hostname: vcenter.example.com
+#     username: administrator@vsphere.local
+#     password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+
+plugin: community.vmware.vmware_vm_inventory
+
+# vCenter connection settings
+# hostname: vcenter.example.com
+# username: administrator@vsphere.local
+# password: your-password
+# port: 443
+validate_certs: false
+
+# Only include powered-on VMs
+# with_powerstate: poweredOn
+
+# Filter VMs by folder path
+# with_path:
+#   - /Datacenter/vm/Production
+#   - /Datacenter/vm/Development
+
+# Filter by datacenter
+# datacenter:
+#   - Datacenter1
+#   - Datacenter2
+
+# Properties to fetch (reduces API calls)
+properties:
+  - name
+  - config.guestId
+  - config.guestFullName
+  - config.hardware.numCPU
+  - config.hardware.memoryMB
+  - config.template
+  - guest.hostName
+  - guest.ipAddress
+  - guest.guestFamily
+  - guest.guestFullName
+  - guest.toolsStatus
+  - guest.toolsVersion
+  - runtime.powerState
+  - summary.runtime.powerState
+  - config.annotation
+  - config.instanceUuid
+  - resourcePool
+  - parent
+  - customValue
+
+# Compose custom host variables
+compose:
+  # Set ansible_host to guest IP
+  ansible_host: guest.ipAddress | default(None)
+
+  # Set ansible_user based on OS family
+  ansible_user: |
+    'root' if guest.guestFamily == 'linuxGuest'
+    else 'ansible' if 'linux' in (config.guestId | default(''))
+    else 'Administrator'
+
+  # Extract custom attributes
+  vm_environment: |
+    customValue | selectattr('key', 'equalto', 1) | map(attribute='value') | first | default('unknown')
+
+  vm_application: |
+    customValue | selectattr('key', 'equalto', 2) | map(attribute='value') | first | default('unknown')
+
+  vm_owner: |
+    customValue | selectattr('key', 'equalto', 3) | map(attribute='value') | first | default('unassigned')
+
+  # Parse VM notes/annotation for tags
+  vm_notes: config.annotation | default('')
+
+  # CPU and memory
+  vcpu_count: config.hardware.numCPU
+  memory_mb: config.hardware.memoryMB
+  memory_gb: (config.hardware.memoryMB / 1024) | round(1)
+
+  # VM size tier
+  vm_size: |
+    'xlarge' if config.hardware.numCPU >= 8 and config.hardware.memoryMB >= 32768
+    else 'large' if config.hardware.numCPU >= 4 and config.hardware.memoryMB >= 16384
+    else 'medium' if config.hardware.numCPU >= 2 and config.hardware.memoryMB >= 8192
+    else 'small'
+
+  # Guest tools status
+  vmtools_running: guest.toolsStatus == 'toolsOk'
+  vmtools_outdated: guest.toolsStatus == 'toolsOld'
+
+  # Extract folder path
+  vm_folder: parent | regex_replace('^.*/vm/', '')
+
+  # Is production (based on folder or annotation)
+  is_production: |
+    'prod' in (parent | lower) or
+    'production' in (config.annotation | default('') | lower)
+
+# Static groups
+groups:
+  # All VMware VMs
+  vmware: true
+
+  # Powered on VMs
+  vmware_running: runtime.powerState == 'poweredOn'
+
+  # Powered off VMs
+  vmware_stopped: runtime.powerState == 'poweredOff'
+
+  # Templates
+  vmware_templates: config.template == true
+
+  # VMs with VMware Tools installed and running
+  vmtools_ok: guest.toolsStatus == 'toolsOk'
+
+  # VMs with outdated VMware Tools
+  vmtools_outdated: guest.toolsStatus == 'toolsOld'
+
+  # VMs without VMware Tools
+  vmtools_not_installed: guest.toolsStatus == 'toolsNotInstalled'
+
+  # High CPU VMs (8+ vCPUs)
+  high_cpu: config.hardware.numCPU >= 8
+
+  # High memory VMs (32GB+)
+  high_memory: config.hardware.memoryMB >= 32768
+
+  # Linux VMs
+  os_linux: guest.guestFamily == 'linuxGuest'
+
+  # Windows VMs
+  os_windows: guest.guestFamily == 'windowsGuest'
+
+# Keyed groups - create groups dynamically
+keyed_groups:
+  # Group by datacenter
+  - key: datacenter
+    prefix: dc
+
+  # Group by cluster
+  - key: cluster
+    prefix: cluster
+
+  # Group by ESXi host
+  - key: esxi_hostname
+    prefix: esxi
+
+  # Group by resource pool
+  - key: resourcePool | basename
+    prefix: pool
+
+  # Group by folder
+  - key: parent | regex_replace('^.*/vm/', '') | regex_replace('/', '_')
+    prefix: folder
+
+  # Group by guest OS family
+  - key: guest.guestFamily | default('unknown')
+    prefix: guest
+
+  # Group by guest OS (detailed)
+  - key: config.guestId | default('unknown')
+    prefix: os
+
+  # Group by power state
+  - key: runtime.powerState
+    prefix: power
+
+  # Group by VM size tier
+  - key: |
+      'xlarge' if config.hardware.numCPU >= 8 and config.hardware.memoryMB >= 32768
+      else 'large' if config.hardware.numCPU >= 4 and config.hardware.memoryMB >= 16384
+      else 'medium' if config.hardware.numCPU >= 2 and config.hardware.memoryMB >= 8192
+      else 'small'
+    prefix: size
+
+  # Group by vCPU count
+  - key: config.hardware.numCPU
+    prefix: cpu
+
+  # Group by network (first network adapter)
+  - key: guest.net[0].network | default('no_network')
+    prefix: net
+
+  # Group by IP subnet (first 3 octets)
+  - key: guest.ipAddress | default('0.0.0.0') | regex_replace('^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+$', '\\1')
+    prefix: subnet
+
+# Hostnames
+hostnames:
+  - config.name
+  - guest.hostName
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Production VMs
+  production: |
+    'prod' in (parent | lower) or
+    'production' in (config.annotation | default('') | lower)
+
+  # Development VMs
+  development: |
+    'dev' in (parent | lower) or
+    'development' in (config.annotation | default('') | lower)
+
+  # Staging VMs
+  staging: |
+    'stage' in (parent | lower) or
+    'staging' in (config.annotation | default('') | lower)
+
+  # Web servers (based on naming convention or annotation)
+  webservers: |
+    'web' in name.lower() or
+    'nginx' in name.lower() or
+    'apache' in name.lower() or
+    'iis' in name.lower() or
+    'webserver' in (config.annotation | default('') | lower)
+
+  # Database servers
+  databases: |
+    'db' in name.lower() or
+    'sql' in name.lower() or
+    'mysql' in name.lower() or
+    'postgres' in name.lower() or
+    'oracle' in name.lower() or
+    'mongo' in name.lower() or
+    'database' in (config.annotation | default('') | lower)
+
+  # Application servers
+  appservers: |
+    'app' in name.lower() or
+    'tomcat' in name.lower() or
+    'jboss' in name.lower() or
+    'application' in (config.annotation | default('') | lower)
+
+  # Domain controllers
+  domain_controllers: |
+    'dc' in name.lower() or
+    'domaincontroller' in name.lower() or
+    'ad' in name.lower()
+
+  # Kubernetes nodes
+  kubernetes: |
+    'k8s' in name.lower() or
+    'kube' in name.lower() or
+    'node' in name.lower()
+
+  # Red Hat Enterprise Linux
+  rhel: |
+    'rhel' in (config.guestId | default('') | lower) or
+    'redhat' in (guest.guestFullName | default('') | lower)
+
+  # Ubuntu
+  ubuntu: |
+    'ubuntu' in (config.guestId | default('') | lower) or
+    'ubuntu' in (guest.guestFullName | default('') | lower)
+
+  # CentOS
+  centos: |
+    'centos' in (config.guestId | default('') | lower) or
+    'centos' in (guest.guestFullName | default('') | lower)
+
+  # Windows Server 2019
+  windows_2019: |
+    '2019' in (config.guestId | default(''))
+
+  # Windows Server 2022
+  windows_2022: |
+    '2022' in (config.guestId | default(''))
+
+  # VMs needing VMware Tools update
+  needs_vmtools_update: |
+    guest.toolsStatus in ['toolsOld', 'toolsNotInstalled'] and
+    runtime.powerState == 'poweredOn'
+
+  # VMs with snapshots (requires additional property)
+  # has_snapshots: snapshot is defined
+
+  # Patch group by day of week (based on last character of VM name)
+  patch_sunday: |
+    name[-1:] in ['0', '7'] and runtime.powerState == 'poweredOn'
+
+  patch_monday: |
+    name[-1:] == '1' and runtime.powerState == 'poweredOn'
+
+  patch_tuesday: |
+    name[-1:] == '2' and runtime.powerState == 'poweredOn'
+
+  # Mission critical (high resources)
+  mission_critical: |
+    config.hardware.numCPU >= 8 and
+    config.hardware.memoryMB >= 32768 and
+    runtime.powerState == 'poweredOn'
+
+  # Candidates for rightsizing (low CPU, high memory)
+  rightsize_candidates: |
+    config.hardware.numCPU <= 2 and
+    config.hardware.memoryMB >= 16384 and
+    runtime.powerState == 'poweredOn'
+
+# Caching
+# cache: yes
+# cache_plugin: jsonfile
+# cache_timeout: 3600
+# cache_connection: /tmp/vmware_inventory_cache
+# cache_prefix: vmware_vm

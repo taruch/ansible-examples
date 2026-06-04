@@ -1,0 +1,375 @@
+---
+# Enhanced AWS EC2 dynamic inventory configuration
+# Plugin: amazon.aws.aws_ec2
+# Documentation: https://docs.ansible.com/ansible/latest/collections/amazon/aws/aws_ec2_inventory.html
+#
+# This is an enhanced version with comprehensive grouping examples
+#
+# Authentication (in order of precedence):
+#   1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN)
+#   2. Shared credentials file (~/.aws/credentials)
+#   3. IAM role (when running on EC2)
+#
+# Required IAM permissions:
+#   - ec2:DescribeInstances
+#   - ec2:DescribeTags
+#   - ec2:DescribeRegions
+
+plugin: amazon.aws.aws_ec2
+
+# Regions to query (query all regions if not specified)
+regions:
+  - us-east-1
+  - us-east-2
+  - us-west-1
+  - us-west-2
+
+# Filters to reduce API calls (AND logic)
+filters:
+  # Only running instances
+  instance-state-name: running
+
+  # Filter by tag
+  # tag:Environment: production
+
+  # Filter by instance type pattern
+  # instance-type: t3.*
+
+# Include instances with specific tags (OR logic)
+# include_filters:
+#   - tag:Environment: production
+#   - tag:Environment: staging
+
+# Exclude instances
+# exclude_filters:
+#   - tag:DoNotManage: "true"
+
+# Compose custom host variables
+compose:
+  # Set ansible_host to public IP if available, fallback to private IP
+  ansible_host: public_ip_address | default(private_ip_address)
+
+  # Set ansible_user based on image/platform
+  ansible_user: |
+    'ec2-user' if (image.name | default('') | regex_search('amzn|Amazon|RHEL'))
+    else 'ubuntu' if (image.name | default('') | regex_search('[Uu]buntu'))
+    else 'admin' if (image.name | default('') | regex_search('[Dd]ebian'))
+    else 'centos' if (image.name | default('') | regex_search('[Cc]ent[Oo][Ss]'))
+    else 'core' if (image.name | default('') | regex_search('[Cc]ore[Oo][Ss]'))
+    else 'Administrator' if platform == 'windows'
+    else 'ec2-user'
+
+  # Connection type based on platform
+  ansible_connection: |
+    'winrm' if platform == 'windows'
+    else 'ssh'
+
+  # Extract custom variables from tags
+  cost_center: tags.CostCenter | default('unassigned')
+  backup_policy: tags.Backup | default('none')
+  patch_group: tags.PatchGroup | default('none')
+  data_classification: tags.DataClassification | default('internal')
+
+  # Instance details
+  instance_type_family: instance_type | regex_replace('^([a-z]+[0-9]+)\..*', '\\1')
+  instance_size: instance_type | regex_replace('^[a-z]+[0-9]+\.(.*)', '\\1')
+
+  # Network details
+  vpc_name: tags.VPC | default(vpc_id)
+  subnet_name: tags.Subnet | default(subnet_id)
+  availability_zone_letter: placement.availability_zone | regex_replace('.*([a-z])$', '\\1')
+
+  # Age calculation
+  instance_age_days: |
+    ((ansible_date_time.epoch | int) - (launch_time | to_datetime | int)) / 86400 | int
+
+  # Is production (multiple indicators)
+  is_production: |
+    tags.Environment | default('') == 'production' or
+    'prod' in (tags.Name | default('') | lower) or
+    placement.availability_zone.startswith('us-east-1')
+
+  # Compliance requirements
+  requires_encryption: tags.RequiresEncryption | default('no') == 'yes'
+  hipaa_compliant: tags.Compliance | default('') == 'HIPAA'
+  pci_compliant: tags.Compliance | default('') == 'PCI'
+
+  # Monitoring
+  detailed_monitoring_enabled: monitoring.state == 'enabled'
+
+# Static groups
+groups:
+  # All AWS EC2 instances
+  cloud_aws: true
+
+  # Running instances
+  aws_running: state.name == 'running'
+
+  # Stopped instances
+  aws_stopped: state.name == 'stopped'
+
+  # Instances with public IPs
+  aws_public: public_ip_address is defined
+
+  # Instances in private subnets only
+  aws_private: public_ip_address is not defined
+
+  # Spot instances
+  aws_spot: instance_lifecycle == 'spot'
+
+  # On-demand instances
+  aws_ondemand: instance_lifecycle is not defined
+
+  # Instances with detailed monitoring
+  aws_detailed_monitoring: monitoring.state == 'enabled'
+
+  # Instances with EBS optimization
+  aws_ebs_optimized: ebs_optimized == true
+
+  # Instances with instance store
+  aws_instance_store: |
+    block_device_mappings | selectattr('device_name', 'defined') |
+    selectattr('ebs', 'undefined') | list | length > 0
+
+  # Instances launched recently (< 7 days)
+  aws_new: |
+    ((ansible_date_time.epoch | int) - (launch_time | to_datetime | int)) / 86400 < 7
+
+  # Old instances (> 365 days)
+  aws_old: |
+    ((ansible_date_time.epoch | int) - (launch_time | to_datetime | int)) / 86400 > 365
+
+# Keyed groups - create groups dynamically
+keyed_groups:
+  # Group by region
+  - key: placement.region
+    prefix: aws
+
+  # Group by availability zone
+  - key: placement.availability_zone
+    prefix: az
+
+  # Group by VPC
+  - key: vpc_id
+    prefix: vpc
+
+  # Group by subnet
+  - key: subnet_id
+    prefix: subnet
+
+  # Group by instance type
+  - key: instance_type
+    prefix: type
+    separator: _
+
+  # Group by instance type family (t3, m5, etc.)
+  - key: instance_type | regex_replace('^([a-z]+[0-9]+)\..*', '\\1')
+    prefix: family
+
+  # Group by instance size (micro, small, large, etc.)
+  - key: instance_type | regex_replace('^[a-z]+[0-9]+\.(.*)', '\\1')
+    prefix: size
+
+  # Group by platform (linux/windows)
+  - key: platform | default('linux')
+    prefix: platform
+
+  # Group by AMI
+  - key: image_id
+    prefix: ami
+
+  # Group by security groups
+  - key: security_groups | map(attribute='group_name') | list
+    prefix: sg
+
+  # Group by IAM instance profile
+  - key: iam_instance_profile.arn | default('none') | regex_replace('.*/(.+)', '\\1')
+    prefix: iam
+
+  # Group by placement group
+  - key: placement.group_name | default('none')
+    prefix: pg
+
+  # Group by tenancy
+  - key: placement.tenancy | default('default')
+    prefix: tenancy
+
+  # Group by tags
+  - key: tags.Name | default('unnamed')
+    prefix: name
+    separator: _
+
+  - key: tags.Environment | default('untagged')
+    prefix: env
+
+  - key: tags.Application | default('none')
+    prefix: app
+
+  - key: tags.Role | default('none')
+    prefix: role
+
+  - key: tags.Owner | default('unassigned')
+    prefix: owner
+
+  - key: tags.Team | default('unassigned')
+    prefix: team
+
+  - key: tags.Project | default('none')
+    prefix: project
+
+  - key: tags.CostCenter | default('unassigned')
+    prefix: costcenter
+
+  - key: tags.Tier | default('none')
+    prefix: tier
+
+  - key: tags.PatchGroup | default('none')
+    prefix: patch
+
+  - key: tags.Backup | default('none')
+    prefix: backup
+
+# Use specific tag as hostname
+hostnames:
+  - tag:Name
+  - dns-name
+  - private-dns-name
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Production instances (multiple criteria)
+  production: |
+    tags.Environment | default('') == 'production' or
+    'prod' in (tags.Name | default('') | lower)
+
+  # Development instances
+  development: |
+    tags.Environment | default('') in ['development', 'dev'] or
+    'dev' in (tags.Name | default('') | lower)
+
+  # Staging instances
+  staging: |
+    tags.Environment | default('') == 'staging' or
+    'stage' in (tags.Name | default('') | lower)
+
+  # Web servers
+  webservers: |
+    'web' in (tags.Role | default('') | lower) or
+    'nginx' in (tags.Name | default('') | lower) or
+    'apache' in (tags.Name | default('') | lower)
+
+  # Database servers
+  databases: |
+    'db' in (tags.Role | default('') | lower) or
+    'database' in (tags.Name | default('') | lower) or
+    'mysql' in (tags.Name | default('') | lower) or
+    'postgres' in (tags.Name | default('') | lower)
+
+  # Application servers
+  appservers: |
+    'app' in (tags.Role | default('') | lower) or
+    tags.Tier | default('') == 'application'
+
+  # Load balancers (instances, not ELB)
+  loadbalancers: |
+    'lb' in (tags.Role | default('') | lower) or
+    'haproxy' in (tags.Name | default('') | lower)
+
+  # Kubernetes nodes
+  kubernetes: |
+    'k8s' in (tags.Name | default('') | lower) or
+    'kubernetes' in (tags.Application | default('') | lower) or
+    tags.Role | default('') in ['master', 'worker', 'node']
+
+  # EKS nodes (using EKS tags)
+  eks_nodes: |
+    tags['kubernetes.io/cluster'] is defined or
+    tags['eks:cluster-name'] is defined
+
+  # Bastion/jump hosts
+  bastion: |
+    'bastion' in (tags.Role | default('') | lower) or
+    'jump' in (tags.Name | default('') | lower)
+
+  # RHEL instances
+  os_rhel: |
+    'rhel' in (image.name | default('') | lower) or
+    'red hat' in (image.name | default('') | lower)
+
+  # Amazon Linux instances
+  os_amazon_linux: |
+    'amzn' in (image.name | default('') | lower) or
+    'amazon linux' in (image.name | default('') | lower)
+
+  # Ubuntu instances
+  os_ubuntu: |
+    'ubuntu' in (image.name | default('') | lower)
+
+  # Windows instances
+  os_windows: |
+    platform == 'windows'
+
+  # Burstable instances (T-series)
+  burstable: |
+    instance_type.startswith('t2.') or
+    instance_type.startswith('t3.') or
+    instance_type.startswith('t4g.')
+
+  # Compute optimized
+  compute_optimized: |
+    instance_type | regex_search('^c[0-9]+\.')
+
+  # Memory optimized
+  memory_optimized: |
+    instance_type | regex_search('^(r|x|z)[0-9]+\.')
+
+  # Storage optimized
+  storage_optimized: |
+    instance_type | regex_search('^(d|h|i)[0-9]+\.')
+
+  # Graviton instances (ARM-based)
+  graviton: |
+    instance_type.endswith('g.micro') or
+    instance_type.endswith('g.small') or
+    instance_type.endswith('g.medium') or
+    instance_type.endswith('g.large') or
+    instance_type.endswith('g.xlarge')
+
+  # Patch groups
+  patch_sunday: tags.PatchGroup | default('') in ['A', 'Sunday']
+  patch_monday: tags.PatchGroup | default('') in ['B', 'Monday']
+  patch_tuesday: tags.PatchGroup | default('') in ['C', 'Tuesday']
+  patch_wednesday: tags.PatchGroup | default('') in ['D', 'Wednesday']
+
+  # Backup policies
+  backup_daily: tags.Backup | default('') == 'daily'
+  backup_weekly: tags.Backup | default('') == 'weekly'
+  backup_monthly: tags.Backup | default('') == 'monthly'
+
+  # Compliance
+  compliance_pci: tags.Compliance | default('') == 'PCI'
+  compliance_hipaa: tags.Compliance | default('') == 'HIPAA'
+  compliance_sox: tags.Compliance | default('') == 'SOX'
+
+  # Mission critical
+  mission_critical: |
+    tags.Criticality | default('') == 'critical' or
+    tags.Tier | default('') == '1'
+
+  # Instances requiring updates (example: outdated AMIs)
+  needs_ami_update: |
+    ((ansible_date_time.epoch | int) - (launch_time | to_datetime | int)) / 86400 > 180 and
+    tags.AutoUpdate | default('yes') == 'yes'
+
+  # Cost optimization candidates (running but stopped pattern)
+  cost_optimization_candidate: |
+    tags.StopSchedule is defined or
+    instance_type | regex_search('^(t2\.|t3\.)') and
+    tags.Environment | default('') in ['development', 'test']
+
+# Caching (improves performance)
+cache: yes
+cache_plugin: jsonfile
+cache_timeout: 300
+cache_connection: /tmp/aws_inventory_cache
+cache_prefix: aws_ec2

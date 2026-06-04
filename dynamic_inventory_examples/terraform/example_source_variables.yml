@@ -1,0 +1,11 @@
+backend_type: s3
+compose:
+  ansible_host: public_ip
+groups:
+  cloud_aws: true
+  os_linux: tags.blueprint.startswith('rhel')
+hostnames:
+  - tag:Name
+keyed_groups:
+  - key: tags.purpose
+    prefix: purpose

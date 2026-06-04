@@ -1,0 +1,22 @@
+compose:
+  ansible_host: public_ip_address
+  ansible_user: ec2-user
+  ansible_host_disable: |
+    (placement.region == 'us-east-2' and tags.deployment == 'new') 
+groups:
+  cloud_aws: true
+  os_linux: tags.blueprint.startswith('rhel')
+hostnames:
+  - tag:Name
+keyed_groups:
+  - key: platform
+    prefix: os
+  - key: tags.blueprint
+    prefix: blueprint
+  - key: tags.owner
+    prefix: owner
+  - key: tags.purpose
+    prefix: purpose
+regions: us-east-2
+composed:
+  new_http_port: 80

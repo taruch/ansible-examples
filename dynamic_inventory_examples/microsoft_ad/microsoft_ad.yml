@@ -1,0 +1,305 @@
+---
+# Microsoft Active Directory dynamic inventory configuration
+# Plugin: community.windows.ldap
+# Documentation: https://docs.ansible.com/ansible/latest/collections/community/windows/ldap_inventory.html
+#
+# This plugin queries Active Directory via LDAP to discover Windows computers
+# and create dynamic inventory groups based on AD attributes
+#
+# Authentication options:
+#   1. Kerberos (recommended for domain-joined Ansible control node)
+#   2. Simple bind with username/password
+#   3. NTLM authentication
+#
+# Environment variables:
+#   ANSIBLE_LDAP_SERVER
+#   ANSIBLE_LDAP_USERNAME
+#   ANSIBLE_LDAP_PASSWORD
+
+plugin: community.windows.ldap
+
+# LDAP server settings
+# server: dc01.example.com
+# port: 389  # Use 636 for LDAPS
+# tls_mode: start_tls  # Options: off, start_tls, ldaps
+
+# Authentication
+# auth: simple  # Options: simple, kerberos, ntlm
+# username: CN=ServiceAccount,OU=ServiceAccounts,DC=example,DC=com
+# password: "{{ lookup('env', 'ANSIBLE_LDAP_PASSWORD') }}"
+
+# Search base (where to search for computers)
+# search_base: OU=Servers,DC=example,DC=com
+
+# Search filter for computer objects
+filter: (&(objectClass=computer)(operatingSystem=Windows*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))
+# This filter finds Windows computers that are NOT disabled
+# userAccountControl bit 2 = ACCOUNTDISABLE
+
+# LDAP attributes to retrieve
+attributes:
+  - cn
+  - dNSHostName
+  - operatingSystem
+  - operatingSystemVersion
+  - operatingSystemServicePack
+  - whenCreated
+  - whenChanged
+  - lastLogonTimestamp
+  - description
+  - location
+  - managedBy
+  - memberOf
+  - distinguishedName
+  - servicePrincipalName
+  - userAccountControl
+
+# Compose host variables
+compose:
+  # Use dNSHostName for ansible_host
+  ansible_host: dNSHostName | default(cn + '.example.com')
+
+  # Set ansible_user (use domain admin or service account)
+  ansible_user: Administrator
+
+  # Set WinRM connection type
+  ansible_connection: winrm
+  ansible_winrm_transport: kerberos  # or 'ntlm', 'credssp'
+  ansible_winrm_server_cert_validation: ignore
+
+  # Extract OS details
+  os_name: operatingSystem | default('Unknown')
+  os_version: operatingSystemVersion | default('Unknown')
+  os_service_pack: operatingSystemServicePack | default('None')
+
+  # Computer created and modified dates
+  computer_created: whenCreated
+  computer_modified: whenChanged
+
+  # Last logon (convert from AD timestamp)
+  last_logon_days_ago: |
+    ((ansible_date_time.epoch | int) - ((lastLogonTimestamp | default(0) | int) / 10000000 - 11644473600)) / 86400 | int
+    if lastLogonTimestamp is defined else 9999
+
+  # Computer description and location
+  computer_description: description | default('')
+  computer_location: location | default('Unknown')
+
+  # Managed by (extract CN from DN)
+  managed_by_user: |
+    managedBy | regex_replace('^CN=([^,]+),.*', '\\1') if managedBy is defined else 'Unmanaged'
+
+  # Is domain controller
+  is_domain_controller: |
+    servicePrincipalName is defined and
+    (servicePrincipalName | select('match', 'ldap/.*') | list | length > 0)
+
+  # Is disabled
+  is_disabled: (userAccountControl | int) & 2 == 2
+
+  # Extract OU path
+  organizational_unit: |
+    distinguishedName | regex_replace('^CN=[^,]+,', '') | regex_replace(',DC=[^,]+', '') | regex_replace('DC=', '')
+
+  # Security groups (extract from memberOf)
+  security_groups: |
+    memberOf | default([]) | map('regex_replace', '^CN=([^,]+),.*', '\\1') | list
+    if memberOf is defined else []
+
+# Static groups
+groups:
+  # All AD computers
+  ad_computers: true
+
+  # Windows servers
+  windows_servers: "'Server' in operatingSystem"
+
+  # Windows workstations
+  windows_workstations: "'Windows' in operatingSystem and 'Server' not in operatingSystem"
+
+  # Domain controllers
+  domain_controllers: |
+    servicePrincipalName is defined and
+    (servicePrincipalName | select('match', 'ldap/.*') | list | length > 0)
+
+  # Stale computers (not logged on in 90 days)
+  stale_computers: |
+    lastLogonTimestamp is defined and
+    ((ansible_date_time.epoch | int) - ((lastLogonTimestamp | int) / 10000000 - 11644473600)) / 86400 > 90
+
+  # Recently created (within 30 days)
+  recently_created: |
+    whenCreated is defined and
+    ((ansible_date_time.epoch | int) - (whenCreated | to_datetime('%Y%m%d%H%M%S.0Z') | int)) / 86400 < 30
+
+  # Computers with missing description
+  missing_description: description is not defined or description == ''
+
+  # Computers with missing location
+  missing_location: location is not defined or location == ''
+
+# Keyed groups
+keyed_groups:
+  # Group by operating system
+  - key: operatingSystem | default('Unknown') | regex_replace('[^a-zA-Z0-9]', '_')
+    prefix: os
+
+  # Group by OS version
+  - key: operatingSystemVersion | default('Unknown') | regex_replace('[^a-zA-Z0-9]', '_')
+    prefix: osver
+
+  # Group by location
+  - key: location | default('Unknown') | regex_replace('[^a-zA-Z0-9]', '_')
+    prefix: location
+
+  # Group by managed by user
+  - key: managedBy | regex_replace('^CN=([^,]+),.*', '\\1') if managedBy is defined else 'Unmanaged'
+    prefix: managed_by
+
+  # Group by OU (first level)
+  - key: |
+      distinguishedName | regex_search('OU=([^,]+)', '\\1') | first | default('Root')
+    prefix: ou
+
+  # Group by OU (full path)
+  - key: |
+      distinguishedName | regex_replace('^CN=[^,]+,', '') | regex_replace(',DC=[^,]+', '') | regex_replace(',OU=', '_') | regex_replace('OU=', '')
+    prefix: ou_path
+
+  # Group by domain (DC components)
+  - key: |
+      distinguishedName | regex_findall('DC=([^,]+)') | join('.')
+    prefix: domain
+
+# Hostnames
+hostnames:
+  - dNSHostName
+  - cn
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Windows Server 2022
+  windows_2022: "'2022' in (operatingSystemVersion | default(''))"
+
+  # Windows Server 2019
+  windows_2019: "'2019' in (operatingSystemVersion | default(''))"
+
+  # Windows Server 2016
+  windows_2016: "'2016' in (operatingSystemVersion | default(''))"
+
+  # Windows Server 2012 R2
+  windows_2012r2: "'6.3' in (operatingSystemVersion | default(''))"
+
+  # Windows 10
+  windows_10: |
+    'Windows 10' in (operatingSystem | default('')) or
+    '10.0' in (operatingSystemVersion | default(''))
+
+  # Windows 11
+  windows_11: |
+    'Windows 11' in (operatingSystem | default(''))
+
+  # Production servers (based on OU or naming)
+  production: |
+    'Prod' in (distinguishedName | upper) or
+    cn | default('') | regex_search('^(PRD|PROD)', ignorecase=True)
+
+  # Development servers
+  development: |
+    'Dev' in (distinguishedName | upper) or
+    cn | default('') | regex_search('^(DEV)', ignorecase=True)
+
+  # Test servers
+  test: |
+    'Test' in (distinguishedName | upper) or
+    cn | default('') | regex_search('^(TST|TEST)', ignorecase=True)
+
+  # Web servers (IIS)
+  webservers: |
+    'web' in (description | default('') | lower) or
+    'iis' in (description | default('') | lower) or
+    cn | default('') | regex_search('web|iis', ignorecase=True)
+
+  # Database servers
+  databases: |
+    'sql' in (description | default('') | lower) or
+    'database' in (description | default('') | lower) or
+    'db' in (description | default('') | lower) or
+    cn | default('') | regex_search('sql|db', ignorecase=True)
+
+  # File servers
+  fileservers: |
+    'file' in (description | default('') | lower) or
+    'storage' in (description | default('') | lower) or
+    cn | default('') | regex_search('file|fs', ignorecase=True)
+
+  # Exchange servers
+  exchange_servers: |
+    'exchange' in (description | default('') | lower) or
+    servicePrincipalName is defined and
+    (servicePrincipalName | select('match', 'exchangeMDB/.*') | list | length > 0)
+
+  # SCCM/MECM clients (in specific security group)
+  sccm_clients: |
+    memberOf is defined and
+    (memberOf | select('search', 'SCCM') | list | length > 0)
+
+  # WSUS clients
+  wsus_clients: |
+    memberOf is defined and
+    (memberOf | select('search', 'WSUS') | list | length > 0)
+
+  # VDI/Virtual desktops
+  vdi: |
+    'VDI' in (distinguishedName | upper) or
+    'virtual desktop' in (description | default('') | lower) or
+    cn | default('') | regex_search('vdi|vd-', ignorecase=True)
+
+  # Hyper-V hosts
+  hyperv_hosts: |
+    'hyper-v' in (description | default('') | lower) or
+    servicePrincipalName is defined and
+    (servicePrincipalName | select('match', 'Microsoft Virtual Console Service/.*') | list | length > 0)
+
+  # Patch group A (Sunday patching)
+  patch_group_a: |
+    memberOf is defined and
+    (memberOf | select('search', 'Patch.*Group.*A') | list | length > 0)
+
+  # Patch group B (Saturday patching)
+  patch_group_b: |
+    memberOf is defined and
+    (memberOf | select('search', 'Patch.*Group.*B') | list | length > 0)
+
+  # Compliance scope (PCI, HIPAA, etc.)
+  compliance_pci: |
+    memberOf is defined and
+    (memberOf | select('search', 'PCI') | list | length > 0)
+
+  compliance_hipaa: |
+    memberOf is defined and
+    (memberOf | select('search', 'HIPAA') | list | length > 0)
+
+  # Servers requiring special handling
+  mission_critical: |
+    memberOf is defined and
+    (memberOf | select('search', '[Cc]ritical') | list | length > 0)
+
+  # Computers in DMZ
+  dmz: |
+    'DMZ' in (distinguishedName | upper) or
+    'dmz' in (description | default('') | lower)
+
+  # Needs cleanup (stale + missing info)
+  needs_cleanup: |
+    (lastLogonTimestamp is defined and
+     ((ansible_date_time.epoch | int) - ((lastLogonTimestamp | int) / 10000000 - 11644473600)) / 86400 > 180) or
+    (description is not defined or description == '') or
+    (location is not defined or location == '')
+
+# Caching
+# cache: yes
+# cache_plugin: jsonfile
+# cache_timeout: 3600
+# cache_connection: /tmp/ad_inventory_cache
+# cache_prefix: ad_ldap
