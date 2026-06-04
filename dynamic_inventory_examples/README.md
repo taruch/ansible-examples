@@ -21,6 +21,209 @@ Dynamic inventory allows Ansible to query external systems (cloud providers, vir
 | **Red Hat Satellite** | `theforeman.foreman.foreman` | [example_source_variables.yml](satellite/example_source_variables.yml) | 10+ | Satellite/Foreman managed hosts |
 | **ServiceNow** | `servicenow.itsm.now` | [servicenow.yml](ServiceNow/servicenow.yml) | 5+ | CMDB computer inventory |
 
+## Inventory Configuration Sections
+
+Dynamic inventory files use several configuration sections. Here's what each one does:
+
+### **`plugin`**
+**Purpose:** Specifies which inventory plugin to use  
+**Required:** Yes  
+**Example:** `plugin: amazon.aws.aws_ec2`  
+**Description:** Tells Ansible which collection and plugin will provide the inventory. Must match an installed inventory plugin.
+
+### **`compose`**
+**Purpose:** Create or modify host variables using Jinja2 expressions  
+**Required:** No  
+**When to use:** Transform source data into useful variables, set connection parameters, calculate derived values  
+**Example:**
+```yaml
+compose:
+  # Set ansible_host from cloud provider data
+  ansible_host: public_ip_address | default(private_ip_address)
+  
+  # Create custom variable from multiple fields
+  vm_size: |
+    'large' if vcpus >= 4 else 'small'
+```
+**Tips:**
+- Set `ansible_host`, `ansible_user`, `ansible_connection` here
+- Use Jinja2 filters to transform data
+- Can reference any property from the source system
+
+### **`groups`**
+**Purpose:** Create static groups using simple boolean expressions  
+**Required:** No  
+**When to use:** Create groups based on simple true/false conditions  
+**Example:**
+```yaml
+groups:
+  # All instances from this source
+  cloud_aws: true
+  
+  # Running instances only
+  aws_running: state.name == 'running'
+  
+  # Instances with public IPs
+  has_public_ip: public_ip_address is defined
+```
+**Tips:**
+- Use `true` to add all hosts to a group
+- Use simple comparisons for basic filtering
+- Good for infrastructure-wide groups
+
+### **`keyed_groups`**
+**Purpose:** Dynamically create groups from host properties/tags  
+**Required:** No  
+**When to use:** Generate many groups automatically from tags, labels, or attributes  
+**Example:**
+```yaml
+keyed_groups:
+  # Group by region → creates groups like "aws_us_east_1"
+  - key: placement.region
+    prefix: aws
+  
+  # Group by tags → creates "env_production", "env_dev"
+  - key: tags.Environment | default('untagged')
+    prefix: env
+  
+  # Group by list of tags (creates multiple groups)
+  - key: tags | dict2items | map(attribute='key')
+    prefix: tag
+```
+**Tips:**
+- Creates one group per unique value
+- Use `prefix` to namespace the groups
+- Use `separator` to change delimiter (default: `_`)
+- Can use Jinja2 filters on the key
+
+### **`conditional_groups`**
+**Purpose:** Create groups using complex logic and multiple conditions  
+**Required:** No  
+**When to use:** When simple groups aren't enough; need AND/OR logic, string matching, calculations  
+**Example:**
+```yaml
+conditional_groups:
+  # Production (multiple criteria with OR)
+  production: |
+    tags.Environment == 'production' or
+    'prod' in name.lower() or
+    placement.region == 'us-east-1'
+  
+  # Web servers (pattern matching)
+  webservers: |
+    'web' in tags.Role | default('') or
+    'nginx' in name.lower()
+  
+  # Mission critical (complex logic)
+  mission_critical: |
+    tags.Tier == '1' and
+    vcpus >= 4 and
+    memory_gb >= 16
+```
+**Tips:**
+- Can use multi-line expressions with `|`
+- Supports all Jinja2 filters and tests
+- Great for workload types, compliance, patch groups
+
+### **`hostnames`**
+**Purpose:** Define which field(s) to use as the inventory hostname  
+**Required:** No (defaults to plugin-specific field)  
+**When to use:** Control how hosts appear in inventory  
+**Example:**
+```yaml
+hostnames:
+  - tag:Name              # Try this first
+  - dns-name              # Then this
+  - private-dns-name      # Finally this
+```
+**Tips:**
+- Ansible tries each in order until one has a value
+- First match wins
+- Must be unique across inventory
+
+### **`filters`** / **`query_filters`**
+**Purpose:** Limit which resources are queried from the source (API-side filtering)  
+**Required:** No  
+**When to use:** Reduce API calls and inventory size  
+**Example:**
+```yaml
+# AWS example
+filters:
+  instance-state-name: running
+  tag:Environment: production
+
+# NetBox example
+query_filters:
+  - role: server
+  - status: active
+```
+**Tips:**
+- Reduces API overhead
+- Filters happen on source system (fast)
+- Different syntax per plugin
+
+### **`include_filters`** / **`exclude_filters`**
+**Purpose:** Include or exclude resources using OR logic (after API query)  
+**Required:** No  
+**When to use:** More flexible filtering than basic filters  
+**Example:**
+```yaml
+# Include production OR staging
+include_filters:
+  - tag:Environment: production
+  - tag:Environment: staging
+
+# Exclude anything marked DoNotManage
+exclude_filters:
+  - tag:DoNotManage: "true"
+```
+
+### **`cache`** / **`cache_plugin`** / **`cache_timeout`**
+**Purpose:** Cache inventory data to improve performance  
+**Required:** No (but recommended for large inventories)  
+**When to use:** API queries are slow, inventory is large (>100 hosts), or you run inventory frequently  
+**Example:**
+```yaml
+cache: yes
+cache_plugin: jsonfile
+cache_timeout: 300  # 5 minutes in seconds
+cache_connection: /tmp/aws_inventory_cache
+cache_prefix: aws_ec2
+```
+**Tips:**
+- Dramatically speeds up repeat queries
+- Set timeout based on how often infrastructure changes
+- Use different prefixes for different inventory sources
+
+### **`validate_certs`**
+**Purpose:** Enable/disable SSL certificate validation  
+**Required:** No (defaults to true)  
+**When to use:** Self-signed certs, lab environments  
+**Example:**
+```yaml
+validate_certs: false  # Use with caution
+```
+**Tips:**
+- Set to `false` only for dev/lab environments
+- Security risk in production
+- Better solution: add CA cert to trust store
+
+### **`regions`** / **`locations`** / **`datacenters`**
+**Purpose:** Limit queries to specific geographic regions (cloud-specific)  
+**Required:** No  
+**Example:**
+```yaml
+# AWS
+regions:
+  - us-east-1
+  - us-west-2
+
+# Azure
+locations:
+  - eastus
+  - westus2
+```
+
 ## Quick Start
 
 ### 1. Install Required Collections
