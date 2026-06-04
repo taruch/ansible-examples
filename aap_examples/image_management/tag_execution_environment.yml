@@ -1,0 +1,222 @@
+---
+# Playbook to tag Execution Environment images in Ansible Automation Platform 2.6
+#
+# This playbook creates new tags for container images using the OCI Registry API
+# Works with Private Automation Hub or any OCI-compliant registry
+# Does NOT require podman/docker in the execution environment
+#
+# Requirements:
+#   - ansible.builtin.uri module (included in ansible-core)
+#
+# Usage:
+#   ansible-playbook tag_execution_environment.yml \
+#     -e image_name=ee-minimal-rhel9 \
+#     -e source_tag=latest \
+#     -e new_tag=1.0.0
+
+- name: Tag Execution Environment image in AAP using Registry API
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # Private Automation Hub settings
+    ah_host: "{{ lookup('env', 'AH_HOST') }}"
+    ah_username: "{{ lookup('env', 'AH_USERNAME') }}"
+    ah_password: "{{ lookup('env', 'AH_PASSWORD') }}"
+    ah_validate_certs: "{{ lookup('env', 'AH_VERIFY_SSL') | default('false') | bool }}"
+
+    # Image details
+    image_name: "ee-minimal-rhel9"
+    source_tag: "latest"
+    new_tag: "1.0.0"
+
+    registry: "{{ ah_host }}"
+    registry_api: "https://{{ registry }}"
+
+  tasks:
+    - name: Verify required variables are set
+      ansible.builtin.assert:
+        that:
+          - ah_host is defined and ah_host != ''
+          - ah_username is defined and ah_username != ''
+          - ah_password is defined and ah_password != ''
+          - image_name is defined and image_name != ''
+          - source_tag is defined and source_tag != ''
+          - new_tag is defined and new_tag != ''
+        fail_msg: |
+          Missing required variables. Please set:
+            AH_HOST={{ ah_host | default('NOT SET') }}
+            AH_USERNAME={{ ah_username | default('NOT SET') }}
+            AH_PASSWORD={{ 'SET' if ah_password else 'NOT SET' }}
+
+          Or pass via extra vars:
+            -e ah_host=... -e ah_username=... -e ah_password=...
+
+    - name: Display connection info
+      ansible.builtin.debug:
+        msg: |
+          Connecting to: {{ registry_api }}
+          Image: {{ image_name }}
+          Source tag: {{ source_tag }}
+          New tag: {{ new_tag }}
+          Validate certs: {{ ah_validate_certs }}
+
+    - name: Get authentication token from AAP registry
+      ansible.builtin.uri:
+        url: "{{ registry_api }}/token/?service={{ registry }}&scope=repository:{{ image_name }}:pull,push"
+        method: GET
+        user: "{{ ah_username }}"
+        password: "{{ ah_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ ah_validate_certs }}"
+        status_code: [200, 404]
+      register: auth_response
+      ignore_errors: true
+
+    - name: Set auth token (if registry requires token authentication)
+      ansible.builtin.set_fact:
+        registry_token: "{{ auth_response.json.token | default('') }}"
+        use_token_auth: true
+      when:
+        - auth_response is defined
+        - auth_response.status is defined
+        - auth_response.status == 200
+
+    - name: Use basic auth if token endpoint not available
+      ansible.builtin.set_fact:
+        registry_token: ""
+        use_token_auth: false
+      when: registry_token is not defined
+
+    - name: Get manifest for source tag (with token auth)
+      ansible.builtin.uri:
+        url: "{{ registry_api }}/v2/{{ image_name }}/manifests/{{ source_tag }}"
+        method: GET
+        headers:
+          Accept: "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
+          Authorization: "Bearer {{ registry_token }}"
+        validate_certs: "{{ ah_validate_certs }}"
+        return_content: true
+      register: manifest_token
+      when: use_token_auth | default(false)
+
+    - name: Get manifest for source tag (with basic auth)
+      ansible.builtin.uri:
+        url: "{{ registry_api }}/v2/{{ image_name }}/manifests/{{ source_tag }}"
+        method: GET
+        headers:
+          Accept: "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
+        user: "{{ ah_username }}"
+        password: "{{ ah_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ ah_validate_certs }}"
+        return_content: true
+      register: manifest_basic
+      when: not (use_token_auth | default(false))
+
+    - name: Set source manifest from token auth
+      ansible.builtin.set_fact:
+        source_manifest: "{{ manifest_token }}"
+      when:
+        - use_token_auth | default(false)
+        - manifest_token is defined
+        - not manifest_token.skipped | default(false)
+
+    - name: Set source manifest from basic auth
+      ansible.builtin.set_fact:
+        source_manifest: "{{ manifest_basic }}"
+      when:
+        - not (use_token_auth | default(false))
+        - manifest_basic is defined
+        - not manifest_basic.skipped | default(false)
+
+    - name: Extract manifest content type and body
+      ansible.builtin.set_fact:
+        manifest_content_type: "{{ source_manifest.content_type | default(source_manifest.get('content-type', 'application/vnd.docker.distribution.manifest.v2+json')) }}"
+        manifest_json: "{{ source_manifest.json }}"
+
+    - name: Create new tag by uploading manifest (with token auth)
+      ansible.builtin.uri:
+        url: "{{ registry_api }}/v2/{{ image_name }}/manifests/{{ new_tag }}"
+        method: PUT
+        headers:
+          Content-Type: "{{ manifest_content_type }}"
+          Authorization: "Bearer {{ registry_token }}"
+        body_format: json
+        body: "{{ manifest_json }}"
+        validate_certs: "{{ ah_validate_certs }}"
+        status_code: [200, 201]
+      register: put_token
+      when: use_token_auth | default(false)
+
+    - name: Create new tag by uploading manifest (with basic auth)
+      ansible.builtin.uri:
+        url: "{{ registry_api }}/v2/{{ image_name }}/manifests/{{ new_tag }}"
+        method: PUT
+        headers:
+          Content-Type: "{{ manifest_content_type }}"
+        user: "{{ ah_username }}"
+        password: "{{ ah_password }}"
+        force_basic_auth: true
+        body_format: json
+        body: "{{ manifest_json }}"
+        validate_certs: "{{ ah_validate_certs }}"
+        status_code: [200, 201]
+      register: put_basic
+      when: not (use_token_auth | default(false))
+
+    - name: Verify new tag was created (with token auth)
+      ansible.builtin.uri:
+        url: "{{ registry_api }}/v2/{{ image_name }}/manifests/{{ new_tag }}"
+        method: HEAD
+        headers:
+          Accept: "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"
+          Authorization: "Bearer {{ registry_token }}"
+        validate_certs: "{{ ah_validate_certs }}"
+        status_code: [200]
+      register: verify_token
+      when: use_token_auth | default(false)
+
+    - name: Verify new tag was created (with basic auth)
+      ansible.builtin.uri:
+        url: "{{ registry_api }}/v2/{{ image_name }}/manifests/{{ new_tag }}"
+        method: HEAD
+        headers:
+          Accept: "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"
+        user: "{{ ah_username }}"
+        password: "{{ ah_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ ah_validate_certs }}"
+        status_code: [200]
+      register: verify_basic
+      when: not (use_token_auth | default(false))
+
+    - name: Set verify result from token auth
+      ansible.builtin.set_fact:
+        verify_result: "{{ verify_token }}"
+      when:
+        - use_token_auth | default(false)
+        - verify_token is defined
+        - not verify_token.skipped | default(false)
+
+    - name: Set verify result from basic auth
+      ansible.builtin.set_fact:
+        verify_result: "{{ verify_basic }}"
+      when:
+        - not (use_token_auth | default(false))
+        - verify_basic is defined
+        - not verify_basic.skipped | default(false)
+
+    - name: Display success message
+      ansible.builtin.debug:
+        msg: |
+          ✓ Successfully tagged image!
+
+          Registry: {{ registry }}
+          Image: {{ image_name }}
+          Source tag: {{ source_tag }}
+          New tag: {{ new_tag }}
+
+          Full image reference: {{ registry }}/{{ image_name }}:{{ new_tag }}
+
+          Digest: {{ verify_result.docker_content_digest | default('N/A') }}
