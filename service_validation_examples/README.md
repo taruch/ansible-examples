@@ -1,12 +1,12 @@
 # Service Validation
 
-Hourly drift check for a Windows service. If the service is found stopped,
+Hourly drift check for a Windows or Linux service. If the service is found stopped,
 the playbook restarts it and opens a ServiceNow incident describing what
 was done plus the last interactive user on the host (read from Security
 log event 4624).
 
 Designed to run on a schedule against many hosts. The hot path — service
-already running — exits via `end_host` before any non-Windows tasks, so
+already running — exits via `end_host`, so
 healthy hosts complete in seconds and never touch ServiceNow.
 
 ## Files
