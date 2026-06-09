@@ -13,7 +13,7 @@ healthy hosts complete in seconds and never touch ServiceNow.
 
 | File | Purpose |
 |---|---|
-| [`ensure_service.yml`](ensure_service.yml) | Scheduled Windows check. `win_service_info` → end_host if running → `win_service: started` → SNOW incident with last 4624 logon. |
+| [`ensure_win_service.yml`](ensure_service.yml) | Scheduled Windows check. `win_service_info` → end_host if running → `win_service: started` → SNOW incident with last 4624 logon. |
 | [`ensure_linux_service.yml`](ensure_linux_service.yml) | Scheduled Linux check. `systemd_service: started` → end_host if unchanged → SNOW incident with last user from `wtmp`. |
 | [`deploy_service_demo.yml`](deploy_service_demo.yml) | One-shot setup playbook. Installs a fake `AnsibleDemoSvc` you can stop/start to demo drift. Windows → NSSM-wrapped PowerShell loop; Linux → systemd-wrapped bash loop. OS detected per host via `ansible_system`. |
 | [`inventory/demo.yml`](inventory/demo.yml) | Demo inventory (two Windows hosts). |
