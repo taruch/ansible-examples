@@ -65,3 +65,34 @@
     - name: Check ANSIBLE_PYTHON_INTERPRETER environment variable
       debug:
         msg: "ANSIBLE_PYTHON_INTERPRETER: {{ lookup('env', 'ANSIBLE_PYTHON_INTERPRETER') | default('NOT SET') }}"
+
+    - name: Test actual kubernetes.core module (will fail on auth, but shows if requests-oauthlib is found)
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        host: https://dummy-test-host.example.com:6443
+        validate_certs: no
+      register: k8s_test
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Analyze kubernetes.core module test result
+      debug:
+        msg: |
+          Return code: {{ k8s_test.failed | default(false) }}
+          {% if k8s_test.msg is defined %}
+          Message: {{ k8s_test.msg }}
+          {% endif %}
+
+          ANALYSIS:
+          {% if 'requests-oauthlib' in (k8s_test.msg | default('')) %}
+          ❌ FAILED - requests-oauthlib library not found by the module
+          The Python interpreter being used does not have requests-oauthlib installed.
+          {% elif 'Failed to connect' in (k8s_test.msg | default('')) or 'Connection' in (k8s_test.msg | default('')) or 'timed out' in (k8s_test.msg | default('')) %}
+          ✅ SUCCESS - requests-oauthlib was found! Connection failed as expected (dummy host).
+          The library is accessible to the kubernetes.core module.
+          {% elif k8s_test.failed %}
+          ⚠️  UNCLEAR - Module failed with: {{ k8s_test.msg | default('unknown error') }}
+          {% else %}
+          ✅ Unexpected success (shouldn't happen with dummy credentials)
+          {% endif %}
