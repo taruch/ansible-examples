@@ -1,0 +1,67 @@
+---
+- name: Diagnose Python Interpreter Issue
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.12
+  tasks:
+    - name: Show discovered Python interpreter
+      debug:
+        msg: "Discovered interpreter: {{ ansible_facts.python.executable | default('NOT SET') }}"
+
+    - name: Show Python version
+      command: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }} --version"
+      register: python_version
+      changed_when: false
+
+    - name: Display Python version
+      debug:
+        var: python_version.stdout
+
+    - name: Test if requests-oauthlib is available in discovered interpreter
+      command: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }} -c 'import requests_oauthlib; print(requests_oauthlib.__version__)'"
+      register: oauthlib_test
+      failed_when: false
+      changed_when: false
+
+    - name: Show requests-oauthlib test result
+      debug:
+        msg: |
+          Return code: {{ oauthlib_test.rc }}
+          {% if oauthlib_test.rc == 0 %}
+          SUCCESS - requests-oauthlib version: {{ oauthlib_test.stdout }}
+          {% else %}
+          FAILED - requests-oauthlib NOT available in this Python interpreter
+          Error: {{ oauthlib_test.stderr }}
+          {% endif %}
+
+    - name: Check all available Python interpreters
+      shell: |
+        echo "=== Available Python binaries ==="
+        ls -la /usr/bin/python* 2>/dev/null || echo "No python binaries found"
+        echo ""
+        echo "=== Testing /usr/bin/python3.12 ==="
+        if [ -x /usr/bin/python3.12 ]; then
+          /usr/bin/python3.12 -c 'import requests_oauthlib; print("requests-oauthlib available:", requests_oauthlib.__version__)' 2>&1 || echo "NOT available"
+        else
+          echo "python3.12 not found or not executable"
+        fi
+      register: python_check
+      changed_when: false
+
+    - name: Display all Python interpreters check
+      debug:
+        var: python_check.stdout_lines
+
+    - name: Show ansible.cfg being used
+      command: ansible-config dump --only-changed
+      register: ansible_config
+      changed_when: false
+
+    - name: Display active Ansible configuration
+      debug:
+        var: ansible_config.stdout_lines
+
+    - name: Check ANSIBLE_PYTHON_INTERPRETER environment variable
+      debug:
+        msg: "ANSIBLE_PYTHON_INTERPRETER: {{ lookup('env', 'ANSIBLE_PYTHON_INTERPRETER') | default('NOT SET') }}"
