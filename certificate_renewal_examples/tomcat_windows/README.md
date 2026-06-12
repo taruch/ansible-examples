@@ -20,9 +20,10 @@ via Let's Encrypt — no pre-staged `.p12` file required.
    the EE's ephemeral filesystem.
 
 3. **Ship and rotate.** `tomcat_windows_tls` builds a PKCS12 keystore,
-   ships it to `conf/`, opens the Windows firewall for the connector port,
-   re-templates `server.xml`, and restarts Tomcat **only if** the keystore
-   or `server.xml` actually changed.
+   ships it to `conf/`, re-templates `server.xml`, and restarts Tomcat
+   **only if** the keystore or `server.xml` actually changed. (The
+   Windows firewall rule for the connector port is opened by
+   `tomcat_windows_install` at initial bootstrap.)
 
 Tomcat does not hot-reload SSL config — the restart is unavoidable on a
 real renewal — but the play won't restart on no-op runs.
@@ -38,6 +39,53 @@ and run it daily or weekly. Each run:
   and restarts in a single job.
 
 No need for a separate "is it time?" check; the play is the check.
+
+## Splitting check from update (for change-control workflows)
+
+If you need a ticketing step (ServiceNow change request, ITSM approval,
+notification) **between** the "should we renew?" decision and the actual
+renewal, the same logic ships as two playbooks you can chain in an AAP
+workflow:
+
+| Playbook | Purpose | LE traffic? | Restarts Tomcat? |
+|---|---|---|---|
+| [`cert_check.yml`](cert_check.yml) | Probe each host, decide if renewal is needed | No | No |
+| [`cert_renew.yml`](cert_renew.yml) | Issue + ship + restart | Yes | Yes (when keystore changes) |
+| [`renew_tomcat_cert.yml`](renew_tomcat_cert.yml) | Single-shot wrapper that `import_playbook`s both | Yes (when due) | Yes (when due) |
+
+`cert_check.yml` writes these workflow artifacts via `set_stats`:
+
+| Key | Type | Use |
+|---|---|---|
+| `renewal_targets` | list | Hosts that need renewal |
+| `renewal_targets_csv` | string | Same list, comma-separated — drop into the renewal node's `limit` field |
+| `renewal_count` | int | Convenience for conditionals |
+| `renewal_needed` | bool | Gate the CR-creation branch on this |
+
+### AAP workflow shape
+
+```
+┌──────────────────┐    success    ┌──────────────────────────┐    success    ┌────────────────────────────────────────┐
+│ Tomcat Windows / │──(renewal_   ▶│ ServiceNow / Create CR   │──────────────▶│ Tomcat Windows / Renew certs           │
+│ Check certs      │   needed)     │ (yours)                  │               │ (no pre-flight)                        │
+└──────────────────┘               └──────────────────────────┘               │ limit: {{ renewal_targets_csv }}       │
+                                                                              └────────────────────────────────────────┘
+```
+
+- **Conditional path on the CR node**: only follow the success branch from
+  `Check certs` when `renewal_needed` is true. Build that with a workflow
+  approval node or a small "guard" job template that fails when nothing
+  needs renewing — AAP doesn't yet have native expression-conditioned
+  edges in workflows, so use whichever pattern fits your setup.
+- **Limit field on the renewal node**: set to `{{ renewal_targets_csv }}`
+  so the renewal only runs against hosts the check identified.
+- **CR creation playbook** is whatever you already use for SNOW; the
+  upstream artifacts (`renewal_targets`, `renewal_count`) are available
+  to it as extra-vars and can populate the CR description.
+
+`setup.yml` declares all three templates (`Check certs`, `Renew certs (no
+pre-flight)`, and the single-shot `Renew certificate`) — wire your SNOW
+template into a workflow in the AAP UI.
 
 ## Rate limits
 
