@@ -1,19 +1,19 @@
 # Service Validation
 
-Hourly drift check for a Windows service. If the service is found stopped,
+Hourly drift check for a Windows or Linux service. If the service is found stopped,
 the playbook restarts it and opens a ServiceNow incident describing what
 was done plus the last interactive user on the host (read from Security
 log event 4624).
 
 Designed to run on a schedule against many hosts. The hot path — service
-already running — exits via `end_host` before any non-Windows tasks, so
+already running — exits via `end_host`, so
 healthy hosts complete in seconds and never touch ServiceNow.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| [`ensure_service.yml`](ensure_service.yml) | Scheduled Windows check. `win_service_info` → end_host if running → `win_service: started` → SNOW incident with last 4624 logon. |
+| [`ensure_win_service.yml`](ensure_service.yml) | Scheduled Windows check. `win_service_info` → end_host if running → `win_service: started` → SNOW incident with last 4624 logon. |
 | [`ensure_linux_service.yml`](ensure_linux_service.yml) | Scheduled Linux check. `systemd_service: started` → end_host if unchanged → SNOW incident with last user from `wtmp`. |
 | [`deploy_service_demo.yml`](deploy_service_demo.yml) | One-shot setup playbook. Installs a fake `AnsibleDemoSvc` you can stop/start to demo drift. Windows → NSSM-wrapped PowerShell loop; Linux → systemd-wrapped bash loop. OS detected per host via `ansible_system`. |
 | [`inventory/demo.yml`](inventory/demo.yml) | Demo inventory (two Windows hosts). |
