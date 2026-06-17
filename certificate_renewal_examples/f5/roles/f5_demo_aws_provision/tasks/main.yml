@@ -1,0 +1,276 @@
+---
+# Provision F5 BIG-IP VE in AWS for demo purposes
+# All tasks run on localhost (AWS API calls)
+
+- name: Find latest F5 BIG-IP VE PAYG AMI (if not provided)
+  amazon.aws.ec2_ami_info:
+    region: "{{ aws_region }}"
+    owners:
+      - "679593333241"  # F5 Networks AWS account
+    filters:
+      name: "F5 BIGIP-16.* PAYG-Best 1Gbps*"
+      state: available
+  register: bigip_amis
+  when: f5_ami_id is not defined
+  delegate_to: localhost
+
+- name: Select the latest AMI
+  ansible.builtin.set_fact:
+    f5_ami_id: "{{ (bigip_amis.images | sort(attribute='creation_date') | last).image_id }}"
+  when: f5_ami_id is not defined
+
+- name: Display selected AMI
+  ansible.builtin.debug:
+    msg: "Using F5 BIG-IP VE AMI: {{ f5_ami_id }}"
+
+# ========================================================================
+# VPC and Networking
+# ========================================================================
+
+- name: Create VPC for BIG-IP demo (if not using existing)
+  amazon.aws.ec2_vpc_net:
+    region: "{{ aws_region }}"
+    name: "{{ demo_tag }}-vpc"
+    cidr_block: 10.0.0.0/16
+    tags:
+      Name: "{{ demo_tag }}-vpc"
+      Project: "{{ demo_tag }}"
+    state: present
+  register: demo_vpc
+  when: vpc_id is not defined
+  delegate_to: localhost
+
+- name: Set VPC ID
+  ansible.builtin.set_fact:
+    vpc_id: "{{ demo_vpc.vpc.id if demo_vpc is changed else vpc_id }}"
+
+- name: Create Internet Gateway
+  amazon.aws.ec2_vpc_igw:
+    region: "{{ aws_region }}"
+    vpc_id: "{{ vpc_id }}"
+    tags:
+      Name: "{{ demo_tag }}-igw"
+      Project: "{{ demo_tag }}"
+    state: present
+  register: demo_igw
+  delegate_to: localhost
+
+- name: Create public subnet (if not using existing)
+  amazon.aws.ec2_vpc_subnet:
+    region: "{{ aws_region }}"
+    vpc_id: "{{ vpc_id }}"
+    cidr: 10.0.1.0/24
+    az: "{{ aws_region }}a"
+    map_public: true
+    tags:
+      Name: "{{ demo_tag }}-public-subnet"
+      Project: "{{ demo_tag }}"
+    state: present
+  register: demo_subnet
+  when: subnet_id is not defined
+  delegate_to: localhost
+
+- name: Set subnet ID
+  ansible.builtin.set_fact:
+    subnet_id: "{{ demo_subnet.subnet.id if demo_subnet is changed else subnet_id }}"
+
+- name: Create route table for public subnet
+  amazon.aws.ec2_vpc_route_table:
+    region: "{{ aws_region }}"
+    vpc_id: "{{ vpc_id }}"
+    tags:
+      Name: "{{ demo_tag }}-public-rt"
+      Project: "{{ demo_tag }}"
+    subnets:
+      - "{{ subnet_id }}"
+    routes:
+      - dest: 0.0.0.0/0
+        gateway_id: "{{ demo_igw.gateway_id }}"
+    state: present
+  delegate_to: localhost
+
+# ========================================================================
+# Security Group
+# ========================================================================
+
+- name: Create security group for BIG-IP
+  amazon.aws.ec2_security_group:
+    region: "{{ aws_region }}"
+    vpc_id: "{{ vpc_id }}"
+    name: "{{ demo_tag }}-bigip-sg"
+    description: "Security group for F5 BIG-IP demo instance"
+    tags:
+      Name: "{{ demo_tag }}-bigip-sg"
+      Project: "{{ demo_tag }}"
+    rules:
+      # SSH access
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0
+        rule_desc: "SSH access"
+
+      # HTTPS management (8443)
+      - proto: tcp
+        from_port: 8443
+        to_port: 8443
+        cidr_ip: 0.0.0.0/0
+        rule_desc: "BIG-IP management UI"
+
+      # HTTPS traffic (443)
+      - proto: tcp
+        from_port: 443
+        to_port: 443
+        cidr_ip: 0.0.0.0/0
+        rule_desc: "HTTPS virtual server"
+
+      # HTTP traffic (80) - for redirect or plaintext
+      - proto: tcp
+        from_port: 80
+        to_port: 80
+        cidr_ip: 0.0.0.0/0
+        rule_desc: "HTTP virtual server"
+
+      # iControl REST API (443)
+      - proto: tcp
+        from_port: 443
+        to_port: 443
+        cidr_ip: 0.0.0.0/0
+        rule_desc: "iControl REST API"
+    state: present
+  register: bigip_sg
+  delegate_to: localhost
+
+# ========================================================================
+# EC2 Instance
+# ========================================================================
+
+- name: Launch F5 BIG-IP VE EC2 instance
+  amazon.aws.ec2_instance:
+    region: "{{ aws_region }}"
+    name: "{{ demo_tag }}-bigip"
+    instance_type: "{{ f5_instance_type }}"
+    image_id: "{{ f5_ami_id }}"
+    key_name: "{{ aws_key_name }}"
+    vpc_subnet_id: "{{ subnet_id }}"
+    security_groups:
+      - "{{ bigip_sg.group_id }}"
+    network:
+      assign_public_ip: true
+    tags:
+      Name: "{{ demo_tag }}-bigip"
+      Project: "{{ demo_tag }}"
+      Purpose: "F5 certificate renewal demo"
+    wait: true
+    state: running
+  register: bigip_instance
+  delegate_to: localhost
+
+- name: Set BIG-IP instance facts
+  ansible.builtin.set_fact:
+    bigip_instance_id: "{{ bigip_instance.instances[0].instance_id }}"
+    bigip_mgmt_ip: "{{ bigip_instance.instances[0].public_ip_address }}"
+    bigip_public_ip: "{{ bigip_instance.instances[0].public_ip_address }}"
+    bigip_private_ip: "{{ bigip_instance.instances[0].private_ip_address }}"
+
+- name: Display BIG-IP instance details
+  ansible.builtin.debug:
+    msg:
+      - "BIG-IP instance launched"
+      - "Instance ID:       {{ bigip_instance_id }}"
+      - "Public IP:         {{ bigip_public_ip }}"
+      - "Private IP:        {{ bigip_private_ip }}"
+      - "Management URL:    https://{{ bigip_mgmt_ip }}:8443"
+
+# ========================================================================
+# Wait for BIG-IP to initialize
+# ========================================================================
+
+- name: Wait for SSH to become available
+  ansible.builtin.wait_for:
+    host: "{{ bigip_mgmt_ip }}"
+    port: 22
+    delay: 10
+    timeout: 600
+    state: started
+  delegate_to: localhost
+
+- name: Wait for BIG-IP management port (8443) to become available
+  ansible.builtin.wait_for:
+    host: "{{ bigip_mgmt_ip }}"
+    port: 8443
+    delay: 30
+    timeout: 900
+    state: started
+  delegate_to: localhost
+
+- name: Wait for BIG-IP to finish initial setup (mcpd ready)
+  ansible.builtin.uri:
+    url: "https://{{ bigip_mgmt_ip }}:8443/mgmt/tm/sys/available"
+    method: GET
+    user: "{{ f5_admin_user }}"
+    password: "{{ f5_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+    timeout: 30
+  register: bigip_ready
+  until: bigip_ready.status == 200
+  retries: 30
+  delay: 30
+  delegate_to: localhost
+  ignore_errors: true
+
+# If the above fails (BIG-IP not fully ready), try alternate check
+- name: Alternate wait - check tmsh availability
+  ansible.builtin.wait_for:
+    host: "{{ bigip_mgmt_ip }}"
+    port: 443
+    delay: 60
+    timeout: 1200
+    state: started
+  delegate_to: localhost
+  when: bigip_ready is failed
+
+- name: BIG-IP initialization complete
+  ansible.builtin.debug:
+    msg: "BIG-IP is ready at {{ bigip_mgmt_ip }}"
+
+# ========================================================================
+# Cloudflare DNS
+# ========================================================================
+
+- name: Create Cloudflare A record for cert FQDN -> BIG-IP public IP
+  community.general.cloudflare_dns:
+    api_token: "{{ cloudflare_api_token }}"
+    zone: "{{ cloudflare_zone }}"
+    record: "{{ cert_fqdn }}"
+    type: A
+    value: "{{ bigip_public_ip }}"
+    ttl: 60
+    solo: true
+    state: present
+  delegate_to: localhost
+  no_log: true
+
+- name: Save BIG-IP details to inventory
+  ansible.builtin.copy:
+    content: |
+      # Auto-generated F5 BIG-IP demo inventory
+      # Created: {{ ansible_date_time.iso8601 }}
+      all:
+        children:
+          bigip:
+            hosts:
+              {{ cert_fqdn }}:
+                ansible_host: {{ bigip_public_ip }}
+                f5_validate_certs: false
+                clientssl_profile: clientssl_{{ cert_name }}
+                partition: Common
+                # AWS details
+                aws_instance_id: {{ bigip_instance_id }}
+                aws_region: {{ aws_region }}
+                demo_tag: {{ demo_tag }}
+    dest: "{{ playbook_dir }}/inventory/demo_bigip.yml"
+    mode: "0644"
+  delegate_to: localhost

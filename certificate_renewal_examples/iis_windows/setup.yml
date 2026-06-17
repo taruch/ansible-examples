@@ -1,0 +1,164 @@
+---
+# Configuration-as-code for deploying the IIS-on-Windows certificate-
+# renewal solution to Ansible Automation Platform 2.6.
+#
+# Apply with ../../controller_setup/configure_aap.yml (or any wrapper that
+# `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
+#
+# Required pre-existing artifacts in AAP:
+#   - A Machine credential for the Windows hosts. Set its name below in
+#     `windows_machine_credential` so the job templates can reference it.
+#
+# After applying:
+#   1. Open the Cloudflare credential in AAP and paste the actual Cloudflare
+#      API token (left blank intentionally).
+#   2. (Optional) Adjust host IPs in `controller_hosts` below to match your
+#      Windows instances.
+
+# ---------------------------------------------------------------------------
+# Tunables — change these without touching the rest of this file.
+# ---------------------------------------------------------------------------
+windows_machine_credential: "Windows - IIS Demo"   # MUST already exist in AAP
+cloudflare_zone: "example.com"
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+project_scm_branch: "master"
+ee_image: "quay.io/truch/iis-windows-cert-renewal:latest"
+target_organization: "Default"
+
+# ---------------------------------------------------------------------------
+# Custom credential type — Cloudflare API token.
+# Injects both the env var (CLOUDFLARE_API_TOKEN) and the extra-var.
+# ---------------------------------------------------------------------------
+controller_credential_types:
+  - name: "Cloudflare API Token"
+    description: "Cloudflare API token scoped to a single zone (Zone:Zone:Read + Zone:DNS:Edit). Used by letsencrypt_cloudflare for DNS-01 challenges."
+    kind: "cloud"
+    inputs:
+      fields:
+        - id: cloudflare_api_token
+          type: string
+          label: API Token
+          secret: true
+      required:
+        - cloudflare_api_token
+    injectors:
+      env:
+        CLOUDFLARE_API_TOKEN: !unsafe '{{ cloudflare_api_token }}'
+      extra_vars:
+        cloudflare_api_token: !unsafe '{{ cloudflare_api_token }}'
+
+# ---------------------------------------------------------------------------
+# Credentials — Cloudflare only. Machine credential is assumed pre-existing.
+# Token left blank; populate after import via the AAP UI.
+# ---------------------------------------------------------------------------
+aap_credentials:
+  - name: "Cloudflare - {{ cloudflare_zone }}"
+    description: "Cloudflare API token, zone-scoped to {{ cloudflare_zone }}"
+    credential_type: "Cloudflare API Token"
+    organization: "{{ target_organization }}"
+    inputs:
+      cloudflare_api_token: ''   # paste real token in AAP UI after deploy
+
+# ---------------------------------------------------------------------------
+# Execution Environment — Quay-hosted public image.
+# ---------------------------------------------------------------------------
+controller_execution_environments:
+  - name: "IIS Windows Cert Renewal EE"
+    description: "EE with ansible.windows, community.windows, community.crypto, community.general plus pywinrm[credssp] + cryptography."
+    image: "{{ ee_image }}"
+    pull: "missing"
+    organization: "{{ target_organization }}"
+
+# ---------------------------------------------------------------------------
+# Project — git-synced from this repository.
+# ---------------------------------------------------------------------------
+controller_projects:
+  - name: "IIS Windows Cert Renewal"
+    description: "IIS-on-Windows certificate renewal example (Pattern A: in-band LE issuance)."
+    organization: "{{ target_organization }}"
+    scm_type: "git"
+    scm_url: "{{ project_scm_url }}"
+    scm_branch: "{{ project_scm_branch }}"
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: true
+    allow_override: false
+
+# ---------------------------------------------------------------------------
+# Inventory + hosts + groups.
+# ---------------------------------------------------------------------------
+controller_inventories:
+  - name: "IIS Windows Demo"
+    description: "Windows hosts running IIS for the cert-renewal demo. Inventory hostname = cert FQDN; ansible_host = public IP."
+    organization: "{{ target_organization }}"
+    variables:
+      ansible_connection: winrm
+      ansible_port: 5986
+      ansible_winrm_transport: credssp
+      ansible_winrm_server_cert_validation: ignore
+      ansible_user: Administrator
+
+controller_groups:
+  - name: iis_windows_demo
+    inventory: "IIS Windows Demo"
+
+controller_hosts:
+  - name: iis-win01.example.com
+    inventory: "IIS Windows Demo"
+    variables:
+      ansible_host: 192.0.2.10  # Update with your Windows host IP
+
+# ---------------------------------------------------------------------------
+# Job templates.
+# Two templates: initial bootstrap + recurring renewal.
+# ---------------------------------------------------------------------------
+controller_templates:
+  - name: "IIS Windows / Bootstrap demo host"
+    description: "Initial demo bootstrap: register Cloudflare A record, install IIS, issue LE cert, configure HTTPS binding. Runs against ALL hosts in iis_windows_demo."
+    organization: "{{ target_organization }}"
+    project: "IIS Windows Cert Renewal"
+    inventory: "IIS Windows Demo"
+    playbook: "certificate_renewal_examples/iis_windows/demo_host_init.yml"
+    execution_environment: "IIS Windows Cert Renewal EE"
+    credentials:
+      - "Cloudflare - {{ cloudflare_zone }}"
+      - "{{ windows_machine_credential }}"
+    extra_vars: |
+      cloudflare_zone: {{ cloudflare_zone }}
+      acme_env: production
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    allow_simultaneous: false
+
+  - name: "IIS Windows / Renew certificate"
+    description: "Pattern A renewal: pre-flight probes the live cert and ends play if > cert_remaining_days from expiry. Otherwise re-issues via LE, imports to cert store, and updates IIS binding. Idempotent — safe to schedule."
+    organization: "{{ target_organization }}"
+    project: "IIS Windows Cert Renewal"
+    inventory: "IIS Windows Demo"
+    playbook: "certificate_renewal_examples/iis_windows/renew_iis_cert.yml"
+    execution_environment: "IIS Windows Cert Renewal EE"
+    credentials:
+      - "Cloudflare - {{ cloudflare_zone }}"
+      - "{{ windows_machine_credential }}"
+    extra_vars: |
+      cloudflare_zone: {{ cloudflare_zone }}
+      acme_env: production
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    allow_simultaneous: false
+
+# ---------------------------------------------------------------------------
+# Schedule — runs the renewal template daily.
+# ---------------------------------------------------------------------------
+controller_schedules:
+  - name: "IIS Windows / Daily renewal check"
+    description: "Daily idempotent check — runs the renewal play, which no-ops unless a cert is close to expiry."
+    unified_job_template: "IIS Windows / Renew certificate"
+    rrule: "DTSTART;TZID=Etc/UTC:20260602T080000 RRULE:FREQ=DAILY;INTERVAL=1"
+    enabled: true

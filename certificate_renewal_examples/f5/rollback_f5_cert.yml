@@ -1,0 +1,91 @@
+---
+# Rollback F5 BIG-IP SSL profile to a previous certificate
+#
+# Usage:
+#   ansible-playbook rollback_f5_cert.yml \
+#     -i inventory/hosts.yml \
+#     -e @secrets.yml \
+#     -e previous_cert_name=bigip_demo_example_com_20260520
+#
+# Required vars:
+#   previous_cert_name    Base name of the versioned cert objects (without .crt/.key suffix)
+#   f5_user               BIG-IP admin username
+#   f5_password           BIG-IP admin password
+
+- name: Rollback F5 BIG-IP SSL certificate
+  hosts: bigip
+  gather_facts: false
+  connection: local
+  vars:
+    cert_name: "{{ cert_fqdn | default(inventory_hostname) | replace('.', '_') }}"
+    partition: "{{ f5_partition | default('Common') }}"
+    clientssl_profile: "{{ f5_clientssl_profile | default('clientssl_' + cert_name) }}"
+
+    provider:
+      server: "{{ ansible_host | default(inventory_hostname) }}"
+      server_port: "{{ f5_server_port | default(443) }}"
+      user: "{{ f5_user }}"
+      password: "{{ f5_password }}"
+      validate_certs: "{{ f5_validate_certs | default(true) }}"
+      transport: rest
+
+  pre_tasks:
+    - name: Verify previous_cert_name is provided
+      ansible.builtin.assert:
+        that:
+          - previous_cert_name is defined
+          - previous_cert_name | length > 0
+        fail_msg: "Provide -e previous_cert_name=<versioned_cert_base_name>"
+
+    - name: Query BIG-IP to confirm the previous cert exists
+      f5networks.f5_modules.bigip_command:
+        commands:
+          - "tmsh list sys file ssl-cert {{ previous_cert_name }}.crt"
+        provider: "{{ provider }}"
+      register: cert_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if the previous cert doesn't exist on BIG-IP
+      ansible.builtin.fail:
+        msg: "Certificate {{ previous_cert_name }}.crt not found on BIG-IP {{ provider.server }}"
+      when: cert_check.rc != 0
+
+  tasks:
+    - name: Revert client-SSL profile to previous cert/key/chain
+      f5networks.f5_modules.bigip_profile_client_ssl:
+        name: "{{ clientssl_profile }}"
+        partition: "{{ partition }}"
+        cert_key_chain:
+          - cert: "{{ previous_cert_name }}.crt"
+            key: "{{ previous_cert_name }}.key"
+            chain: "{{ previous_cert_name }}_chain.crt"
+        state: present
+        provider: "{{ provider }}"
+      register: rollback
+
+    - name: Verify the profile now references the previous cert
+      f5networks.f5_modules.bigip_command:
+        commands:
+          - "tmsh list ltm profile client-ssl {{ clientssl_profile }} cert-key-chain"
+        provider: "{{ provider }}"
+      register: verify
+      changed_when: false
+
+    - name: Show the live profile binding
+      ansible.builtin.debug:
+        var: verify.stdout_lines
+
+    - name: Save running config
+      f5networks.f5_modules.bigip_config:
+        save: true
+        provider: "{{ provider }}"
+      when: rollback is changed
+
+    - name: Rollback summary
+      ansible.builtin.debug:
+        msg:
+          - "Rollback complete!"
+          - "F5 BIG-IP:      {{ provider.server }}"
+          - "SSL Profile:    {{ clientssl_profile }}"
+          - "Reverted to:    {{ previous_cert_name }}.crt"

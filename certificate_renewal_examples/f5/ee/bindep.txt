@@ -1,0 +1,20 @@
+# System-level dependencies for F5 certificate renewal EE
+
+python3-devel [platform:rpm]
+python3-dev [platform:dpkg]
+
+# Required for cryptography Python package
+libffi-devel [platform:rpm]
+libffi-dev [platform:dpkg]
+
+# OpenSSL for certificate operations
+openssl-devel [platform:rpm]
+libssl-dev [platform:dpkg]
+
+# Git for Ansible Galaxy
+git [platform:rpm]
+git [platform:dpkg]
+
+# Network tools
+iputils [platform:rpm]
+iproute2 [platform:dpkg]

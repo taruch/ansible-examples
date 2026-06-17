@@ -1,0 +1,29 @@
+---
+# IIS site settings
+iis_site_name: "Default Web Site"
+iis_binding_port: 443
+
+# Cert identity. cert_fqdn is required from the caller.
+cert_name: "{{ cert_fqdn | replace('.', '_') }}"
+
+# Certificate password for PFX. Override via a Vault credential in production.
+cert_password: "{{ vault_cert_password | default('changeit') }}"
+
+# Where letsencrypt_cloudflare dropped the cert artifacts on the control node.
+acme_work_dir: "{{ playbook_dir }}/.acme"
+cert_key_path: "{{ acme_work_dir }}/{{ cert_name }}.key"
+cert_path: "{{ acme_work_dir }}/{{ cert_name }}.crt"
+chain_path: "{{ acme_work_dir }}/{{ cert_name }}.chain.pem"
+
+# PFX certificate bundle staging on the control node
+pfx_local_path: "{{ playbook_dir }}/files/{{ cert_name }}.pfx"
+
+# Temporary location for PFX on Windows (will be deleted after import)
+pfx_remote_temp_path: "C:\\Windows\\Temp\\{{ cert_name }}.pfx"
+
+# ACME directory — passed through so the verification step knows whether to
+# trust the live cert (LE staging is not in the public trust store).
+acme_directory: "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+# Required from the caller:
+#   cert_fqdn  - FQDN of the cert (used for certificate import and verification)

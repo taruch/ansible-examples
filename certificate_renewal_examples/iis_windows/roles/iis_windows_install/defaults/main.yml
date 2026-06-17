@@ -1,0 +1,6 @@
+---
+# IIS site configuration
+iis_site_name: "Default Web Site"
+
+# Required from caller:
+#   cert_fqdn - FQDN for the demo site (used in default web page)

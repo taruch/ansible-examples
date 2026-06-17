@@ -1,0 +1,42 @@
+{% if (current_project_index | default(0)) == 0 %}
+---
+eda_projects:
+{% endif %}
+  - name: "{{ current_projects_asset_value.name }}"
+    description: "{{ template_overrides_resources.eda_project[current_projects_asset_value.name].description
+                     | default(template_overrides_global.eda_project.description)
+                     | default(current_projects_asset_value.description) }}"
+    organization: "{{ current_projects_asset_value.organization_id
+                      | default(organization if organization != 'Default'
+                                else 'ToDo: The project \'' + current_projects_asset_value.name + '\' must have an organization') }}"
+{% if template_overrides_resources.eda_project[current_projects_asset_value.name].scm_type is defined
+      or template_overrides_global.eda_project.scm_type is defined
+      or current_projects_asset_value.scm_type %}
+    scm_type: "{{ template_overrides_resources.eda_project[current_projects_asset_value.name].scm_type
+                  | default(template_overrides_global.eda_project.scm_type)
+                  | default(current_projects_asset_value.scm_type) }}"
+{% if template_overrides_resources.eda_project[current_projects_asset_value.name].scm_credential is defined
+      or template_overrides_global.eda_scm_credential is defined
+      or current_projects_asset_value.summary_fields.credential is defined %}
+    scm_credential: "{{ template_overrides_resources.eda_project[current_projects_asset_value.name].scm_credential
+                        | default(template_overrides_global.eda_scm_credential)
+                        | default(current_projects_asset_value.summary_fields.credential.name) }}"
+{% endif %}
+    scm_branch: "{{ template_overrides_resources.eda_project[current_projects_asset_value.name].scm_branch
+                    | default(template_overrides_global.eda_project.scm_branch)
+                    | default(current_projects_asset_value.scm_branch) }}"
+    scm_refspec: "{{ template_overrides_resources.eda_project[current_projects_asset_value.name].scm_refspec
+                     | default(template_overrides_global.eda_project.scm_refspec)
+                     | default(current_projects_asset_value.scm_refspec) }}"
+{% endif %}
+{% if is_aap and
+      (template_overrides_resources.eda_project[current_projects_asset_value.name].default_environment is defined
+      or template_overrides_global.eda_project.default_environment is defined
+      or current_job_templates_asset_value.summary_fields.default_environment is defined) %}
+    default_environment: "{{ template_overrides_resources.eda_project[current_projects_asset_value.name].default_environment
+                             | default(template_overrides_global.eda_project.default_environment)
+                             | default(current_job_templates_asset_value.summary_fields.default_environment.name) }}"
+{% endif %}
+{% if last_project | default(true) | bool %}
+...
+{% endif %}

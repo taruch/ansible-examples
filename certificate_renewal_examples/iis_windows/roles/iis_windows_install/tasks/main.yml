@@ -1,0 +1,68 @@
+---
+- name: Install IIS Web-Server feature
+  ansible.windows.win_feature:
+    name: Web-Server
+    state: present
+    include_management_tools: true
+  register: iis_install
+
+- name: Install IIS Management Console
+  ansible.windows.win_feature:
+    name: Web-Mgmt-Console
+    state: present
+
+- name: Install ASP.NET 4.8
+  ansible.windows.win_feature:
+    name: Web-Asp-Net45
+    state: present
+
+- name: Ensure IIS service is running
+  ansible.windows.win_service:
+    name: W3SVC
+    state: started
+    start_mode: auto
+
+- name: Create a simple default web page
+  ansible.windows.win_copy:
+    content: |
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>IIS Demo</title>
+          <style>
+              body { font-family: Arial, sans-serif; margin: 50px; }
+              h1 { color: #0078d4; }
+          </style>
+      </head>
+      <body>
+          <h1>Hello from IIS on Windows!</h1>
+          <p>This is a demo site for Let's Encrypt certificate renewal.</p>
+          <p>Server: {{ ansible_hostname }}</p>
+          <p>FQDN: {{ cert_fqdn }}</p>
+      </body>
+      </html>
+    dest: 'C:\inetpub\wwwroot\index.html'
+
+- name: Ensure Default Web Site is started
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration
+    Start-WebSite -Name "{{ iis_site_name }}"
+  changed_when: false
+
+- name: Open HTTP port 80 in Windows Firewall
+  community.windows.win_firewall_rule:
+    name: "IIS HTTP 80"
+    localport: 80
+    action: allow
+    direction: in
+    protocol: tcp
+    profiles: [domain, private, public]
+    state: present
+    enabled: true
+
+- name: IIS installation complete
+  ansible.builtin.debug:
+    msg:
+      - "IIS installed and configured"
+      - "Default site: {{ iis_site_name }}"
+      - "HTTP access: http://{{ cert_fqdn }}/"

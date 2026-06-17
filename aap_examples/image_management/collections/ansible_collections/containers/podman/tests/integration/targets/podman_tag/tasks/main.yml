@@ -1,0 +1,56 @@
+---
+- name: Test podman tag
+  block:
+    - name: Pull image
+      containers.podman.podman_image:
+        executable: "{{ test_executable | default('podman') }}"
+        name: docker.io/library/alpine
+
+    - name: Tag image
+      containers.podman.podman_tag:
+        executable: "{{ test_executable | default('podman') }}"
+        image: docker.io/library/alpine
+        target_names:
+          - openjdk8
+          - jdk8
+      register: tag_result
+
+    - name: Tag image again to test idempotency
+      containers.podman.podman_tag:
+        executable: "{{ test_executable | default('podman') }}"
+        image: docker.io/library/alpine
+        target_names:
+          - openjdk8
+          - jdk8
+      register: tag_result_idempotency
+
+    - name: Check idempotency
+      assert:
+        that:
+          - tag_result.changed == true
+          - tag_result_idempotency.changed == false
+
+    - name: Get tagged image info
+      containers.podman.podman_image_info:
+        executable: "{{ test_executable | default('podman') }}"
+        name: docker.io/library/alpine
+      register: tagged_image_result
+
+    - name: Check results
+      assert:
+        that:
+          - tagged_image_result.images | length == 1
+          - tagged_image_result.images[0]['RepoTags'] | select('match', 'docker.io/library/alpine.*') | list | length > 0
+          - "'localhost/openjdk8:latest' in tagged_image_result.images[0]['RepoTags']"
+          - "'localhost/jdk8:latest' in tagged_image_result.images[0]['RepoTags']"
+
+  always:
+    - name: Cleanup image
+      containers.podman.podman_image:
+        executable: "{{ test_executable | default('podman') }}"
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - docker.io/library/alpine
+        - localhost/openjdk8
+        - localhost/jdk8

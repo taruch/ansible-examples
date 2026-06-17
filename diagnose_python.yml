@@ -1,0 +1,98 @@
+---
+- name: Diagnose Python Interpreter Issue
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.12
+  tasks:
+    - name: Show discovered Python interpreter
+      debug:
+        msg: "Discovered interpreter: {{ ansible_facts.python.executable | default('NOT SET') }}"
+
+    - name: Show Python version
+      command: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }} --version"
+      register: python_version
+      changed_when: false
+
+    - name: Display Python version
+      debug:
+        var: python_version.stdout
+
+    - name: Test if requests-oauthlib is available in discovered interpreter
+      command: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }} -c 'import requests_oauthlib; print(requests_oauthlib.__version__)'"
+      register: oauthlib_test
+      failed_when: false
+      changed_when: false
+
+    - name: Show requests-oauthlib test result
+      debug:
+        msg: |
+          Return code: {{ oauthlib_test.rc }}
+          {% if oauthlib_test.rc == 0 %}
+          SUCCESS - requests-oauthlib version: {{ oauthlib_test.stdout }}
+          {% else %}
+          FAILED - requests-oauthlib NOT available in this Python interpreter
+          Error: {{ oauthlib_test.stderr }}
+          {% endif %}
+
+    - name: Check all available Python interpreters
+      shell: |
+        echo "=== Available Python binaries ==="
+        ls -la /usr/bin/python* 2>/dev/null || echo "No python binaries found"
+        echo ""
+        echo "=== Testing /usr/bin/python3.12 ==="
+        if [ -x /usr/bin/python3.12 ]; then
+          /usr/bin/python3.12 -c 'import requests_oauthlib; print("requests-oauthlib available:", requests_oauthlib.__version__)' 2>&1 || echo "NOT available"
+        else
+          echo "python3.12 not found or not executable"
+        fi
+      register: python_check
+      changed_when: false
+
+    - name: Display all Python interpreters check
+      debug:
+        var: python_check.stdout_lines
+
+    - name: Show ansible.cfg being used
+      command: ansible-config dump --only-changed
+      register: ansible_config
+      changed_when: false
+
+    - name: Display active Ansible configuration
+      debug:
+        var: ansible_config.stdout_lines
+
+    - name: Check ANSIBLE_PYTHON_INTERPRETER environment variable
+      debug:
+        msg: "ANSIBLE_PYTHON_INTERPRETER: {{ lookup('env', 'ANSIBLE_PYTHON_INTERPRETER') | default('NOT SET') }}"
+
+    - name: Test actual kubernetes.core module (will fail on auth, but shows if requests-oauthlib is found)
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        host: https://dummy-test-host.example.com:6443
+        validate_certs: no
+      register: k8s_test
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Analyze kubernetes.core module test result
+      debug:
+        msg: |
+          Return code: {{ k8s_test.failed | default(false) }}
+          {% if k8s_test.msg is defined %}
+          Message: {{ k8s_test.msg }}
+          {% endif %}
+
+          ANALYSIS:
+          {% if 'requests-oauthlib' in (k8s_test.msg | default('')) %}
+          ❌ FAILED - requests-oauthlib library not found by the module
+          The Python interpreter being used does not have requests-oauthlib installed.
+          {% elif 'Failed to connect' in (k8s_test.msg | default('')) or 'Connection' in (k8s_test.msg | default('')) or 'timed out' in (k8s_test.msg | default('')) %}
+          ✅ SUCCESS - requests-oauthlib was found! Connection failed as expected (dummy host).
+          The library is accessible to the kubernetes.core module.
+          {% elif k8s_test.failed %}
+          ⚠️  UNCLEAR - Module failed with: {{ k8s_test.msg | default('unknown error') }}
+          {% else %}
+          ✅ Unexpected success (shouldn't happen with dummy credentials)
+          {% endif %}

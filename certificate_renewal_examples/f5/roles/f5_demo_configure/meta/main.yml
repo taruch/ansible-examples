@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  author: Todd Ruch
+  description: Configure F5 BIG-IP demo environment with Let's Encrypt cert
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+  galaxy_tags:
+    - f5
+    - bigip
+    - ssl
+    - tls
+    - letsencrypt
+    - demo
+
+dependencies:
+  - role: letsencrypt_cloudflare
+  - role: f5_tls

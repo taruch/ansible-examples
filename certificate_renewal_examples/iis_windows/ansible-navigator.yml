@@ -1,0 +1,9 @@
+---
+ansible-navigator:
+  execution-environment:
+    image: quay.io/truch/iis-windows-cert-renewal:latest
+    pull:
+      policy: missing
+  mode: stdout
+  playbook-artifact:
+    enable: false

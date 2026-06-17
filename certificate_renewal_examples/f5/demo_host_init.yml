@@ -1,0 +1,100 @@
+---
+# Stand up the F5 BIG-IP certificate-renewal demo environment in AWS.
+#
+# This playbook:
+#   1. Provisions F5 BIG-IP VE EC2 instance in AWS
+#   2. Waits for BIG-IP to finish initializing
+#   3. Configures initial BIG-IP objects (pool, virtual server, SSL profile)
+#   4. Creates Cloudflare A record pointing to BIG-IP
+#   5. Issues initial Let's Encrypt certificate
+#   6. Imports cert to BIG-IP and configures SSL profile
+#
+# Prerequisites:
+#   - AWS credentials configured (via env vars, ~/.aws/credentials, or IAM role)
+#   - Cloudflare API token with Zone:Zone:Read + Zone:DNS:Edit
+#   - F5 BIG-IP VE subscription in AWS Marketplace (or use BYOL AMI)
+#   - SSH key pair in AWS for initial access
+#
+# Required vars:
+#   cloudflare_zone         Cloudflare-managed zone (e.g. example.com)
+#   cloudflare_api_token    Cloudflare API token
+#   aws_region              AWS region (e.g. us-east-1)
+#   aws_key_name            SSH key pair name in AWS
+#   f5_admin_password       Initial admin password for BIG-IP (will be set)
+#
+# Optional vars:
+#   cert_fqdn               Defaults to bigip-demo.{{ cloudflare_zone }}
+#   acme_env                staging (default) or production
+#   f5_instance_type        t3.xlarge (default) — BIG-IP VE requires >= 2vCPU, 8GB RAM
+#   f5_ami_id               Auto-detected if not provided (latest F5 PAYG 1Gbps)
+#   vpc_id                  Use existing VPC (or creates new)
+#   subnet_id               Use existing subnet (or creates new)
+#   demo_tag                Demo identifier for resource tagging (default: f5-cert-demo)
+#
+# Usage:
+#   ansible-navigator run demo_host_init.yml \
+#     --eei quay.io/truch/f5-cert-renewal:1.0 \
+#     -e @secrets.yml \
+#     -e cloudflare_zone=example.com \
+#     -e aws_region=us-east-1 \
+#     -e aws_key_name=my-keypair \
+#     -e f5_admin_password='StrongPassword123!'
+
+- name: Provision F5 BIG-IP VE demo instance in AWS
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cert_fqdn: "{{ demo_fqdn | default('bigip-demo.' + cloudflare_zone) }}"
+    cert_name: "{{ cert_fqdn | replace('.', '_') }}"
+    demo_tag: "{{ demo_identifier | default('f5-cert-demo') }}"
+    f5_instance_type: "{{ bigip_instance_type | default('t3.xlarge') }}"
+    f5_admin_user: admin
+    # BIG-IP VE requires >= 2 vCPU, 8GB RAM — t3.xlarge is minimum for production
+    # Use t3.2xlarge for better performance
+
+  pre_tasks:
+    - name: Verify required inputs
+      ansible.builtin.assert:
+        that:
+          - cloudflare_zone is defined and cloudflare_zone | length > 0
+          - cloudflare_api_token is defined and cloudflare_api_token | length > 0
+          - aws_region is defined and aws_region | length > 0
+          - aws_key_name is defined and aws_key_name | length > 0
+          - f5_admin_password is defined and f5_admin_password | length > 0
+        fail_msg: >-
+          Provide: cloudflare_zone, cloudflare_api_token, aws_region,
+          aws_key_name, and f5_admin_password
+
+  roles:
+    - role: f5_demo_aws_provision
+    - role: f5_demo_configure
+
+  post_tasks:
+    - name: Demo environment ready
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "F5 BIG-IP demo environment is ready!"
+          - "=========================================="
+          - ""
+          - "BIG-IP Management IP: {{ bigip_mgmt_ip }}"
+          - "BIG-IP Public IP:     {{ bigip_public_ip }}"
+          - "Cert FQDN:            {{ cert_fqdn }}"
+          - "Admin username:       {{ f5_admin_user }}"
+          - "Admin password:       {{ f5_admin_password }}"
+          - ""
+          - "Management UI:        https://{{ bigip_mgmt_ip }}:8443"
+          - "Virtual Server:       https://{{ cert_fqdn }}"
+          - ""
+          - "Initial cert issued:  {{ 'STAGING' if acme_env == 'staging' else 'PRODUCTION' }}"
+          - ""
+          - "Next steps:"
+          - "  1. Verify cert at https://{{ cert_fqdn }}"
+          - "  2. Run renew_f5_cert_v2.yml to test renewal flow"
+          - "  3. Run demo_teardown.yml when done to clean up AWS resources"
+          - ""
+          - "Renewal command:"
+          - "  ansible-navigator run renew_f5_cert_v2.yml \\"
+          - "    -e @secrets.yml \\"
+          - "    -e cloudflare_zone={{ cloudflare_zone }} \\"
+          - "    -e bigip_host={{ bigip_public_ip }}"

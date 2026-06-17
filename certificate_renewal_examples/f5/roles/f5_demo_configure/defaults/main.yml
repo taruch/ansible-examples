@@ -1,0 +1,13 @@
+---
+# Defaults for f5_demo_configure role
+
+# Backend pool member (demo purposes)
+demo_backend_host: httpbin.org
+demo_backend_port: 80
+
+# Certificate settings
+acme_env: staging  # Use staging by default to avoid rate limits
+cert_remaining_days: 999  # Force initial issuance
+
+# BIG-IP partition
+partition: Common

@@ -1,0 +1,174 @@
+---
+# AAP configuration-as-code for F5 BIG-IP certificate renewal
+#
+# Import this via ../../controller_setup/configure_aap.yml:
+#
+#   ansible-navigator run ../../controller_setup/configure_aap.yml \
+#     -e aap_hostname=aap.example.com \
+#     -e aap_username=admin \
+#     -e aap_password='...' \
+#     -e aap_validate_certs=true
+#
+# Tunables (override with -e):
+
+cloudflare_credential_name: "Cloudflare API Token (F5 Demo)"
+f5_credential_name: "F5 BIG-IP Admin (Demo)"
+ee_image: "quay.io/truch/f5-cert-renewal:1.0"
+git_url: "https://github.com/taruch/ansible-examples.git"
+git_branch: "master"
+organization_name: "Default"
+inventory_name: "F5 BIG-IP Demo"
+project_name: "F5 Certificate Renewal"
+
+# ========================================================================
+# Credential Types
+# ========================================================================
+
+controller_credential_types:
+  - name: Cloudflare API Token
+    description: "Injects cloudflare_api_token as both env var and extra-var"
+    kind: cloud
+    inputs:
+      fields:
+        - id: cloudflare_api_token
+          type: string
+          label: Cloudflare API Token
+          secret: true
+          help_text: "Token with Zone:Zone:Read + Zone:DNS:Edit permissions"
+    injectors:
+      env:
+        CLOUDFLARE_API_TOKEN: "{{ cloudflare_api_token }}"
+      extra_vars:
+        cloudflare_api_token: "{{ cloudflare_api_token }}"
+
+  - name: F5 BIG-IP Credentials
+    description: "Injects f5_user and f5_password as extra-vars"
+    kind: cloud
+    inputs:
+      fields:
+        - id: f5_user
+          type: string
+          label: F5 Username
+          default: admin
+        - id: f5_password
+          type: string
+          label: F5 Password
+          secret: true
+    injectors:
+      extra_vars:
+        f5_user: "{{ f5_user }}"
+        f5_password: "{{ f5_password }}"
+
+# ========================================================================
+# Credentials
+# ========================================================================
+
+controller_credentials:
+  - name: "{{ cloudflare_credential_name }}"
+    description: "Cloudflare API token for DNS-01 ACME challenges"
+    organization: "{{ organization_name }}"
+    credential_type: Cloudflare API Token
+    inputs:
+      cloudflare_api_token: ""  # USER MUST FILL THIS IN AAP UI
+
+  - name: "{{ f5_credential_name }}"
+    description: "F5 BIG-IP admin credentials"
+    organization: "{{ organization_name }}"
+    credential_type: F5 BIG-IP Credentials
+    inputs:
+      f5_user: admin
+      f5_password: ""  # USER MUST FILL THIS IN AAP UI
+
+# ========================================================================
+# Execution Environment
+# ========================================================================
+
+controller_execution_environments:
+  - name: F5 Certificate Renewal EE
+    image: "{{ ee_image }}"
+    description: "EE with f5networks.f5_modules, community.crypto, community.general"
+    pull: missing
+    organization: "{{ organization_name }}"
+
+# ========================================================================
+# Project
+# ========================================================================
+
+controller_projects:
+  - name: "{{ project_name }}"
+    description: "F5 BIG-IP certificate renewal via Let's Encrypt"
+    organization: "{{ organization_name }}"
+    scm_type: git
+    scm_url: "{{ git_url }}"
+    scm_branch: "{{ git_branch }}"
+    scm_update_on_launch: true
+    scm_update_cache_timeout: 86400
+    default_environment: F5 Certificate Renewal EE
+
+# ========================================================================
+# Inventory
+# ========================================================================
+
+controller_inventories:
+  - name: "{{ inventory_name }}"
+    description: "F5 BIG-IP devices for certificate renewal demo"
+    organization: "{{ organization_name }}"
+
+controller_groups:
+  - name: bigip
+    description: "F5 BIG-IP load balancers"
+    inventory: "{{ inventory_name }}"
+    variables:
+      f5_validate_certs: false  # Set true if your BIG-IP has valid mgmt cert
+
+controller_hosts:
+  - name: bigip-demo.example.com
+    description: "Demo F5 BIG-IP instance"
+    inventory: "{{ inventory_name }}"
+    variables:
+      ansible_host: 10.1.1.100  # CHANGE THIS to your BIG-IP management IP
+      clientssl_profile: clientssl_demo_example_com
+      partition: Common
+
+# Add the host to the bigip group
+controller_groups:
+  - name: bigip
+    inventory: "{{ inventory_name }}"
+    hosts:
+      - bigip-demo.example.com
+
+# ========================================================================
+# Job Templates
+# ========================================================================
+
+controller_templates:
+  - name: "F5 / Renew certificate"
+    description: "Renew F5 BIG-IP SSL cert via Let's Encrypt (DNS-01)"
+    organization: "{{ organization_name }}"
+    project: "{{ project_name }}"
+    inventory: "{{ inventory_name }}"
+    playbook: certificate_renewal_examples/f5/renew_f5_cert_v2.yml
+    execution_environment: F5 Certificate Renewal EE
+    credentials:
+      - "{{ cloudflare_credential_name }}"
+      - "{{ f5_credential_name }}"
+    extra_vars:
+      cloudflare_zone: example.com  # CHANGE THIS to your zone
+      acme_env: staging  # Change to 'production' for real certs
+      cert_remaining_days: 30
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    survey_enabled: false
+    concurrent_jobs_enabled: false
+    verbosity: 0
+
+# ========================================================================
+# Schedules
+# ========================================================================
+
+controller_schedules:
+  - name: "F5 / Daily cert renewal check"
+    description: "Runs daily; no-ops if cert has >30 days left"
+    unified_job_template: "F5 / Renew certificate"
+    rrule: "DTSTART:20260602T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+    enabled: true

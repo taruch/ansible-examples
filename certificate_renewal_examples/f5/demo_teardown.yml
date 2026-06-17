@@ -1,0 +1,212 @@
+---
+# Tear down the F5 BIG-IP demo environment in AWS
+#
+# This playbook removes all resources created by demo_host_init.yml:
+#   - EC2 instance (BIG-IP VE)
+#   - Security group
+#   - Subnet
+#   - Route table
+#   - Internet gateway
+#   - VPC
+#   - Cloudflare DNS record
+#
+# Usage:
+#   ansible-navigator run demo_teardown.yml \
+#     -e @secrets.yml \
+#     -e cloudflare_zone=example.com \
+#     -e aws_region=us-east-1 \
+#     -e demo_tag=f5-cert-demo
+#
+# Required vars:
+#   aws_region          AWS region where resources were created
+#   cloudflare_zone     Cloudflare zone (to remove DNS record)
+#   cloudflare_api_token  Cloudflare API token
+#
+# Optional vars:
+#   demo_tag            Demo identifier (default: f5-cert-demo)
+#   cert_fqdn           FQDN of the cert (default: bigip-demo.{{ cloudflare_zone }})
+#   skip_cloudflare     Set to true to skip Cloudflare DNS cleanup
+
+- name: Tear down F5 BIG-IP demo environment
+  hosts: localhost
+  gather_facts: false
+  vars:
+    demo_tag: "{{ demo_identifier | default('f5-cert-demo') }}"
+    cert_fqdn: "{{ demo_fqdn | default('bigip-demo.' + cloudflare_zone) }}"
+
+  tasks:
+    - name: Verify required inputs
+      ansible.builtin.assert:
+        that:
+          - aws_region is defined and aws_region | length > 0
+          - cloudflare_zone is defined and cloudflare_zone | length > 0
+        fail_msg: "Provide aws_region and cloudflare_zone"
+
+    # ====================================================================
+    # Find resources by tag
+    # ====================================================================
+
+    - name: Find BIG-IP EC2 instance by tag
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ demo_tag }}"
+          "tag:Name": "{{ demo_tag }}-bigip"
+          instance-state-name: [running, stopped, stopping, pending]
+      register: bigip_instances
+
+    - name: Terminate BIG-IP EC2 instance
+      amazon.aws.ec2_instance:
+        region: "{{ aws_region }}"
+        instance_ids: "{{ item.instance_id }}"
+        state: absent
+        wait: true
+      loop: "{{ bigip_instances.instances }}"
+      when: bigip_instances.instances | length > 0
+
+    - name: Wait for instance termination
+      ansible.builtin.pause:
+        seconds: 30
+      when: bigip_instances.instances | length > 0
+
+    # ====================================================================
+    # Find and delete VPC resources
+    # ====================================================================
+
+    - name: Find demo VPC
+      amazon.aws.ec2_vpc_net_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ demo_tag }}"
+      register: demo_vpcs
+
+    - name: Set VPC ID
+      ansible.builtin.set_fact:
+        vpc_id: "{{ demo_vpcs.vpcs[0].vpc_id }}"
+      when: demo_vpcs.vpcs | length > 0
+
+    - name: Delete security groups in VPC
+      amazon.aws.ec2_security_group:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ vpc_id }}"
+        name: "{{ demo_tag }}-bigip-sg"
+        state: absent
+      when: vpc_id is defined
+      ignore_errors: true
+
+    - name: Find subnets in VPC
+      amazon.aws.ec2_vpc_subnet_info:
+        region: "{{ aws_region }}"
+        filters:
+          vpc-id: "{{ vpc_id }}"
+          "tag:Project": "{{ demo_tag }}"
+      register: demo_subnets
+      when: vpc_id is defined
+
+    - name: Find route tables in VPC
+      amazon.aws.ec2_vpc_route_table_info:
+        region: "{{ aws_region }}"
+        filters:
+          vpc-id: "{{ vpc_id }}"
+          "tag:Project": "{{ demo_tag }}"
+      register: demo_route_tables
+      when: vpc_id is defined
+
+    - name: Delete route tables
+      amazon.aws.ec2_vpc_route_table:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ vpc_id }}"
+        route_table_id: "{{ item.route_table_id }}"
+        lookup: id
+        state: absent
+      loop: "{{ demo_route_tables.route_tables }}"
+      when:
+        - vpc_id is defined
+        - demo_route_tables.route_tables is defined
+      ignore_errors: true
+
+    - name: Delete subnets
+      amazon.aws.ec2_vpc_subnet:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ vpc_id }}"
+        cidr: "{{ item.cidr_block }}"
+        state: absent
+      loop: "{{ demo_subnets.subnets }}"
+      when:
+        - vpc_id is defined
+        - demo_subnets.subnets is defined
+
+    - name: Find internet gateway
+      amazon.aws.ec2_vpc_igw_info:
+        region: "{{ aws_region }}"
+        filters:
+          attachment.vpc-id: "{{ vpc_id }}"
+      register: demo_igws
+      when: vpc_id is defined
+
+    - name: Detach and delete internet gateway
+      amazon.aws.ec2_vpc_igw:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ vpc_id }}"
+        state: absent
+      when:
+        - vpc_id is defined
+        - demo_igws.internet_gateways is defined
+        - demo_igws.internet_gateways | length > 0
+
+    - name: Delete VPC
+      amazon.aws.ec2_vpc_net:
+        region: "{{ aws_region }}"
+        vpc_id: "{{ vpc_id }}"
+        cidr_block: 10.0.0.0/16
+        state: absent
+      when: vpc_id is defined
+
+    # ====================================================================
+    # Cloudflare cleanup
+    # ====================================================================
+
+    - name: Remove Cloudflare A record
+      community.general.cloudflare_dns:
+        api_token: "{{ cloudflare_api_token }}"
+        zone: "{{ cloudflare_zone }}"
+        record: "{{ cert_fqdn }}"
+        type: A
+        state: absent
+      when:
+        - skip_cloudflare is not defined or not skip_cloudflare
+        - cloudflare_api_token is defined
+      no_log: true
+      ignore_errors: true
+
+    # ====================================================================
+    # Local cleanup
+    # ====================================================================
+
+    - name: Remove auto-generated demo inventory file
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/inventory/demo_bigip.yml"
+        state: absent
+
+    - name: Remove ACME artifacts
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.acme/{{ cert_fqdn }}"
+        state: absent
+
+    - name: Teardown complete
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "F5 BIG-IP demo teardown complete!"
+          - "=========================================="
+          - ""
+          - "Removed resources:"
+          - "  - EC2 instance: {{ demo_tag }}-bigip"
+          - "  - Security group: {{ demo_tag }}-bigip-sg"
+          - "  - VPC: {{ demo_tag }}-vpc"
+          - "  - Subnet, route table, internet gateway"
+          - "  - Cloudflare DNS record: {{ cert_fqdn }}"
+          - "  - Local inventory file and ACME artifacts"
+          - ""
+          - "AWS region: {{ aws_region }}"
+          - "Demo tag: {{ demo_tag }}"

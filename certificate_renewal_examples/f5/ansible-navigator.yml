@@ -1,0 +1,17 @@
+---
+ansible-navigator:
+  execution-environment:
+    image: quay.io/truch/f5-cert-renewal:1.0
+    pull:
+      policy: missing
+    enabled: true
+
+  playbook-artifact:
+    enable: false
+
+  mode: stdout
+
+  ansible:
+    inventory:
+      entries:
+        - inventory/hosts.yml

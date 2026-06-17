@@ -1,0 +1,195 @@
+---
+# Step 2: Restore extra_vars comments to AAP 2.6 AFTER filetree import
+#
+# This playbook restores the preserved extra_vars (with comments) to job templates
+# in AAP 2.6 after the standard filetree import has completed.
+#
+# The filetree import strips comments from extra_vars during YAML parsing.
+# This script uses the preserved data to restore the original extra_vars via API.
+#
+# Usage:
+#   export AAP26_HOST=controller26.example.com
+#   export AAP26_USERNAME=admin
+#   export AAP26_PASSWORD=yourpassword
+#   ansible-playbook restore_extra_vars_comments.yml
+#
+# Input: preserved_comments/extra_vars_with_comments.json
+
+- name: Restore extra_vars comments to AAP 2.6
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    aap26_host: "{{ lookup('env', 'AAP26_HOST') }}"
+    aap26_username: "{{ lookup('env', 'AAP26_USERNAME') }}"
+    aap26_password: "{{ lookup('env', 'AAP26_PASSWORD') }}"
+    aap26_validate_certs: false
+    preserved_dir: "./preserved_comments"
+    preserved_file: "{{ preserved_dir }}/extra_vars_with_comments.json"
+    dry_run: "{{ lookup('env', 'DRY_RUN') | default('false') | bool }}"
+
+  tasks:
+    - name: Verify required environment variables
+      ansible.builtin.assert:
+        that:
+          - aap26_host | length > 0
+          - aap26_username | length > 0
+          - aap26_password | length > 0
+        fail_msg: |
+          Missing required environment variables.
+          Please set: AAP26_HOST, AAP26_USERNAME, AAP26_PASSWORD
+
+    - name: Check if preserved data file exists
+      ansible.builtin.stat:
+        path: "{{ preserved_file }}"
+      register: preserved_stat
+
+    - name: Verify preserved data exists
+      ansible.builtin.assert:
+        that:
+          - preserved_stat.stat.exists
+        fail_msg: |
+          Preserved data file not found: {{ preserved_file }}
+          Run extract_extra_vars_comments.yml first!
+
+    - name: Load preserved extra_vars data
+      ansible.builtin.set_fact:
+        preserved_templates: "{{ lookup('file', preserved_file) | from_json }}"
+
+    - name: Display restore info
+      ansible.builtin.debug:
+        msg:
+          - "Loaded {{ preserved_templates | length }} templates from preserved data"
+          - "Dry run mode: {{ dry_run }}"
+          - ""
+
+    - name: Get all job templates from AAP 2.6
+      ansible.builtin.uri:
+        url: "https://{{ aap26_host }}/api/v2/job_templates/?page_size=200"
+        user: "{{ aap26_username }}"
+        password: "{{ aap26_password }}"
+        method: GET
+        force_basic_auth: true
+        validate_certs: "{{ aap26_validate_certs }}"
+        status_code: 200
+      register: aap26_templates_response
+
+    - name: Build template name to ID mapping for AAP 2.6
+      ansible.builtin.set_fact:
+        aap26_template_map: >-
+          {{
+            aap26_template_map | default({}) | combine({
+              item.name: {
+                'id': item.id,
+                'url': item.url,
+                'current_extra_vars': item.extra_vars
+              }
+            })
+          }}
+      loop: "{{ aap26_templates_response.json.results }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Match preserved templates to AAP 2.6 templates
+      ansible.builtin.set_fact:
+        templates_to_update: >-
+          {{
+            templates_to_update | default([]) + [{
+              'name': item.name,
+              'aap24_id': item.id,
+              'aap26_id': aap26_template_map[item.name].id,
+              'aap26_url': aap26_template_map[item.name].url,
+              'preserved_extra_vars': item.extra_vars,
+              'current_extra_vars': aap26_template_map[item.name].current_extra_vars,
+              'needs_update': item.extra_vars != aap26_template_map[item.name].current_extra_vars
+            }]
+          }}
+      loop: "{{ preserved_templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - item.name in aap26_template_map
+        - item.extra_vars | length > 0
+
+    - name: Display update summary
+      ansible.builtin.debug:
+        msg:
+          - "Templates found in AAP 2.6: {{ templates_to_update | default([]) | length }}"
+          - "Templates needing update: {{ (templates_to_update | default([]) | selectattr('needs_update') | list | length) }}"
+          - ""
+
+    - name: Templates that need updating
+      ansible.builtin.debug:
+        msg: "{{ item.name }} (AAP24 ID: {{ item.aap24_id }} -> AAP26 ID: {{ item.aap26_id }})"
+      loop: "{{ templates_to_update | default([]) | selectattr('needs_update') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Restore extra_vars to job templates in AAP 2.6
+      ansible.builtin.uri:
+        url: "https://{{ aap26_host }}{{ item.aap26_url }}"
+        user: "{{ aap26_username }}"
+        password: "{{ aap26_password }}"
+        method: PATCH
+        force_basic_auth: true
+        validate_certs: "{{ aap26_validate_certs }}"
+        body_format: json
+        body:
+          extra_vars: "{{ item.preserved_extra_vars }}"
+        status_code: 200
+      register: update_results
+      loop: "{{ templates_to_update | default([]) | selectattr('needs_update') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not dry_run
+
+    - name: Create restoration report
+      ansible.builtin.copy:
+        content: |
+          # Extra Vars Comments Restoration Report
+
+          Restored to: {{ aap26_host }}
+          Date: {{ lookup('pipe', 'date -Iseconds') }}
+          Dry run: {{ dry_run }}
+
+          ## Summary
+          - Preserved templates loaded: {{ preserved_templates | length }}
+          - Templates found in AAP 2.6: {{ templates_to_update | default([]) | length }}
+          - Templates updated: {{ (templates_to_update | default([]) | selectattr('needs_update') | list | length) if not dry_run else 0 }}
+          - Templates already current: {{ (templates_to_update | default([]) | rejectattr('needs_update') | list | length) }}
+
+          ## Updated Templates
+          {% for template in templates_to_update | default([]) | selectattr('needs_update') | list %}
+          ### {{ template.name }}
+          - AAP 2.4 ID: {{ template.aap24_id }}
+          - AAP 2.6 ID: {{ template.aap26_id }}
+          - Extra vars preserved: {{ 'Yes' if template.preserved_extra_vars | length > 0 else 'No' }}
+          - Status: {{ 'Updated' if not dry_run else 'Would update' }}
+          {% endfor %}
+
+          ## Templates Not Needing Update
+          {% for template in templates_to_update | default([]) | rejectattr('needs_update') | list %}
+          - {{ template.name }} (already has correct extra_vars)
+          {% endfor %}
+
+          ## Templates Not Found in AAP 2.6
+          {% for preserved in preserved_templates %}
+          {% if preserved.name not in aap26_template_map %}
+          - {{ preserved.name }} (ID {{ preserved.id }} in AAP 2.4)
+          {% endif %}
+          {% endfor %}
+        dest: "{{ preserved_dir }}/restoration_report.md"
+        mode: '0644'
+
+    - name: Final Summary
+      ansible.builtin.debug:
+        msg:
+          - "{{ '✓' if not dry_run else '🔍' }} Restoration {{ 'completed' if not dry_run else 'simulation completed' }}"
+          - ""
+          - "Updated: {{ (templates_to_update | default([]) | selectattr('needs_update') | list | length) if not dry_run else 0 }} templates"
+          - "Already current: {{ (templates_to_update | default([]) | rejectattr('needs_update') | list | length) }} templates"
+          - ""
+          - "Report saved to: {{ preserved_dir }}/restoration_report.md"
+          - ""
+          - "{% if dry_run %}NOTE: This was a DRY RUN. No changes were made."
+          - "To apply changes, run: DRY_RUN=false ansible-playbook restore_extra_vars_comments.yml{% endif %}"

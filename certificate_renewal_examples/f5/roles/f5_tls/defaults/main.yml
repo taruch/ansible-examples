@@ -1,0 +1,15 @@
+---
+# Defaults for f5_tls role
+
+# ACME artifact paths (from letsencrypt_cloudflare role)
+acme_work_dir: "{{ playbook_dir }}/.acme"
+cert_path: "{{ acme_work_dir }}/{{ cert_fqdn }}/cert.pem"
+cert_key_path: "{{ acme_work_dir }}/{{ cert_fqdn }}/key.pem"
+chain_path: "{{ acme_work_dir }}/{{ cert_fqdn }}/chain.pem"
+fullchain_path: "{{ acme_work_dir }}/{{ cert_fqdn }}/fullchain.pem"
+
+# F5 BIG-IP settings
+partition: "Common"
+ucs_backup_dir: "/tmp"
+f5_server_port: 443
+f5_validate_certs: true

@@ -1,0 +1,17 @@
+---
+# Defaults for f5_demo_aws_provision role
+
+# AWS settings
+aws_region: us-east-1
+f5_instance_type: t3.xlarge  # Minimum for BIG-IP VE (2 vCPU, 8GB RAM)
+
+# BIG-IP settings
+f5_admin_user: admin
+
+# Demo tagging
+demo_tag: f5-cert-demo
+
+# These are typically provided at runtime or auto-detected
+# f5_ami_id: (auto-detected if not provided)
+# vpc_id: (created if not provided)
+# subnet_id: (created if not provided)

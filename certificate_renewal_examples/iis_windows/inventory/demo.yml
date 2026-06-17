@@ -1,0 +1,14 @@
+---
+all:
+  children:
+    iis_windows_demo:
+      hosts:
+        iis-win01.example.com:
+          ansible_host: 192.0.2.10  # Replace with your Windows host's public IP
+      vars:
+        ansible_connection: winrm
+        ansible_port: 5986
+        ansible_winrm_transport: credssp
+        # EC2 Windows ships a self-signed WinRM cert; ignore for the demo.
+        ansible_winrm_server_cert_validation: ignore
+        ansible_user: Administrator

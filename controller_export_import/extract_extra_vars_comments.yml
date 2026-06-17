@@ -1,0 +1,144 @@
+---
+# Step 1: Extract extra_vars with comments from AAP 2.4 BEFORE filetree export
+#
+# This playbook queries the AAP 2.4 API directly to preserve the raw extra_vars
+# field which contains YAML comments. These comments get stripped during the
+# normal filetree export/import process.
+#
+# Usage:
+#   export AAP24_HOST=controller24.example.com
+#   export AAP24_USERNAME=admin
+#   export AAP24_PASSWORD=yourpassword
+#   ansible-playbook extract_extra_vars_comments.yml
+#
+# Output: preserved_comments/extra_vars_with_comments.json
+
+- name: Extract extra_vars comments from AAP 2.4
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    aap24_host: "{{ lookup('env', 'AAP24_HOST') }}"
+    aap24_username: "{{ lookup('env', 'AAP24_USERNAME') }}"
+    aap24_password: "{{ lookup('env', 'AAP24_PASSWORD') }}"
+    aap24_validate_certs: false
+    output_dir: "./preserved_comments"
+    comments_file: "{{ output_dir }}/extra_vars_with_comments.json"
+
+  tasks:
+    - name: Verify required environment variables
+      ansible.builtin.assert:
+        that:
+          - aap24_host | length > 0
+          - aap24_username | length > 0
+          - aap24_password | length > 0
+        fail_msg: |
+          Missing required environment variables.
+          Please set: AAP24_HOST, AAP24_USERNAME, AAP24_PASSWORD
+
+    - name: Create output directory
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Get first page to determine total count
+      ansible.builtin.uri:
+        url: "https://{{ aap24_host }}/api/v2/job_templates/?page_size=1"
+        user: "{{ aap24_username }}"
+        password: "{{ aap24_password }}"
+        method: GET
+        force_basic_auth: true
+        validate_certs: "{{ aap24_validate_certs }}"
+        status_code: 200
+      register: first_page
+
+    - name: Set pagination facts
+      ansible.builtin.set_fact:
+        total_templates: "{{ first_page.json.count }}"
+        page_size: 100
+
+    - name: Calculate total pages needed
+      ansible.builtin.set_fact:
+        total_pages: "{{ ((total_templates | int - 1) // (page_size | int) + 1) }}"
+
+    - name: Display extraction info
+      ansible.builtin.debug:
+        msg:
+          - "Found {{ total_templates }} job templates"
+          - "Will fetch {{ total_pages }} pages"
+
+    - name: Fetch all job template pages
+      ansible.builtin.uri:
+        url: "https://{{ aap24_host }}/api/v2/job_templates/?page={{ item }}&page_size={{ page_size }}"
+        user: "{{ aap24_username }}"
+        password: "{{ aap24_password }}"
+        method: GET
+        force_basic_auth: true
+        validate_certs: "{{ aap24_validate_certs }}"
+        status_code: 200
+      register: template_pages
+      loop: "{{ range(1, total_pages | int + 1) | list }}"
+
+    - name: Combine all templates from all pages
+      ansible.builtin.set_fact:
+        all_templates: "{{ template_pages.results | map(attribute='json.results') | flatten }}"
+
+    - name: Build preservation data structure
+      ansible.builtin.set_fact:
+        preserved_data: "{{ preserved_data | default([]) + [template_data] }}"
+      vars:
+        template_data:
+          id: "{{ item.id }}"
+          name: "{{ item.name }}"
+          organization: "{{ item.summary_fields.organization.name | default('') }}"
+          extra_vars: "{{ item.extra_vars }}"
+      loop: "{{ all_templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Save preserved extra_vars to file
+      ansible.builtin.copy:
+        content: "{{ preserved_data | to_nice_json(indent=2) }}"
+        dest: "{{ comments_file }}"
+        mode: '0644'
+
+    - name: Create human-readable report
+      ansible.builtin.copy:
+        content: |
+          # Extra Vars Comments Preservation Report
+
+          Extracted from: {{ aap24_host }}
+          Date: {{ ansible_date_time.iso8601 }}
+          Total templates: {{ all_templates | length }}
+
+          ## Templates with extra_vars content:
+          {% for template in preserved_data %}
+          {% if template.extra_vars | length > 0 %}
+
+          ### {{ template.name }}
+          - ID: {{ template.id }}
+          - Organization: {{ template.organization }}
+          - Extra vars length: {{ template.extra_vars | length }} characters
+          {% endif %}
+          {% endfor %}
+        dest: "{{ output_dir }}/extraction_report.md"
+        mode: '0644'
+      vars:
+        ansible_date_time:
+          iso8601: "{{ lookup('pipe', 'date -Iseconds') }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "✓ Successfully extracted extra_vars from {{ all_templates | length }} job templates"
+          - "✓ Saved to: {{ comments_file }}"
+          - "✓ Report: {{ output_dir }}/extraction_report.md"
+          - ""
+          - "Templates with extra_vars content: {{ (preserved_data | selectattr('extra_vars', 'ne', '') | list | length) }}"
+          - ""
+          - "NEXT STEPS:"
+          - "1. Review the extraction_report.md to verify comments were captured"
+          - "2. Run your normal filetree export from AAP 2.4"
+          - "3. Import the filetree to AAP 2.6"
+          - "4. Run restore_extra_vars_comments.yml to restore comments to AAP 2.6"

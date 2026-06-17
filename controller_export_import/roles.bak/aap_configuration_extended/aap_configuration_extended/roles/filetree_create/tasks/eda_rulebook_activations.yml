@@ -1,0 +1,114 @@
+---
+- name: "Get current Rulebook Activations from the API"
+  ansible.builtin.set_fact:
+    rulebook_activations_lookvar: "{{ query('ansible.platform.gateway_api', 'api/eda/v1/activations/',
+                                query_params=(query_params | combine({'id': rulebook_activation_id} if rulebook_activation_id is defined else {})),
+                                host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                return_all=true, max_objects=query_eda_api_max_objects, errors='ignore')
+                       }}"
+  vars:
+    query_params:
+      order_by: 'organization_id,id'
+  no_log: "{{ eda_configuration_filetree_create_secure_logging }}"
+
+# state is present but all of the following are missing: rulebook_name, decision_environment_name, project_name
+- name: "Continue only if there has no errors with the previous API query"
+  when:
+    - rulebook_activations_lookvar | length > 0
+    - rulebook_activations_lookvar | first | length > 0
+  block:
+    - name: "Block for to generate flatten output"
+      when:
+        - flatten_output is defined
+        - flatten_output | bool
+      vars:
+        __dest: "{{ output_path }}/eda_rulebook_activations.yaml"
+      block:
+        - name: "Add current rulebook_activations to the eda_rulebook_activations flat file"
+          ansible.builtin.blockinfile:
+            create: true
+            mode: "0644"
+            insertafter: EOF
+            path: "{{ __dest }}"
+            marker: ""
+            block: "{{ lookup('template', 'templates/eda_rulebook_activations.j2') }}"
+          vars:
+            # rulebook_activation_organization: "{{ current_rulebook_activations_asset_value.organization_id | default(organization, true) }}"
+            # rulebook_activation_id: "{{ current_rulebook_activations_asset_value.id }}"
+            # rulebook_activation_name: "{{ current_rulebook_activations_asset_value.name | regex_replace('/', '_') }}"
+            query_organization_name: "{{ (query('ansible.platform.gateway_api', 'api/eda/v1/organizations/' + current_rulebook_activations_asset_value.decision_environment_id | string,
+                                                host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                                return_all=true, max_objects=query_eda_api_max_objects) | first).name
+                                     }}"
+            query_decision_environment_name: "{{ (query('ansible.platform.gateway_api', 'api/eda/v1/decision-environments/',
+                                                        query_params={'id': current_rulebook_activations_asset_value.decision_environment_id},
+                                                        host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                                        return_all=true, max_objects=query_eda_api_max_objects) | first).name
+                                             }}"
+            query_project_name: "{{ (query('ansible.platform.gateway_api', 'api/eda/v1/projects/',
+                                           query_params={'id': current_rulebook_activations_asset_value.project_id},
+                                           host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                           return_all=true, max_objects=query_eda_api_max_objects) | first).name
+                                }}"
+            last_rulebook_activation: "{{ current_rulebook_activation_index == ((rulebook_activations_lookvar | length) - 1) }}"
+          loop: "{{ rulebook_activations_lookvar }}"
+          loop_control:
+            index_var: current_rulebook_activation_index
+            loop_var: current_rulebook_activations_asset_value
+            label: "{{ __dest }}"
+          no_log: "{{ eda_configuration_filetree_create_secure_logging }}"
+
+        - name: "Remove all the blank lines introduced by the last task"
+          ansible.builtin.lineinfile:
+            path: "{{ __dest }}"
+            line: ''
+            state: absent
+
+    - name: "Block for to generate the filetre_create normal output"
+      when: flatten_output is not defined or not (flatten_output | bool)
+      block:
+        - name: "Create the <ORGANIZATION_NAME>/eda_rulebook_activations output directory for rulebook_activations in {{ output_path }}"
+          ansible.builtin.file:
+            path: "{{ __path }}"
+            state: directory
+            mode: '0755'
+          vars:
+            __path: "{{ output_path }}/{{ needed_path | regex_replace('/', '_') }}/eda_rulebook_activations"
+          loop: "{{ (rulebook_activations_lookvar | selectattr('organization_id', 'defined') |
+                    map(attribute='organization_id') | list | flatten | unique) +
+                    ([organization] if ((rulebook_activations_lookvar | selectattr('organization', 'undefined') | list) | flatten | length > 0) else [])
+                }}"
+          loop_control:
+            loop_var: needed_path
+            label: "{{ __path }}"
+
+        - name: "Add current rulebook_activations to the <ORGANIZATION_NAME>/eda_rulebook_activations output file in {{ output_path }}"
+          ansible.builtin.template:
+            src: "templates/eda_rulebook_activations.j2"
+            dest: "{{ __dest }}"
+            mode: '0644'
+          vars:
+            rulebook_activation_organization: "{{ current_rulebook_activations_asset_value.organization_id | default(organization, true) }}"
+            rulebook_activation_id: "{{ current_rulebook_activations_asset_value.id }}"
+            rulebook_activation_name: "{{ current_rulebook_activations_asset_value.name | regex_replace('/', '_') }}"
+            __dest: "{{ output_path }}/{{ rulebook_activation_organization | regex_replace('/', '_') }}/eda_rulebook_activations/{{ (rulebook_activation_id ~ '_') if omit_id is not defined else '' }}{{ rulebook_activation_name | regex_replace('/', '_') }}.yaml"
+            query_organization_name: "{{ (query('ansible.platform.gateway_api', 'api/eda/v1/organizations/' + current_rulebook_activations_asset_value.decision_environment_id | string,
+                                                host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                                return_all=true, max_objects=query_eda_api_max_objects) | first).name
+                                     }}"
+            query_decision_environment_name: "{{ (query('ansible.platform.gateway_api', 'api/eda/v1/decision-environments/',
+                                                       query_params={'id': current_rulebook_activations_asset_value.decision_environment_id},
+                                                       host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                                       return_all=true, max_objects=query_eda_api_max_objects) | first).name
+                                             }}"
+            query_project_name: "{{ (query('ansible.platform.gateway_api', 'api/eda/v1/projects/',
+                                           query_params={'id': current_rulebook_activations_asset_value.project_id},
+                                           host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                           return_all=true, max_objects=query_eda_api_max_objects) | first).name
+                                }}"
+          loop: "{{ rulebook_activations_lookvar }}"
+          loop_control:
+            loop_var: current_rulebook_activations_asset_value
+            label: "{{ __dest }}"
+          no_log: "{{ eda_configuration_filetree_create_secure_logging }}"
+...

@@ -1,0 +1,68 @@
+---
+# Stand up the IIS-on-Windows certificate-renewal demo environment.
+#
+# Multi-host capable. The play targets the `iis_windows_demo` group; add as
+# many host entries as you like to inventory/demo.yml (each with its own
+# `ansible_host: <public IP>`). The Cloudflare A record + IIS install + LE
+# cert flow runs per host.
+#
+# Three main steps:
+#   1. Cloudflare A record setup   (localhost) upsert the per-host A record
+#   2. iis_windows_install         (Windows)   install IIS, configure site
+#   3. letsencrypt_cloudflare      (delegated) acquire LE cert via DNS-01
+#   4. iis_windows_tls             (Windows)   import cert, bind to IIS, verify HTTPS
+#
+# Required runtime inputs:
+#   cloudflare_zone         Cloudflare-managed zone (e.g. example.com)
+#   cloudflare_api_token    via -e @secrets.yml, env CLOUDFLARE_API_TOKEN, or AAP credential
+#   ansible_password        Windows admin password (via inventory / vault / secrets.yml)
+#
+# Optional:
+#   cert_fqdn               Defaults to inventory_hostname per Windows host.
+#   acme_env                staging (default) or production
+
+- name: Bootstrap IIS-on-Windows demo host(s)
+  hosts: iis_windows_demo
+  gather_facts: true
+  vars:
+    # If the inventory host is already an FQDN (has a dot), use it as-is.
+    # Otherwise treat the inventory hostname as a short name and append the
+    # Cloudflare zone — that way both `iis-demo.example.com` and `iis-demo`
+    # (with cloudflare_zone=example.com) work.
+    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
+
+  pre_tasks:
+    - name: Sanity-check required inputs
+      ansible.builtin.assert:
+        that:
+          - cloudflare_zone is defined and cloudflare_zone | length > 0
+          - cert_fqdn | default(none) is not none
+          - ansible_host is defined and ansible_host | length > 0
+        fail_msg: >-
+          Provide cloudflare_zone and cert_fqdn. Each Windows host must have
+          ansible_host set in the inventory — the A record points at it.
+
+    - name: Upsert the A record {{ cert_fqdn }} -> {{ ansible_host }}
+      community.general.cloudflare_dns:
+        api_token: "{{ cloudflare_api_token | default(lookup('env', 'CLOUDFLARE_API_TOKEN')) }}"
+        zone: "{{ cloudflare_zone }}"
+        record: "{{ cert_fqdn }}"
+        type: A
+        value: "{{ ansible_host }}"
+        ttl: 60
+        # Replace any prior A record at this name so re-runs don't pile up entries.
+        solo: true
+        state: present
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+  roles:
+    - role: iis_windows_install
+    - role: letsencrypt_cloudflare
+    - role: iis_windows_tls
+
+  post_tasks:
+    - name: Next steps
+      ansible.builtin.debug:
+        msg: "Demo up — run renew_iis_cert.yml against this host to demo the renewal flow."

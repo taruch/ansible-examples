@@ -1,0 +1,11 @@
+---
+- name: test adding string to list
+  hosts: all
+  tasks:
+    - name: Create node var
+      loop: "{{ vtep_mpls_hits }}"
+      loop_control:
+        label: "{{ item.ip }}"
+      when: item.found == true
+      ansible.builtin.set_fact:
+        Host_VTEP_data: "{{ Host_VTEP_data | default([]) + [ansible_net_hostname ~ ' ' ~ item.ip ~ ' ' ~ item.hex] }}"

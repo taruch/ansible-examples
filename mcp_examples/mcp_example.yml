@@ -1,0 +1,95 @@
+---
+- name: Call MCP Tool
+  hosts: localhost
+  become: false
+  vars:
+    token: "{{ lookup('env', 'AAP_TOKEN') }}"
+    host: "{{ lookup('env', 'AAP_HOST') }}"
+  tasks:
+    - name: Initialize MCP Session
+      ansible.builtin.uri:
+        url: "https://{{ host }}:8448/job_management/mcp"
+        headers:
+          Authorization: "Bearer {{ token }}"
+          Accept: "application/json, text/event-stream"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: "0"
+          method: "initialize"
+          params:
+            protocolVersion: "2024-11-05"
+            capabilities: {}
+            clientInfo:
+              name: "ansible-client"
+              version: "1.0"
+        status_code: 200
+        validate_certs: false
+      register: session_init
+
+    - name: Extract Session ID
+      ansible.builtin.set_fact:
+        session_id: "{{ session_init.mcp_session_id | default(session_init.json.result.sessionId | default('')) }}"
+
+    - name: List Available MCP Tools
+      ansible.builtin.uri:
+        url: "https://ec2-3-12-163-224.us-east-2.compute.amazonaws.com:8448/job_management/mcp"
+        headers:
+          Authorization: "Bearer {{ token }}"
+          Accept: "application/json, text/event-stream"
+          Mcp-Session-Id: "{{ session_id }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: "1"
+          method: "tools/list"
+        status_code: 200
+        validate_certs: false
+        return_content: true
+      register: tools_list
+
+    - name: Parse Available Tools
+      ansible.builtin.set_fact:
+        parsed_tools: "{{ (tools_list.content | regex_search('data: (.+)', '\\1') | first | from_json).result.tools }}"
+
+    - name: Filter Tool Details
+      ansible.builtin.set_fact:
+        tools_summary: "{{ tools_summary | default([]) + [{'name': item.name, 'description': item.description}] }}"
+      loop: "{{ parsed_tools }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Display Available Tools
+      ansible.builtin.debug:
+        var: tools_summary
+
+    - name: Call an MCP Tool via HTTP
+      ansible.builtin.uri:
+        url: "https://ec2-3-12-163-224.us-east-2.compute.amazonaws.com:8448/job_management/mcp"
+        headers:
+          Authorization: "Bearer {{ token }}"
+          Accept: "application/json, text/event-stream"
+          Mcp-Session-Id: "{{ session_id }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: "2"
+          method: "tools/call"
+          params:
+            name: "jobs_list"
+            arguments: {}
+        status_code: 200
+        validate_certs: false
+        return_content: true
+      register: mcp_response
+
+    - name: Parse Tool Call Response
+      ansible.builtin.set_fact:
+        parsed_response: "{{ (mcp_response.content | regex_search('data: (.+)', '\\1') | first | from_json).result.content[0].text | from_json }}"
+
+    - name: Debug Tool Call Response
+      ansible.builtin.debug:
+        var: parsed_response

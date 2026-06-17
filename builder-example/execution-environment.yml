@@ -1,0 +1,59 @@
+---
+version: 3
+dependencies:
+  galaxy:
+    collections:
+      - name: ansible.controller
+    # - name: ansible.eda
+      - name: ansible.hub
+      - name: ansible.platform
+      - name: ansible.posix
+      - name: containers.podman
+      - name: community.general
+      - name: infra.aap_configuration
+      - name: infra.aap_configuration_extended
+      - name: infra.aap_utilities
+      - name: infra.ah_configuration
+      - name: infra.ee_utilities
+      - name: kubernetes.core
+      - name: redhat.openshift
+      # version: ">=9"
+      # https://docs.ansible.com/projects/ansible/latest/collections_guide/collections_installing.html#install-multiple-collections-with-a-requirements-file
+  python:
+    - requests-oauthlib
+  python_interpreter:
+    package_system: python312
+    python_path: /usr/bin/python3.12
+
+  exclude:
+    system:
+      - openshift-clients
+    python:
+      - systemd-python
+
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-26/ee-minimal-rhel9:latest
+
+options:
+  package_manager_path: /usr/bin/microdnf
+
+additional_build_files:
+  - src: ansible.cfg
+    dest: configs
+
+additional_build_steps:
+  prepend_galaxy:
+    - ADD _build/configs/ansible.cfg /etc/ansible/ansible.cfg
+    - ARG ANSIBLE_GALAXY_SERVER_CERTIFIED_TOKEN
+    - ARG ANSIBLE_GALAXY_SERVER_VALIDATED_TOKEN
+    - ENV ANSIBLE_GALAXY_SERVER_CERTIFIED_TOKEN=${ANSIBLE_GALAXY_SERVER_CERTIFIED_TOKEN}
+    - ENV ANSIBLE_GALAXY_SERVER_VALIDATED_TOKEN=${ANSIBLE_GALAXY_SERVER_VALIDATED_TOKEN}
+    - RUN cat /etc/ansible/ansible.cfg
+  prepend_final: |
+    RUN microdnf install -y tar gzip \
+    && curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -o oc.tar.gz \
+    && tar -xzvf oc.tar.gz -C /usr/bin/ oc \
+    && rm oc.tar.gz \
+    && microdnf install -y podman rsync \
+    && microdnf clean all

@@ -1,0 +1,28 @@
+# Create Credential
+
+fields:
+  - id: azure_resource_group
+    type: string
+    label: Resource Group
+  - id: client_id
+    type: string
+    label: Client ID
+    help_text: client_id = AZURE_CLIENT_ID
+  - id: client_secret
+    type: string
+    label: Service Principal password
+    secret: true
+    help_text: >-
+      client_secret = AZURE_SECRET (service principal password for accessing the vault)
+  - id: tenant_id
+    type: string
+    label: Tenant ID
+    help_text: tenant_id = AZURE_TENANT
+  - id: key_vault_name
+    type: string
+    label: KeyVault Name
+    help_text: Specify which azure cloud environment to use.
+  - id: azure_subscription_id
+    type: string
+    label: Subscription ID
+    help_text: azure_subscription_id

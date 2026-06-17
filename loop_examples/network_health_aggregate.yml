@@ -1,0 +1,420 @@
+---
+- name: Network Device Health Checks with Data Aggregation
+  hosts: all
+  gather_facts: false
+  vars:
+    # Sample network checks data structure
+    network_checks:
+      interfaces:
+        - name: "GigabitEthernet0/0"
+          expected_state: "up"
+          expected_speed: "1000"
+        - name: "GigabitEthernet0/1"
+          expected_state: "up"
+          expected_speed: "1000"
+        - name: "GigabitEthernet0/2"
+          expected_state: "up"
+          expected_speed: "1000"
+
+      bgp_neighbors:
+        - peer: "10.0.1.1"
+          asn: "65001"
+          expected_state: "Established"
+        - peer: "10.0.1.2"
+          asn: "65002"
+          expected_state: "Established"
+
+      vlans:
+        - id: "10"
+          name: "Management"
+          expected_status: "active"
+        - id: "20"
+          name: "Production"
+          expected_status: "active"
+        - id: "30"
+          name: "Development"
+          expected_status: "active"
+
+      routes:
+        - destination: "0.0.0.0/0"
+          next_hop: "10.0.0.1"
+          protocol: "static"
+        - destination: "192.168.0.0/16"
+          next_hop: "10.0.0.2"
+          protocol: "bgp"
+
+    # Simulated device types for different behavior
+    device_types:
+      router: ["router1", "router2", "edge-router"]
+      switch: ["switch1", "switch2", "core-switch"]
+      firewall: ["fw1", "fw2"]
+
+  tasks:
+    - name: Initialize per-device results lists
+      ansible.builtin.set_fact:
+        interface_results: []
+        bgp_results: []
+        vlan_results: []
+        route_results: []
+        device_summary: {}
+
+    - name: Check interface status (simulated)
+      loop: "{{ network_checks.interfaces }}"
+      loop_control:
+        label: "{{ item.name }}"
+      ansible.builtin.set_fact:
+        interface_results: "{{ interface_results + [check_result] }}"
+      vars:
+        # Simulate random interface states
+        simulated_state: "{{ ['up', 'down', 'up', 'up'] | random }}"
+        simulated_speed: "{{ ['1000', '100', '1000'] | random }}"
+        check_result:
+          device: "{{ inventory_hostname }}"
+          check_type: "interface"
+          interface: "{{ item.name }}"
+          expected_state: "{{ item.expected_state }}"
+          actual_state: "{{ simulated_state }}"
+          expected_speed: "{{ item.expected_speed }}"
+          actual_speed: "{{ simulated_speed }}"
+          status: "{{ 'OK' if (simulated_state == item.expected_state and simulated_speed == item.expected_speed) else 'FAILED' }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Check BGP neighbor status (simulated)
+      loop: "{{ network_checks.bgp_neighbors }}"
+      loop_control:
+        label: "{{ item.peer }}"
+      when: "'router' in inventory_hostname or 'edge' in inventory_hostname"
+      ansible.builtin.set_fact:
+        bgp_results: "{{ bgp_results + [check_result] }}"
+      vars:
+        simulated_state: "{{ ['Established', 'Idle', 'Established', 'Established'] | random }}"
+        check_result:
+          device: "{{ inventory_hostname }}"
+          check_type: "bgp"
+          peer: "{{ item.peer }}"
+          asn: "{{ item.asn }}"
+          expected_state: "{{ item.expected_state }}"
+          actual_state: "{{ simulated_state }}"
+          status: "{{ 'OK' if simulated_state == item.expected_state else 'FAILED' }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Check VLAN status (simulated)
+      loop: "{{ network_checks.vlans }}"
+      loop_control:
+        label: "VLAN {{ item.id }}"
+      when: "'switch' in inventory_hostname"
+      ansible.builtin.set_fact:
+        vlan_results: "{{ vlan_results + [check_result] }}"
+      vars:
+        simulated_status: "{{ ['active', 'suspended', 'active', 'active'] | random }}"
+        check_result:
+          device: "{{ inventory_hostname }}"
+          check_type: "vlan"
+          vlan_id: "{{ item.id }}"
+          vlan_name: "{{ item.name }}"
+          expected_status: "{{ item.expected_status }}"
+          actual_status: "{{ simulated_status }}"
+          status: "{{ 'OK' if simulated_status == item.expected_status else 'FAILED' }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Check routing table (simulated)
+      loop: "{{ network_checks.routes }}"
+      loop_control:
+        label: "{{ item.destination }}"
+      when: "'router' in inventory_hostname or 'firewall' in inventory_hostname"
+      ansible.builtin.set_fact:
+        route_results: "{{ route_results + [check_result] }}"
+      vars:
+        simulated_exists: "{{ [true, false, true, true] | random }}"
+        check_result:
+          device: "{{ inventory_hostname }}"
+          check_type: "route"
+          destination: "{{ item.destination }}"
+          next_hop: "{{ item.next_hop }}"
+          protocol: "{{ item.protocol }}"
+          route_exists: "{{ simulated_exists }}"
+          status: "{{ 'OK' if simulated_exists else 'FAILED' }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Build per-device summary
+      vars:
+        all_checks: "{{ interface_results + bgp_results + vlan_results + route_results }}"
+        total: "{{ all_checks | length }}"
+        failed: "{{ all_checks | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        ok: "{{ all_checks | selectattr('status', 'equalto', 'OK') | list | length }}"
+      ansible.builtin.set_fact:
+        device_summary:
+          total_checks: "{{ total }}"
+          passed: "{{ ok }}"
+          failed: "{{ failed }}"
+          interface_count: "{{ interface_results | length }}"
+          bgp_count: "{{ bgp_results | length }}"
+          vlan_count: "{{ vlan_results | length }}"
+          route_count: "{{ route_results | length }}"
+
+    - name: Display per-device summary
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ device_summary.passed }}/{{ device_summary.total }} checks passed"
+        verbosity: 1
+
+- name: Aggregate Network Results on Localhost for Email Report
+  hosts: localhost
+  gather_facts: true
+  vars:
+    all_interface_checks: []
+    all_bgp_checks: []
+    all_vlan_checks: []
+    all_route_checks: []
+    all_checks_combined: []
+    failed_checks_by_type: {}
+    critical_failures: []
+    warnings: []
+    device_summaries: {}
+
+  tasks:
+    - name: Aggregate interface checks from all devices
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        label: "{{ item }}"
+      ansible.builtin.set_fact:
+        all_interface_checks: "{{ all_interface_checks + hostvars[item].interface_results | default([]) }}"
+
+    - name: Aggregate BGP checks from all devices
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        label: "{{ item }}"
+      ansible.builtin.set_fact:
+        all_bgp_checks: "{{ all_bgp_checks + hostvars[item].bgp_results | default([]) }}"
+
+    - name: Aggregate VLAN checks from all devices
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        label: "{{ item }}"
+      ansible.builtin.set_fact:
+        all_vlan_checks: "{{ all_vlan_checks + hostvars[item].vlan_results | default([]) }}"
+
+    - name: Aggregate route checks from all devices
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        label: "{{ item }}"
+      ansible.builtin.set_fact:
+        all_route_checks: "{{ all_route_checks + hostvars[item].route_results | default([]) }}"
+
+    - name: Combine all checks into single list
+      ansible.builtin.set_fact:
+        all_checks_combined: "{{ all_interface_checks + all_bgp_checks + all_vlan_checks + all_route_checks }}"
+
+    - name: Build device summary dictionary
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        label: "{{ item }}"
+      ansible.builtin.set_fact:
+        device_summaries: "{{ device_summaries | combine({item: hostvars[item].device_summary}) }}"
+
+    - name: Categorize failures by severity (critical vs warning)
+      loop: "{{ all_checks_combined }}"
+      loop_control:
+        label: "{{ item.device }}/{{ item.check_type }}"
+      when: item.status == 'FAILED'
+      vars:
+        # BGP failures and interface down are critical, others are warnings
+        is_critical: "{{ item.check_type in ['bgp', 'route'] or (item.check_type == 'interface' and 'GigabitEthernet0/0' in item.interface) }}"
+      ansible.builtin.set_fact:
+        critical_failures: "{{ critical_failures + [item] if is_critical else critical_failures }}"
+        warnings: "{{ warnings + [item] if not is_critical else warnings }}"
+
+    - name: Calculate failure statistics by check type
+      vars:
+        interface_failed: "{{ all_interface_checks | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        bgp_failed: "{{ all_bgp_checks | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        vlan_failed: "{{ all_vlan_checks | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        route_failed: "{{ all_route_checks | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+      ansible.builtin.set_fact:
+        failed_checks_by_type:
+          interface: "{{ interface_failed }}"
+          bgp: "{{ bgp_failed }}"
+          vlan: "{{ vlan_failed }}"
+          route: "{{ route_failed }}"
+
+    - name: Display overall statistics
+      ansible.builtin.debug:
+        msg:
+          - "=== Network Health Check Summary ==="
+          - "Total Checks: {{ all_checks_combined | length }}"
+          - "Passed: {{ all_checks_combined | selectattr('status', 'equalto', 'OK') | list | length }}"
+          - "Failed: {{ all_checks_combined | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+          - "Critical Failures: {{ critical_failures | length }}"
+          - "Warnings: {{ warnings | length }}"
+          - "Devices Checked: {{ groups['all'] | length }}"
+
+    - name: Display failure breakdown by type
+      ansible.builtin.debug:
+        msg:
+          - "Interface Failures: {{ failed_checks_by_type.interface }}/{{ all_interface_checks | length }}"
+          - "BGP Failures: {{ failed_checks_by_type.bgp }}/{{ all_bgp_checks | length }}"
+          - "VLAN Failures: {{ failed_checks_by_type.vlan }}/{{ all_vlan_checks | length }}"
+          - "Route Failures: {{ failed_checks_by_type.route }}/{{ all_route_checks | length }}"
+
+    - name: Display critical failures
+      when: critical_failures | length > 0
+      ansible.builtin.debug:
+        msg: "CRITICAL: {{ item.device }} - {{ item.check_type | upper }} - {{ item.peer | default(item.interface | default(item.destination)) }} is {{ item.actual_state | default('missing') }}"
+      loop: "{{ critical_failures }}"
+      loop_control:
+        label: "{{ item.device }}/{{ item.check_type }}"
+
+    - name: Prepare email report with network details
+      ansible.builtin.set_fact:
+        email_subject: "Network Health Check Report - {{ critical_failures | length }} Critical, {{ warnings | length }} Warnings"
+        email_body: |
+          NETWORK HEALTH CHECK REPORT
+          ===========================
+          Generated: {{ ansible_date_time.iso8601 }}
+          Report Period: Last 5 minutes
+
+          EXECUTIVE SUMMARY:
+          ------------------
+          Total Checks Performed: {{ all_checks_combined | length }}
+          Passed: {{ all_checks_combined | selectattr('status', 'equalto', 'OK') | list | length }}
+          Failed: {{ all_checks_combined | selectattr('status', 'equalto', 'FAILED') | list | length }}
+          Critical Failures: {{ critical_failures | length }}
+          Warnings: {{ warnings | length }}
+
+          FAILURE BREAKDOWN BY TYPE:
+          --------------------------
+          Interface Checks: {{ failed_checks_by_type.interface }}/{{ all_interface_checks | length }} failed
+          BGP Neighbor Checks: {{ failed_checks_by_type.bgp }}/{{ all_bgp_checks | length }} failed
+          VLAN Checks: {{ failed_checks_by_type.vlan }}/{{ all_vlan_checks | length }} failed
+          Routing Checks: {{ failed_checks_by_type.route }}/{{ all_route_checks | length }} failed
+
+          DEVICE SUMMARY:
+          ---------------
+          {% for device, summary in device_summaries.items() %}
+          {{ device }}: {{ summary.passed }}/{{ summary.total }} passed
+            - Interfaces: {{ summary.interface_count }} checks
+            - BGP: {{ summary.bgp_count }} checks
+            - VLANs: {{ summary.vlan_count }} checks
+            - Routes: {{ summary.route_count }} checks
+          {% endfor %}
+
+          {% if critical_failures | length > 0 %}
+          CRITICAL FAILURES (IMMEDIATE ACTION REQUIRED):
+          ---------------------------------------------
+          {% for failure in critical_failures %}
+          [{{ failure.timestamp }}] {{ failure.device }}
+            Type: {{ failure.check_type | upper }}
+          {% if failure.check_type == 'interface' %}
+            Interface: {{ failure.interface }}
+            Expected: {{ failure.expected_state }} @ {{ failure.expected_speed }}Mbps
+            Actual: {{ failure.actual_state }} @ {{ failure.actual_speed }}Mbps
+          {% elif failure.check_type == 'bgp' %}
+            BGP Peer: {{ failure.peer }} (AS{{ failure.asn }})
+            Expected: {{ failure.expected_state }}
+            Actual: {{ failure.actual_state }}
+          {% elif failure.check_type == 'route' %}
+            Route: {{ failure.destination }} via {{ failure.next_hop }}
+            Protocol: {{ failure.protocol }}
+            Status: Route {{ 'exists' if failure.route_exists else 'MISSING' }}
+          {% endif %}
+
+          {% endfor %}
+          {% endif %}
+
+          {% if warnings | length > 0 %}
+          WARNINGS (REVIEW RECOMMENDED):
+          ------------------------------
+          {% for warning in warnings %}
+          [{{ warning.timestamp }}] {{ warning.device }}
+            Type: {{ warning.check_type | upper }}
+          {% if warning.check_type == 'interface' %}
+            Interface: {{ warning.interface }} - {{ warning.actual_state }}
+          {% elif warning.check_type == 'vlan' %}
+            VLAN {{ warning.vlan_id }} ({{ warning.vlan_name }}) - {{ warning.actual_status }}
+          {% endif %}
+
+          {% endfor %}
+          {% endif %}
+
+          {% if critical_failures | length == 0 and warnings | length == 0 %}
+          *** ALL CHECKS PASSED - NETWORK HEALTHY ***
+          {% endif %}
+
+          RECOMMENDED ACTIONS:
+          --------------------
+          {% if critical_failures | length > 0 %}
+          1. Investigate critical BGP and interface failures immediately
+          2. Check physical layer connectivity for down interfaces
+          3. Review routing tables for missing routes
+          {% else %}
+          No critical issues detected. Continue monitoring.
+          {% endif %}
+
+          ---
+          This report was generated automatically by Ansible Network Automation
+          For details, contact: netops@example.com
+
+    - name: Display email content preview
+      ansible.builtin.debug:
+        msg:
+          - "=== EMAIL PREVIEW ==="
+          - "Subject: {{ email_subject }}"
+          - "---"
+          - "{{ email_body }}"
+
+    - name: Save network health report to file
+      ansible.builtin.copy:
+        content: |
+          Subject: {{ email_subject }}
+
+          {{ email_body }}
+        dest: "/tmp/network_health_report_{{ ansible_date_time.epoch }}.txt"
+        mode: '0644'
+
+    - name: Save detailed results as JSON for integration
+      ansible.builtin.copy:
+        content: |
+          {{ {
+            'timestamp': ansible_date_time.iso8601,
+            'summary': {
+              'total_checks': all_checks_combined | length,
+              'passed': all_checks_combined | selectattr('status', 'equalto', 'OK') | list | length,
+              'failed': all_checks_combined | selectattr('status', 'equalto', 'FAILED') | list | length,
+              'critical': critical_failures | length,
+              'warnings': warnings | length
+            },
+            'failures_by_type': failed_checks_by_type,
+            'device_summaries': device_summaries,
+            'critical_failures': critical_failures,
+            'warnings': warnings,
+            'all_checks': all_checks_combined
+          } | to_nice_json }}
+        dest: "/tmp/network_health_report_{{ ansible_date_time.epoch }}.json"
+        mode: '0644'
+
+    - name: Display next steps for email delivery
+      ansible.builtin.debug:
+        msg:
+          - "Report files saved:"
+          - "  - Text: /tmp/network_health_report_{{ ansible_date_time.epoch }}.txt"
+          - "  - JSON: /tmp/network_health_report_{{ ansible_date_time.epoch }}.json"
+          - ""
+          - "To send via email, use one of these methods:"
+          - "1. community.general.mail module (requires mail server configuration)"
+          - "2. ansible.builtin.command with 'mail' or 'sendmail'"
+          - "3. Integration with ticketing system via REST API"
+          - "4. Send to monitoring/alerting platform (PagerDuty, ServiceNow, etc.)"
+
+    # Example of how to actually send email (commented out - requires configuration)
+    # - name: Send email report (example - requires mail configuration)
+    #   community.general.mail:
+    #     host: smtp.example.com
+    #     port: 587
+    #     username: ansible@example.com
+    #     password: "{{ vault_smtp_password }}"
+    #     to: netops@example.com
+    #     subject: "{{ email_subject }}"
+    #     body: "{{ email_body }}"
+    #     secure: starttls
+    #   when: critical_failures | length > 0
+
+...

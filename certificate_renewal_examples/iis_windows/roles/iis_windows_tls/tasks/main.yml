@@ -1,0 +1,161 @@
+---
+- name: Sanity-check required inputs
+  ansible.builtin.assert:
+    that:
+      - cert_fqdn | default(none) is not none
+    fail_msg: Provide cert_fqdn (and ensure cert artifacts exist under acme_work_dir on the control node).
+
+# ---------------------------------------------- bundle + import certificate
+- name: Build the PFX certificate bundle from the issued certificate
+  community.crypto.openssl_pkcs12:
+    action: export
+    path: "{{ pfx_local_path }}"
+    friendly_name: "{{ cert_fqdn }}"
+    privatekey_path: "{{ cert_key_path }}"
+    certificate_path: "{{ cert_path }}"
+    other_certificates: "{{ chain_path }}"
+    other_certificates_parse_all: true
+    passphrase: "{{ cert_password }}"
+    state: present
+  delegate_to: localhost
+  become: false
+
+- name: Ship the PFX bundle to a temp directory on Windows
+  ansible.windows.win_copy:
+    src: "{{ pfx_local_path }}"
+    dest: "{{ pfx_remote_temp_path }}"
+  no_log: true
+  register: pfx_ship
+
+- name: Import certificate into Windows Certificate Store
+  # Import into LocalMachine\My (Personal) store where IIS looks for certs
+  ansible.windows.win_certificate_store:
+    path: "{{ pfx_remote_temp_path }}"
+    state: present
+    store_location: LocalMachine
+    store_name: My
+    password: "{{ cert_password }}"
+  register: cert_import
+
+- name: Get the certificate thumbprint
+  # After import, we need the thumbprint to bind it to IIS
+  ansible.windows.win_shell: |
+    $cert = Get-ChildItem -Path Cert:\LocalMachine\My |
+            Where-Object { $_.Subject -match "CN={{ cert_fqdn }}" } |
+            Sort-Object NotAfter -Descending |
+            Select-Object -First 1
+    $cert.Thumbprint
+  register: cert_thumbprint_result
+  changed_when: false
+
+- name: Set cert thumbprint fact
+  ansible.builtin.set_fact:
+    cert_thumbprint: "{{ cert_thumbprint_result.stdout | trim }}"
+
+# ---------------------------------------------------- IIS binding
+- name: Check if HTTPS binding exists for {{ iis_site_name }}
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration
+    $binding = Get-WebBinding -Name "{{ iis_site_name }}" -Protocol "https" -Port {{ iis_binding_port }}
+    if ($binding) { "exists" } else { "missing" }
+  register: binding_check
+  changed_when: false
+
+- name: Create HTTPS binding if it doesn't exist
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration
+    New-WebBinding -Name "{{ iis_site_name }}" -Protocol "https" -Port {{ iis_binding_port }} -IPAddress "*"
+  when: binding_check.stdout | trim == "missing"
+
+- name: Update IIS site binding with the new certificate
+  # Bind the certificate to the HTTPS binding using netsh
+  # This ensures the binding uses the correct cert thumbprint
+  ansible.windows.win_shell: |
+    $appId = "{00000000-0000-0000-0000-000000000000}"
+    netsh http delete sslcert ipport=0.0.0.0:{{ iis_binding_port }}
+    netsh http add sslcert ipport=0.0.0.0:{{ iis_binding_port }} certhash={{ cert_thumbprint }} appid=$appId certstorename=MY
+  register: binding_update
+  changed_when: "'successfully' in binding_update.stdout"
+  failed_when:
+    - binding_update.rc != 0
+    - "'Cannot create a file when that file already exists' not in binding_update.stderr"
+
+# Alternative method using WebAdministration cmdlets
+- name: Update IIS binding using WebAdministration (alternative)
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration
+    $binding = Get-WebBinding -Name "{{ iis_site_name }}" -Protocol "https" -Port {{ iis_binding_port }}
+    $binding.AddSslCertificate("{{ cert_thumbprint }}", "My")
+  register: web_binding_update
+  changed_when: true
+  failed_when: false
+
+- name: Open Windows Firewall for port {{ iis_binding_port }}
+  # Ensure the HTTPS port is open in Windows Firewall
+  community.windows.win_firewall_rule:
+    name: "IIS HTTPS {{ iis_binding_port }}"
+    localport: "{{ iis_binding_port }}"
+    action: allow
+    direction: in
+    protocol: tcp
+    profiles: [domain, private, public]
+    state: present
+    enabled: true
+
+- name: Ensure IIS is running
+  ansible.windows.win_service:
+    name: W3SVC
+    state: started
+    start_mode: auto
+
+- name: Recycle application pool for {{ iis_site_name }}
+  # Recycle the app pool to pick up the new certificate
+  # Only if the cert actually changed
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration
+    $appPool = (Get-Item "IIS:\Sites\{{ iis_site_name }}").applicationPool
+    Restart-WebAppPool -Name $appPool
+  when: pfx_ship is changed or cert_import is changed
+  register: apppool_recycle
+
+- name: Wait for IIS to respond on :{{ iis_binding_port }}
+  ansible.windows.win_wait_for:
+    port: "{{ iis_binding_port }}"
+    delay: 3
+    timeout: 60
+
+# ------------------------------------------------------------- verify
+- name: Fetch the live certificate from :{{ iis_binding_port }}
+  community.crypto.get_certificate:
+    host: "{{ cert_fqdn }}"
+    port: "{{ iis_binding_port }}"
+  delegate_to: localhost
+  become: false
+  register: live_cert
+
+- name: Confirm IIS is serving content over HTTPS
+  ansible.builtin.uri:
+    url: "https://{{ cert_fqdn }}:{{ iis_binding_port }}/"
+    return_content: true
+    # Staging certs are not in the public trust store.
+    validate_certs: "{{ 'staging' not in acme_directory }}"
+    status_code: [200, 403]  # 403 is OK if default site has no content
+  delegate_to: localhost
+  become: false
+  register: https_check
+
+- name: Clean up temporary PFX file
+  ansible.windows.win_file:
+    path: "{{ pfx_remote_temp_path }}"
+    state: absent
+  when: pfx_remote_temp_path is defined
+
+- name: Demo environment summary
+  ansible.builtin.debug:
+    msg:
+      - "Site:       https://{{ cert_fqdn }}:{{ iis_binding_port }}/"
+      - "Cert CN:    {{ live_cert.subject.commonName | default('?') }}"
+      - "Issuer:     {{ live_cert.issuer.commonName | default('?') }}"
+      - "Expires:    {{ live_cert.not_after }}"
+      - "Thumbprint: {{ cert_thumbprint }}"
+      - "Store:      LocalMachine\\My"

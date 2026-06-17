@@ -1,0 +1,48 @@
+---
+version: 3
+
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-26/ee-minimal-rhel9:latest
+
+options:
+  package_manager_path: /usr/bin/microdnf
+
+dependencies:
+  galaxy: requirements.yml
+  ansible_core:
+    package_pip: ansible-core>=2.15.0,<2.16.0
+  ansible_runner:
+    package_pip: ansible-runner>=2.4.0
+  python:
+    - cryptography>=41.0.0
+    - requests>=2.31.0
+    - f5-sdk>=3.0.21
+    - netaddr
+    - boto3>=1.34.0
+    - botocore>=1.34.0
+    - paramiko
+  system: bindep.txt
+
+additional_build_files:
+  - src: files/ansible.cfg
+    dest: configs
+
+additional_build_steps:
+  prepend_base:
+    - RUN microdnf install -y python3-pip python3-devel gcc make git openssl-devel libffi-devel
+    - RUN python3 -m ensurepip --upgrade || true
+    - RUN python3 -m pip install --upgrade pip setuptools wheel
+  prepend_galaxy:
+    - RUN mkdir -p /runner && echo "Runner dir created"
+
+  prepend_final: |
+    RUN mkdir -p /etc/ansible \
+      && if [ -f /runner/_build/configs/ansible.cfg ]; then \
+           cp /runner/_build/configs/ansible.cfg /etc/ansible/ansible.cfg; \
+         fi
+
+  append_final:
+    - RUN echo "F5 Certificate Renewal EE built successfully"
+    - LABEL maintainer="Todd Ruch truch@redhat.com"
+    - LABEL description="Execution Environment for F5 BIG-IP certificate renewal via Let's Encrypt"

@@ -1,0 +1,36 @@
+---
+# Let's Encrypt environment switch. Default is staging (re-runnable, high rate
+# limits, untrusted cert). Pass `-e acme_env=production` for a real cert.
+acme_env: staging
+acme_directories:
+  staging: "https://acme-staging-v02.api.letsencrypt.org/directory"
+  production: "https://acme-v02.api.letsencrypt.org/directory"
+acme_directory: "{{ acme_directories[acme_env] }}"
+
+# Skip the ACME order if the existing cert at cert_path still has more than
+# this many days left. Makes re-runs idempotent and avoids burning LE
+# duplicate-cert quota during iteration.
+cert_remaining_days: 30
+
+# Defaults for cert identity. cert_fqdn must be set by the caller.
+cert_name: "{{ cert_fqdn | replace('.', '_') }}"
+acme_email: "admin@{{ cloudflare_zone }}"
+
+# Cloudflare API token used to publish/clean up the _acme-challenge TXT records.
+# Same token shape as demo_prep — same permissions (Zone:DNS:Edit + Zone:Zone:Read,
+# scoped to the zone).
+cloudflare_api_token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') }}"
+
+# Working files on the control node. ACME artifacts are intentionally kept
+# outside the role so renewals can re-use the same account key.
+acme_work_dir: "{{ playbook_dir }}/.acme"
+acme_account_key: "{{ acme_work_dir }}/account.key"
+cert_key_path: "{{ acme_work_dir }}/{{ cert_name }}.key"
+csr_path: "{{ acme_work_dir }}/{{ cert_name }}.csr"
+cert_path: "{{ acme_work_dir }}/{{ cert_name }}.crt"
+chain_path: "{{ acme_work_dir }}/{{ cert_name }}.chain.pem"
+fullchain_path: "{{ acme_work_dir }}/{{ cert_name }}.fullchain.pem"
+
+# Required from the caller:
+#   cloudflare_zone  - Cloudflare-managed zone where the _acme-challenge TXT records get written
+#   cert_fqdn        - FQDN being issued

@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  author: Todd Ruch
+  description: Provision F5 BIG-IP VE in AWS for certificate renewal demo
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+  galaxy_tags:
+    - f5
+    - bigip
+    - aws
+    - ec2
+    - demo
+    - provisioning
+
+dependencies: []

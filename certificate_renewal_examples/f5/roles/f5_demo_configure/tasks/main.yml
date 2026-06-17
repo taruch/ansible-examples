@@ -1,0 +1,183 @@
+---
+# Configure F5 BIG-IP demo environment
+# Creates pool, virtual server, SSL profile, and issues initial cert
+
+- name: Set F5 provider connection details
+  ansible.builtin.set_fact:
+    provider:
+      server: "{{ bigip_mgmt_ip }}"
+      server_port: 8443
+      user: "{{ f5_admin_user }}"
+      password: "{{ f5_admin_password }}"
+      validate_certs: false
+      transport: rest
+
+# ========================================================================
+# Basic BIG-IP setup
+# ========================================================================
+
+- name: Provision LTM module (should already be provisioned)
+  f5networks.f5_modules.bigip_provision:
+    module: ltm
+    level: nominal
+    provider: "{{ provider }}"
+  delegate_to: localhost
+
+- name: Set BIG-IP hostname
+  f5networks.f5_modules.bigip_hostname:
+    hostname: "{{ cert_fqdn }}"
+    provider: "{{ provider }}"
+  delegate_to: localhost
+
+# ========================================================================
+# Create demo pool and pool member (echo server)
+# ========================================================================
+
+- name: Create demo pool
+  f5networks.f5_modules.bigip_pool:
+    name: demo_pool
+    partition: Common
+    lb_method: round-robin
+    monitors:
+      - /Common/http
+    state: present
+    provider: "{{ provider }}"
+  delegate_to: localhost
+
+- name: Add dummy pool member (httpbin.org for demo)
+  f5networks.f5_modules.bigip_pool_member:
+    pool: demo_pool
+    partition: Common
+    host: "{{ demo_backend_host | default('httpbin.org') }}"
+    port: 80
+    state: present
+    provider: "{{ provider }}"
+  delegate_to: localhost
+
+# ========================================================================
+# Create client-SSL profile (placeholder cert)
+# ========================================================================
+
+- name: Create client-SSL profile (inherits from default)
+  f5networks.f5_modules.bigip_profile_client_ssl:
+    name: "clientssl_{{ cert_name }}"
+    partition: Common
+    parent: /Common/clientssl
+    state: present
+    provider: "{{ provider }}"
+  delegate_to: localhost
+  register: initial_profile
+
+# ========================================================================
+# Create HTTPS virtual server
+# ========================================================================
+
+- name: Create HTTPS virtual server
+  f5networks.f5_modules.bigip_virtual_server:
+    name: demo_vs_https
+    partition: Common
+    destination: "{{ bigip_private_ip }}"
+    port: 443
+    pool: demo_pool
+    snat: automap
+    profiles:
+      - name: tcp
+        context: all
+      - name: "clientssl_{{ cert_name }}"
+        context: client-side
+      - name: http
+        context: all
+    state: present
+    provider: "{{ provider }}"
+  delegate_to: localhost
+
+- name: Create HTTP virtual server (redirect to HTTPS)
+  f5networks.f5_modules.bigip_virtual_server:
+    name: demo_vs_http
+    partition: Common
+    destination: "{{ bigip_private_ip }}"
+    port: 80
+    pool: demo_pool
+    snat: automap
+    profiles:
+      - name: tcp
+        context: all
+      - name: http
+        context: all
+    state: present
+    provider: "{{ provider }}"
+  delegate_to: localhost
+
+# ========================================================================
+# Issue initial Let's Encrypt certificate
+# ========================================================================
+
+- name: Issue initial certificate via Let's Encrypt
+  ansible.builtin.include_role:
+    name: letsencrypt_cloudflare
+  vars:
+    acme_env: "{{ acme_env | default('staging') }}"
+    cert_remaining_days: 999  # Force initial issuance
+
+# ========================================================================
+# Import cert to BIG-IP and configure SSL profile
+# ========================================================================
+
+- name: Import certificate to BIG-IP
+  ansible.builtin.include_role:
+    name: f5_tls
+  vars:
+    cert_version: "{{ ansible_date_time.date | default(lookup('pipe','date +%Y%m%d')) }}"
+    new_cert_object: "{{ cert_name }}_{{ cert_version }}"
+    clientssl_profile: "clientssl_{{ cert_name }}"
+
+# ========================================================================
+# Verify
+# ========================================================================
+
+- name: Save BIG-IP configuration
+  f5networks.f5_modules.bigip_config:
+    save: true
+    provider: "{{ provider }}"
+  delegate_to: localhost
+
+- name: Wait for virtual server to be accessible
+  ansible.builtin.wait_for:
+    host: "{{ cert_fqdn }}"
+    port: 443
+    delay: 5
+    timeout: 60
+    state: started
+  delegate_to: localhost
+
+- name: Verify HTTPS connectivity (may fail on staging cert)
+  ansible.builtin.uri:
+    url: "https://{{ cert_fqdn }}"
+    return_content: false
+    validate_certs: "{{ 'staging' not in (acme_env | default('staging')) }}"
+    timeout: 30
+  delegate_to: localhost
+  register: https_check
+  failed_when: false
+
+- name: Demo configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "F5 BIG-IP demo configuration complete!"
+      - ""
+      - "Objects created:"
+      - "  - Pool: demo_pool"
+      - "  - Pool member: {{ demo_backend_host | default('httpbin.org') }}:80"
+      - "  - Virtual server (HTTPS): demo_vs_https ({{ bigip_private_ip }}:443)"
+      - "  - Virtual server (HTTP): demo_vs_http ({{ bigip_private_ip }}:80)"
+      - "  - Client-SSL profile: clientssl_{{ cert_name }}"
+      - "  - Certificate: {{ cert_name }}_{{ cert_version }}.crt"
+      - ""
+      - "Access URLs:"
+      - "  - https://{{ cert_fqdn }} ({{ 'STAGING CERT - browser will warn' if acme_env == 'staging' else 'Production cert' }})"
+      - "  - https://{{ bigip_mgmt_ip }}:8443 (BIG-IP management)"
+      - ""
+      - "Certificate details:"
+      - "  - FQDN: {{ cert_fqdn }}"
+      - "  - ACME environment: {{ acme_env | default('staging') }}"
+      - "  - Issuer: {{ 'Fake LE Intermediate' if acme_env == 'staging' else 'Let''s Encrypt' }}"

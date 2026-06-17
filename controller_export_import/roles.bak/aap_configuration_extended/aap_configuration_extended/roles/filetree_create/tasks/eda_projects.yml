@@ -1,0 +1,103 @@
+---
+- name: "Get current Projects from the API"
+  ansible.builtin.set_fact:
+    projects_lookvar: "{{ query('ansible.platform.gateway_api', 'api/eda/v1/projects/',
+                                query_params=(query_params | combine({'id': project_id} if project_id is defined else {})),
+                                host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                                return_all=true, max_objects=query_eda_api_max_objects, errors='ignore')
+                       }}"
+  vars:
+    query_params:
+      order_by: 'organization_id,id'
+  no_log: "{{ eda_configuration_filetree_create_secure_logging }}"
+
+- name: "Continue only if there has no errors with the previous API query"
+  when:
+    - projects_lookvar | length > 0
+    - projects_lookvar | first | length > 0
+  block:
+    - name: "Block for to generate flatten output"
+      when:
+        - flatten_output is defined
+        - flatten_output | bool
+      vars:
+        __dest: "{{ output_path }}/eda_projects.yaml"
+      block:
+        - name: "Add current projects to the eda_projects flat file"
+          ansible.builtin.blockinfile:
+            create: true
+            mode: "0644"
+            insertafter: EOF
+            path: "{{ __dest }}"
+            marker: ""
+            block: "{{ lookup('template', 'templates/eda_projects.j2') }}"
+          vars:
+            project_organization: "{{ current_projects_asset_value.organization_id | default(organization, true) }}"
+            project_id: "{{ current_projects_asset_value.id }}"
+            project_name: "{{ current_projects_asset_value.name | regex_replace('/', '_') }}"
+            query_notification_error: "{{ query(eda_api_plugin, current_projects_asset_value.related.notification_templates_error,
+                             host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                             return_all=true, max_objects=query_eda_api_max_objects) }}"
+            query_notification_started: "{{ query(eda_api_plugin, current_projects_asset_value.related.notification_templates_started,
+                             host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                             return_all=true, max_objects=query_eda_api_max_objects) }}"
+            query_notification_success: "{{ query(eda_api_plugin, current_projects_asset_value.related.notification_templates_success,
+                             host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                             return_all=true, max_objects=query_eda_api_max_objects) }}"
+            last_project: "{{ current_project_index == ((projects_lookvar | length) - 1) }}"
+          loop: "{{ projects_lookvar }}"
+          loop_control:
+            index_var: current_project_index
+            loop_var: current_projects_asset_value
+            label: "{{ __dest }}"
+          no_log: "{{ eda_configuration_filetree_create_secure_logging }}"
+
+        - name: "Remove all the blank lines introduced by the last task"
+          ansible.builtin.lineinfile:
+            path: "{{ __dest }}"
+            line: ''
+            state: absent
+
+    - name: "Block for to generate the filetre_create normal output"
+      when: flatten_output is not defined or not (flatten_output | bool)
+      block:
+        - name: "Create the <ORGANIZATION_NAME>/eda_projects output directory for projects in {{ output_path }}"
+          ansible.builtin.file:
+            path: "{{ __path }}"
+            state: directory
+            mode: '0755'
+          vars:
+            __path: "{{ output_path }}/{{ needed_path | regex_replace('/', '_') }}/eda_projects"
+          loop: "{{ (projects_lookvar | selectattr('organization_id', 'defined') |
+                    map(attribute='organization_id') | list | flatten | unique) +
+                    ([organization] if ((projects_lookvar | selectattr('organization', 'undefined') | list) | flatten | length > 0) else [])
+                }}"
+          loop_control:
+            loop_var: needed_path
+            label: "{{ __path }}"
+
+        - name: "Add current projects to the <ORGANIZATION_NAME>/eda_projects output file in {{ output_path }}"
+          ansible.builtin.template:
+            src: "templates/eda_projects.j2"
+            dest: "{{ __dest }}"
+            mode: '0644'
+          vars:
+            project_organization: "{{ current_projects_asset_value.organization_id | default(organization, true) }}"
+            project_id: "{{ current_projects_asset_value.id }}"
+            project_name: "{{ current_projects_asset_value.name | regex_replace('/', '_') }}"
+            __dest: "{{ output_path }}/{{ project_organization | regex_replace('/', '_') }}/eda_projects/{{ (project_id ~ '_') if omit_id is not defined else '' }}{{ project_name | regex_replace('/', '_') }}.yaml"
+            query_notification_error: "{{ query(eda_api_plugin, current_projects_asset_value.related.notification_templates_error,
+                             host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                             return_all=true, max_objects=query_eda_api_max_objects) }}"
+            query_notification_started: "{{ query(eda_api_plugin, current_projects_asset_value.related.notification_templates_started,
+                             host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                             return_all=true, max_objects=query_eda_api_max_objects) }}"
+            query_notification_success: "{{ query(eda_api_plugin, current_projects_asset_value.related.notification_templates_success,
+                             host=aap_hostname, oauth_token=aap_oauthtoken, verify_ssl=aap_validate_certs,
+                             return_all=true, max_objects=query_eda_api_max_objects) }}"
+          loop: "{{ projects_lookvar }}"
+          loop_control:
+            loop_var: current_projects_asset_value
+            label: "{{ __dest }}"
+          no_log: "{{ eda_configuration_filetree_create_secure_logging }}"
+...

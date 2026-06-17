@@ -1,0 +1,115 @@
+---
+# Renew (or, when due, re-issue) an SSL cert on F5 BIG-IP via Let's Encrypt
+# (DNS-01 against Cloudflare).
+#
+# Architecture — Pattern A (in-band issuance):
+#   1. Pre-flight: query the F5 SSL profile for the current cert's expiry via
+#      iControl REST API. If more than `cert_remaining_days` left, end the play.
+#      This check works regardless of whether any cert artifacts exist on the
+#      control node — critical for AAP, where the project filesystem is ephemeral
+#      per job and `.acme/` never persists between runs.
+#   2. Otherwise, run `letsencrypt_cloudflare` (issues a fresh LE cert via a
+#      DNS-01 challenge written to the Cloudflare zone) and `f5_tls` (imports
+#      the cert/key/chain to BIG-IP with versioned names, updates the SSL profile
+#      to reference the new cert — zero downtime cutover).
+#
+# Required vars (from caller, inventory, or AAP credential injectors):
+#   cloudflare_zone         Cloudflare-managed zone (e.g. example.com)
+#   cloudflare_api_token    Token with Zone:Zone:Read + Zone:DNS:Edit on the zone
+#                           (or set the CLOUDFLARE_API_TOKEN env var)
+#   f5_user                 BIG-IP admin username
+#   f5_password             BIG-IP admin password
+#
+# Optional vars:
+#   cert_fqdn               Defaults to `inventory_hostname` — the play assumes
+#                           the inventory hostname IS the cert FQDN.
+#   acme_env                staging (default) or production
+#   cert_remaining_days     30 (default). Skip renewal if live cert has more
+#                           than this many days left. Set to 999 to force re-issue.
+#   vault_keystore_password N/A for F5 (no keystore concept like Tomcat)
+#   clientssl_profile       Name of the client-SSL profile to update
+#   partition               BIG-IP partition (default: Common)
+
+- name: Renew F5 BIG-IP SSL cert via Let's Encrypt
+  hosts: bigip
+  gather_facts: true
+  connection: local
+  vars:
+    # If the inventory host is already an FQDN (has a dot), use it as-is.
+    # Otherwise treat it as a short name and append cloudflare_zone.
+    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
+    cert_name: "{{ cert_fqdn | replace('.', '_') }}"
+    cert_version: "{{ ansible_date_time.date | default(lookup('pipe','date +%Y%m%d')) }}"
+    new_cert_object: "{{ cert_name }}_{{ cert_version }}"
+    partition: "{{ f5_partition | default('Common') }}"
+    clientssl_profile: "{{ f5_clientssl_profile | default('clientssl_' + cert_name) }}"
+
+    provider:
+      server: "{{ ansible_host | default(inventory_hostname) }}"
+      server_port: "{{ f5_server_port | default(443) }}"
+      user: "{{ f5_user }}"
+      password: "{{ f5_password }}"
+      validate_certs: "{{ f5_validate_certs | default(true) }}"
+      transport: rest
+
+  pre_tasks:
+    - name: Query the current SSL profile to get the active cert name
+      f5networks.f5_modules.bigip_command:
+        commands:
+          - "tmsh list ltm profile client-ssl {{ clientssl_profile }} cert-key-chain one-line"
+        provider: "{{ provider }}"
+      register: current_profile
+      failed_when: false
+      changed_when: false
+
+    - name: Extract the current certificate name from the profile
+      ansible.builtin.set_fact:
+        current_cert_name: "{{ current_profile.stdout_lines[0] | regex_search('cert\\s+(\\S+\\.crt)', '\\1') | first | default('') | regex_replace('\\.crt$', '') }}"
+      when:
+        - current_profile.rc == 0
+        - current_profile.stdout_lines | length > 0
+
+    - name: Fetch the current certificate object details from BIG-IP
+      f5networks.f5_modules.bigip_command:
+        commands:
+          - "tmsh list sys file ssl-cert {{ current_cert_name }}.crt"
+        provider: "{{ provider }}"
+      register: cert_details
+      failed_when: false
+      changed_when: false
+      when: current_cert_name is defined and current_cert_name | length > 0
+
+    - name: Parse certificate expiry from BIG-IP output
+      ansible.builtin.set_fact:
+        cert_expiry_timestamp: "{{ cert_details.stdout | regex_search('expiration-date\\s+(\\d+)', '\\1') | first | default(none) }}"
+      when:
+        - cert_details is defined
+        - cert_details.rc == 0
+
+    - name: Compute days remaining on the current cert
+      ansible.builtin.set_fact:
+        live_cert_days_remaining: >-
+          {{ ((cert_expiry_timestamp | int) - (ansible_date_time.epoch | int)) // 86400 }}
+      when: cert_expiry_timestamp is defined and cert_expiry_timestamp
+
+    - name: Renewal decision
+      ansible.builtin.debug:
+        msg: >-
+          {% if live_cert_days_remaining is defined -%}
+          Current cert on profile {{ clientssl_profile }} valid for {{ live_cert_days_remaining }} more day(s);
+          threshold is {{ cert_remaining_days | default(30) }} —
+          {{ 'skipping renewal.' if (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
+             else 'renewing.' }}
+          {%- else -%}
+          No valid cert found on SSL profile {{ clientssl_profile }} — proceeding with issuance.
+          {%- endif %}
+
+    - name: End play if the current cert is still fresh enough
+      ansible.builtin.meta: end_play
+      when:
+        - live_cert_days_remaining is defined
+        - (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
+
+  roles:
+    - role: letsencrypt_cloudflare
+    - role: f5_tls

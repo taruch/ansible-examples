@@ -1,0 +1,11 @@
+---
+aap_organizations:
+  - name: Satellite
+  - name: Default
+    default_environment: Automation Hub Default Execution Environment
+  - name: Test-dispatch-dependencies
+    galaxy_credentials:
+      - galaxy-server
+    notification_templates_approvals:
+      - Email notification
+...

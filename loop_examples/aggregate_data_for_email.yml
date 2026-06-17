@@ -1,0 +1,172 @@
+---
+- name: Loop Through Data Structure and Aggregate Results for Email
+  hosts: all
+  gather_facts: true
+  vars:
+    # Sample data structure - simulating application status checks
+    applications:
+      - name: "web-server"
+        service: "httpd"
+        port: 80
+        expected_status: "running"
+      - name: "database"
+        service: "postgresql"
+        port: 5432
+        expected_status: "running"
+      - name: "cache"
+        service: "redis"
+        port: 6379
+        expected_status: "running"
+      - name: "message-queue"
+        service: "rabbitmq"
+        port: 5672
+        expected_status: "running"
+
+  tasks:
+    - name: Initialize per-host results list
+      ansible.builtin.set_fact:
+        host_app_results: []
+
+    - name: Simulate checking application status (loop through apps)
+      loop: "{{ applications }}"
+      loop_control:
+        label: "{{ item.name }}"
+      ansible.builtin.set_fact:
+        host_app_results: "{{ host_app_results + [check_result] }}"
+      vars:
+        # Simulate random status check results
+        random_status: "{{ ['running', 'stopped', 'running', 'running'] | random }}"
+        check_result:
+          app_name: "{{ item.name }}"
+          service: "{{ item.service }}"
+          port: "{{ item.port }}"
+          expected: "{{ item.expected_status }}"
+          actual: "{{ random_status }}"
+          status: "{{ 'OK' if random_status == item.expected_status else 'FAILED' }}"
+          host: "{{ inventory_hostname }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Display per-host results
+      ansible.builtin.debug:
+        msg: "Host {{ inventory_hostname }} has {{ host_app_results | length }} application checks"
+        verbosity: 1
+
+- name: Aggregate Results on Localhost for Email Report
+  hosts: localhost
+  gather_facts: false
+  vars:
+    all_results: []
+    failed_checks: []
+    summary_by_host: {}
+
+  tasks:
+    - name: Combine all host results into single list
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        label: "{{ item }}"
+      ansible.builtin.set_fact:
+        all_results: "{{ all_results + hostvars[item].host_app_results | default([]) }}"
+
+    - name: Extract only failed checks
+      loop: "{{ all_results }}"
+      loop_control:
+        label: "{{ item.host }}/{{ item.app_name }}"
+      when: item.status == 'FAILED'
+      ansible.builtin.set_fact:
+        failed_checks: "{{ failed_checks + [item] }}"
+
+    - name: Build summary statistics by host
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        label: "{{ item }}"
+      vars:
+        host_results: "{{ hostvars[item].host_app_results | default([]) }}"
+        total_checks: "{{ host_results | length }}"
+        failed_count: "{{ host_results | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        ok_count: "{{ host_results | selectattr('status', 'equalto', 'OK') | list | length }}"
+      ansible.builtin.set_fact:
+        summary_by_host: "{{ summary_by_host | combine({item: {'total': total_checks, 'ok': ok_count, 'failed': failed_count}}) }}"
+
+    - name: Display aggregated results summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Application Health Check Summary ==="
+          - "Total checks across all hosts: {{ all_results | length }}"
+          - "Total failed checks: {{ failed_checks | length }}"
+          - "Hosts checked: {{ groups['all'] | length }}"
+
+    - name: Display per-host summary
+      ansible.builtin.debug:
+        msg: "Host: {{ item.key }} | Total: {{ item.value.total }} | OK: {{ item.value.ok }} | Failed: {{ item.value.failed }}"
+      loop: "{{ summary_by_host | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Display failed checks details
+      when: failed_checks | length > 0
+      ansible.builtin.debug:
+        msg: "FAILED: {{ item.host }} - {{ item.app_name }} ({{ item.service }}:{{ item.port }}) - Expected: {{ item.expected }}, Actual: {{ item.actual }}"
+      loop: "{{ failed_checks }}"
+      loop_control:
+        label: "{{ item.host }}/{{ item.app_name }}"
+
+    - name: Prepare email body from aggregated data
+      ansible.builtin.set_fact:
+        email_subject: "Application Health Check Report - {{ failed_checks | length }} Issues Found"
+        email_body: |
+          Application Health Check Report
+          Generated: {{ ansible_date_time.iso8601 }}
+
+          SUMMARY:
+          --------
+          Total Checks: {{ all_results | length }}
+          Passed: {{ all_results | selectattr('status', 'equalto', 'OK') | list | length }}
+          Failed: {{ failed_checks | length }}
+
+          PER-HOST BREAKDOWN:
+          -------------------
+          {% for host, stats in summary_by_host.items() %}
+          {{ host }}: {{ stats.ok }}/{{ stats.total }} OK ({{ stats.failed }} failed)
+          {% endfor %}
+
+          {% if failed_checks | length > 0 %}
+          FAILED CHECKS:
+          --------------
+          {% for check in failed_checks %}
+          - {{ check.host }}: {{ check.app_name }} ({{ check.service }})
+            Port: {{ check.port }}
+            Expected: {{ check.expected }}
+            Actual: {{ check.actual }}
+            Time: {{ check.timestamp }}
+          {% endfor %}
+          {% else %}
+          All checks passed successfully!
+          {% endif %}
+
+          ---
+          End of Report
+
+    - name: Display email content (simulated email send)
+      ansible.builtin.debug:
+        msg:
+          - "Subject: {{ email_subject }}"
+          - "---"
+          - "{{ email_body }}"
+
+    - name: Save aggregated results to file (optional - for actual email sending)
+      ansible.builtin.copy:
+        content: |
+          Subject: {{ email_subject }}
+
+          {{ email_body }}
+        dest: "/tmp/health_check_report_{{ ansible_date_time.epoch }}.txt"
+        mode: '0644'
+
+    - name: Display next steps
+      ansible.builtin.debug:
+        msg:
+          - "Report saved to /tmp/health_check_report_{{ ansible_date_time.epoch }}.txt"
+          - "To send via email, use mail module or command module with sendmail/mail"
+          - "Example: community.general.mail module or ansible.builtin.command with 'mail -s ...'"
+
+...

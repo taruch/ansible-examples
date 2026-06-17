@@ -1,0 +1,82 @@
+---
+# Renew (or, when due, re-issue) the IIS SSL cert on Windows via Let's
+# Encrypt (DNS-01 against Cloudflare).
+#
+# Architecture — Pattern A (in-band issuance):
+#   1. Pre-flight: read the live cert from the IIS binding and compute
+#      days until expiry. If more than `cert_remaining_days` left, end the
+#      play. This check works regardless of whether any cert artifacts exist
+#      on the control node — critical for AAP, where the project filesystem
+#      is ephemeral per job and `.acme/` never persists between runs.
+#   2. Otherwise, run `letsencrypt_cloudflare` (issues a fresh LE cert via a
+#      DNS-01 challenge written to the Cloudflare zone) and
+#      `iis_windows_tls` (imports the cert to Windows Certificate Store,
+#      updates IIS binding, and recycles the application pool only if the
+#      cert actually changed).
+#
+# Required vars (from caller, an inventory file, or AAP credential injectors):
+#   cloudflare_zone         Cloudflare-managed zone (e.g. example.com)
+#   cloudflare_api_token    Token with Zone:Zone:Read + Zone:DNS:Edit on the zone
+#                           (or set the CLOUDFLARE_API_TOKEN env var)
+#   ansible_password        Windows admin password (via inventory / vault)
+#
+# Optional vars:
+#   cert_fqdn               Defaults to `inventory_hostname` — the play assumes
+#                           the inventory hostname IS the cert FQDN.
+#   acme_env                staging (default) or production
+#   cert_remaining_days     30 (default). Skip renewal if live cert has more
+#                           than this many days left. Set to 999 to force re-issue.
+#   iis_site_name           Default Web Site (default). IIS site to bind cert to.
+#   iis_binding_port        443 (default). HTTPS port for the IIS binding.
+
+- name: Renew IIS SSL cert via Let's Encrypt
+  hosts: iis_windows_demo
+  gather_facts: true
+  vars:
+    # If the inventory host is already an FQDN (has a dot), use it as-is.
+    # Otherwise treat it as a short name and append cloudflare_zone — so both
+    # `iis-demo.example.com` and `iis-demo` (with cloudflare_zone=example.com)
+    # resolve to the same cert FQDN.
+    cert_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname + '.' + cloudflare_zone }}"
+
+  pre_tasks:
+    - name: Probe the live cert on the IIS binding
+      community.crypto.get_certificate:
+        host: "{{ cert_fqdn }}"
+        port: "{{ iis_binding_port | default(443) }}"
+      delegate_to: localhost
+      become: false
+      register: live_cert_probe
+      failed_when: false
+      changed_when: false
+
+    - name: Compute days remaining on the live cert
+      ansible.builtin.set_fact:
+        live_cert_days_remaining: >-
+          {{ (
+              (live_cert_probe.not_after | to_datetime('%Y%m%d%H%M%SZ'))
+              - (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%SZ'))
+             ).days }}
+      when: live_cert_probe.not_after is defined
+
+    - name: Renewal decision
+      ansible.builtin.debug:
+        msg: >-
+          {% if live_cert_days_remaining is defined -%}
+          Live cert valid for {{ live_cert_days_remaining }} more day(s);
+          threshold is {{ cert_remaining_days | default(30) }} —
+          {{ 'skipping renewal.' if (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
+             else 'renewing.' }}
+          {%- else -%}
+          No reachable cert on {{ cert_fqdn }}:{{ iis_binding_port | default(443) }} — proceeding with issuance.
+          {%- endif %}
+
+    - name: End play if the live cert is still fresh enough
+      ansible.builtin.meta: end_play
+      when:
+        - live_cert_days_remaining is defined
+        - (live_cert_days_remaining | int) > (cert_remaining_days | default(30) | int)
+
+  roles:
+    - role: letsencrypt_cloudflare
+    - role: iis_windows_tls
