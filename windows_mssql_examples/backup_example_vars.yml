@@ -1,0 +1,76 @@
+---
+# Example variables for SQL Server backup playbook
+# Copy this file and customize for your environment
+# Usage: ansible-playbook backup_mssql.yml -e @backup_example_vars.yml
+
+# ============================================
+# BACKUP METHOD SELECTION
+# ============================================
+# Choose 'native' for lowlydba.sqlserver backups
+# Choose 'cohesity' for Cohesity DataProtect backups
+_backup_method: native
+
+# ============================================
+# SQL SERVER CONNECTION
+# ============================================
+_mssql_instance: localhost
+_mssql_port: 1433
+_mssql_database: all  # 'all' for all user databases, or specific database name
+_mssql_login_user: sa
+# _mssql_login_password: "{{ vault_mssql_password }}"  # Store in Ansible Vault
+
+# ============================================
+# NATIVE BACKUP SETTINGS
+# ============================================
+_backup_type: full  # full, diff, or log
+_backup_path: C:\SQLBackups
+_backup_compression: true
+_backup_checksum: true
+_backup_verify: true
+_backup_copy_only: false
+_backup_retention_days: 7
+
+# ============================================
+# COHESITY SETTINGS
+# ============================================
+# Uncomment and configure if using Cohesity backup method
+# _cohesity_cluster: cohesity.example.com
+# _cohesity_username: admin
+# _cohesity_password: "{{ vault_cohesity_password }}"
+# _cohesity_job_name: SQL_Production_Backup
+# _cohesity_policy_name: SQL_Daily_Retention
+# _cohesity_storage_domain: DefaultStorageDomain
+
+# ============================================
+# ANSIBLE CONNECTION (Windows)
+# ============================================
+ansible_connection: winrm
+ansible_winrm_transport: ntlm
+ansible_winrm_server_cert_validation: ignore
+ansible_winrm_port: 5986
+ansible_winrm_scheme: https
+
+# ============================================
+# EXAMPLES FOR DIFFERENT SCENARIOS
+# ============================================
+
+# Example 1: Full backup of all databases (default)
+# ansible-playbook backup_mssql.yml -e @backup_example_vars.yml
+
+# Example 2: Differential backup
+# ansible-playbook backup_mssql.yml -e @backup_example_vars.yml -e "_backup_type=diff"
+
+# Example 3: Transaction log backup
+# ansible-playbook backup_mssql.yml -e @backup_example_vars.yml -e "_backup_type=log"
+
+# Example 4: Backup specific database
+# ansible-playbook backup_mssql.yml -e @backup_example_vars.yml -e "_mssql_database=AdventureWorks"
+
+# Example 5: Copy-only backup (doesn't break backup chain)
+# ansible-playbook backup_mssql.yml -e @backup_example_vars.yml -e "_backup_copy_only=true"
+
+# Example 6: Custom retention period
+# ansible-playbook backup_mssql.yml -e @backup_example_vars.yml -e "_backup_retention_days=30"
+
+# Example 7: Cohesity backup
+# ansible-playbook backup_mssql.yml -e @backup_example_vars.yml -e "_backup_method=cohesity"

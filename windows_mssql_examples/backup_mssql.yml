@@ -1,0 +1,344 @@
+---
+- name: Backup Microsoft SQL Server databases
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: true
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: basic
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+    # Backup method: 'cohesity' or 'native' (default)
+    backup_method: "{{ _backup_method | default('native') }}"
+
+    # SQL Server connection settings
+    mssql_instance: "{{ _mssql_instance | default('localhost') }}"
+    mssql_port: "{{ _mssql_port | default(1433) }}"
+    mssql_database: "{{ _mssql_database | default('all') }}"  # 'all' or specific database name
+    mssql_login_user: "{{ _mssql_login_user | default('sa') }}"
+    mssql_login_password: "{{ _mssql_login_password }}"
+
+    # Native backup settings (lowlydba.sqlserver)
+    backup_type: "{{ _backup_type | default('full') }}"  # full, diff, or log
+    backup_path: "{{ _backup_path | default('C:\\SQLBackups') }}"
+    backup_compression: "{{ _backup_compression | default(true) }}"
+    backup_checksum: "{{ _backup_checksum | default(true) }}"
+    backup_verify: "{{ _backup_verify | default(true) }}"
+    backup_copy_only: "{{ _backup_copy_only | default(false) }}"
+    backup_retention_days: "{{ _backup_retention_days | default(7) }}"
+
+    # Cohesity settings
+    cohesity_cluster: "{{ _cohesity_cluster | default('cohesity.example.com') }}"
+    cohesity_username: "{{ _cohesity_username | default('admin') }}"
+    cohesity_password: "{{ _cohesity_password }}"
+    cohesity_job_name: "{{ _cohesity_job_name | default('SQL_Backup_Job') }}"
+    cohesity_policy_name: "{{ _cohesity_policy_name | default('SQL_Daily') }}"
+    cohesity_storage_domain: "{{ _cohesity_storage_domain | default('DefaultStorageDomain') }}"
+
+  tasks:
+    # --- Check which backup method to use ---
+    - name: Set backup method facts
+      ansible.builtin.set_fact:
+        use_cohesity: "{{ backup_method == 'cohesity' }}"
+        use_native: "{{ backup_method == 'native' }}"
+
+    # --- Prerequisites ---
+    - name: Check if dbatools is installed
+      ansible.windows.win_powershell:
+        script: |
+          $module = Get-Module -ListAvailable -Name dbatools
+          if ($module) {
+            @{
+              Installed = $true
+              Version = $module.Version.ToString()
+              Path = $module.ModuleBase
+            } | ConvertTo-Json
+          } else {
+            @{Installed = $false} | ConvertTo-Json
+          }
+      register: dbatools_check
+      when: use_native | bool
+
+    - name: Install dbatools PowerShell module (required for lowlydba.sqlserver)
+      ansible.windows.win_powershell:
+        script: |
+          # Install to Program Files so it's available system-wide
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -ErrorAction SilentlyContinue
+          Install-Module -Name dbatools -Force -AllowClobber -Scope AllUsers -SkipPublisherCheck
+          Import-Module dbatools -Force
+
+          # Verify installation
+          $cmd = Get-Command Backup-DbaDatabase -ErrorAction SilentlyContinue
+          if ($cmd) {
+            "dbatools installed and Backup-DbaDatabase available"
+          } else {
+            throw "dbatools installed but Backup-DbaDatabase not found"
+          }
+      register: dbatools_install
+      when:
+        - use_native | bool
+        - (dbatools_check.output[0] | from_json).Installed == false
+
+    - name: Display dbatools installation result
+      ansible.builtin.debug:
+        var: dbatools_install.output
+      when:
+        - use_native | bool
+        - dbatools_install is defined
+
+    # --- Common validation tasks ---
+    - name: Check if SQL Server service is running
+      ansible.windows.win_service:
+        name: MSSQLSERVER
+      register: mssql_service
+      failed_when: false
+
+    - name: Debug SQL Server service status
+      ansible.builtin.debug:
+        var: mssql_service
+      when: false  # Set to true to see full service details
+
+    - name: Assert SQL Server service is running
+      ansible.builtin.assert:
+        that:
+          - mssql_service.exists | default(false)
+          - mssql_service.state == 'running'
+        fail_msg: "SQL Server service is not running. State: {{ mssql_service.state | default('unknown') }}"
+        success_msg: "SQL Server service is running"
+
+    - name: Check all databases (for debugging)
+      ansible.windows.win_powershell:
+        script: |
+          Invoke-Sqlcmd -Query "SELECT database_id, name FROM sys.databases ORDER BY database_id" -ServerInstance "{{ mssql_instance }}" | Format-Table -AutoSize | Out-String
+      register: all_dbs_debug
+      when: mssql_database == 'all'
+
+    - name: Display all databases
+      ansible.builtin.debug:
+        msg: "{{ all_dbs_debug.output }}"
+      when: mssql_database == 'all'
+
+    - name: Get list of databases
+      ansible.windows.win_powershell:
+        script: |
+          $databases = Invoke-Sqlcmd -Query "
+            SELECT name, database_id, state_desc, recovery_model_desc
+            FROM sys.databases
+            WHERE database_id > 4
+              AND state_desc = 'ONLINE'
+            ORDER BY name
+          " -ServerInstance "{{ mssql_instance }}"
+          if ($databases) {
+            $databases | ConvertTo-Json -Depth 2 -Compress
+          } else {
+            '[]'
+          }
+      register: database_list
+      when: mssql_database == 'all'
+
+    - name: Parse database list (all databases)
+      ansible.builtin.set_fact:
+        databases_to_backup: "{{ database_list.output[0] | from_json if database_list.output[0] | default('[]') != '[]' else [] }}"
+      when: mssql_database == 'all'
+
+    - name: Ensure databases_to_backup is a list
+      ansible.builtin.set_fact:
+        databases_to_backup: "{{ [databases_to_backup] if databases_to_backup is mapping else databases_to_backup }}"
+      when:
+        - mssql_database == 'all'
+        - databases_to_backup | default([]) | length > 0
+
+    - name: Set single database backup
+      ansible.builtin.set_fact:
+        databases_to_backup:
+          - name: "{{ mssql_database }}"
+      when: mssql_database != 'all'
+
+    # ============================================
+    # COHESITY BACKUP METHOD
+    # ============================================
+    - name: Cohesity backup block
+      when: use_cohesity | bool
+      block:
+        - name: Check for Cohesity agent on Windows
+          ansible.windows.win_service:
+            name: CohesityAgent
+          register: cohesity_agent
+          failed_when: false
+
+        - name: Assert Cohesity agent is installed and running
+          ansible.builtin.assert:
+            that:
+              - cohesity_agent.exists is defined
+              - cohesity_agent.state == 'started'
+            fail_msg: "Cohesity agent is not installed or not running. Install it first."
+            success_msg: "Cohesity agent is running"
+
+        - name: Register SQL Server with Cohesity (if needed)
+          cohesity.dataprotect.cohesity_source:
+            cluster: "{{ cohesity_cluster }}"
+            username: "{{ cohesity_username }}"
+            password: "{{ cohesity_password }}"
+            validate_certs: false
+            state: present
+            endpoint: "{{ ansible_host }}"
+            environment: SQL
+          delegate_to: localhost
+          run_once: true
+
+        - name: Create or update Cohesity protection job
+          cohesity.dataprotect.cohesity_job:
+            cluster: "{{ cohesity_cluster }}"
+            username: "{{ cohesity_username }}"
+            password: "{{ cohesity_password }}"
+            validate_certs: false
+            state: present
+            name: "{{ cohesity_job_name }}"
+            environment: SQL
+            protection_policy: "{{ cohesity_policy_name }}"
+            storage_domain: "{{ cohesity_storage_domain }}"
+            protection_sources:
+              - endpoint: "{{ ansible_host }}"
+                paths: "{{ databases_to_backup | map(attribute='name') | list if mssql_database == 'all' else [mssql_database] }}"
+          delegate_to: localhost
+          run_once: true
+          register: cohesity_job_result
+
+        - name: Run Cohesity backup job
+          cohesity.dataprotect.cohesity_job:
+            cluster: "{{ cohesity_cluster }}"
+            username: "{{ cohesity_username }}"
+            password: "{{ cohesity_password }}"
+            validate_certs: false
+            state: started
+            name: "{{ cohesity_job_name }}"
+          delegate_to: localhost
+          run_once: true
+          register: cohesity_backup_run
+
+        - name: Display Cohesity backup status
+          ansible.builtin.debug:
+            msg: "Cohesity backup job started: {{ cohesity_backup_run }}"
+
+    # ============================================
+    # NATIVE SQL SERVER BACKUP METHOD
+    # ============================================
+    - name: Native SQL Server backup block
+      when: use_native | bool
+      block:
+        - name: Create backup directory
+          ansible.windows.win_file:
+            path: "{{ backup_path }}"
+            state: directory
+
+        - name: Generate backup timestamp
+          ansible.builtin.set_fact:
+            backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+
+        - name: Configure dbatools to trust SQL Server certificate
+          ansible.windows.win_powershell:
+            script: |
+              # Get current module path
+              $currentPath = $env:PSModulePath
+              $programFilesPath = "C:\Program Files\WindowsPowerShell\Modules"
+
+              # Add Program Files module path if not present
+              if ($currentPath -notlike "*$programFilesPath*") {
+                [Environment]::SetEnvironmentVariable("PSModulePath", "$currentPath;$programFilesPath", "Machine")
+                $env:PSModulePath = "$currentPath;$programFilesPath"
+              }
+
+              # Import dbatools
+              Import-Module dbatools -Force -ErrorAction Stop
+
+              # Configure dbatools to trust server certificates (disable certificate validation)
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+
+              # Verify
+              Get-Command Backup-DbaDatabase | Select-Object Name, ModuleName, Version
+          register: dbatools_verify
+
+        - name: Display dbatools verification
+          ansible.builtin.debug:
+            var: dbatools_verify.output
+
+        - name: Perform SQL Server backup for each database
+          lowlydba.sqlserver.backup:
+            sql_instance: "{{ mssql_instance }}"
+            database: "{{ item.name }}"
+            sql_username: "{{ mssql_login_user }}"
+            sql_password: "{{ mssql_login_password }}"
+            type: "{{ backup_type }}"
+            path: "{{ backup_path }}"
+            file_path: "{{ item.name }}_{{ backup_type }}_{{ backup_timestamp }}.bak"
+            compress: "{{ backup_compression }}"
+            checksum: "{{ backup_checksum }}"
+            verify: "{{ backup_verify }}"
+            copy_only: "{{ backup_copy_only }}"
+            encryption_algorithm: null
+            encryption_certificate: null
+          loop: "{{ databases_to_backup }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: backup_results
+
+        - name: Display backup results
+          ansible.builtin.debug:
+            msg: "Backup completed for {{ item.item.name }}: {{ item.backup_path | default('Success') }}"
+          loop: "{{ backup_results.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+
+        - name: Clean up old backups
+          ansible.windows.win_powershell:
+            script: |
+              $backupPath = "{{ backup_path }}"
+              $retentionDays = {{ backup_retention_days }}
+              $cutoffDate = (Get-Date).AddDays(-$retentionDays)
+
+              Get-ChildItem -Path $backupPath -Filter *.bak |
+                Where-Object { $_.LastWriteTime -lt $cutoffDate } |
+                ForEach-Object {
+                  Write-Output "Removing old backup: $($_.Name)"
+                  Remove-Item -Path $_.FullName -Force
+                }
+          register: cleanup_result
+
+        - name: Display cleanup results
+          ansible.builtin.debug:
+            var: cleanup_result.output
+          when: cleanup_result.output | default([]) | length > 0
+
+        # Verify backups
+        - name: Verify backup files exist
+          ansible.windows.win_stat:
+            path: "{{ backup_path }}\\{{ item.item.name }}_{{ backup_type }}_{{ backup_timestamp }}.bak"
+          loop: "{{ backup_results.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          register: backup_file_check
+
+        - name: Assert all backup files were created
+          ansible.builtin.assert:
+            that:
+              - item.stat.exists
+            fail_msg: "Backup file not found: {{ item.stat.path }}"
+            success_msg: "Backup file verified: {{ item.stat.path }}"
+          loop: "{{ backup_file_check.results }}"
+          loop_control:
+            label: "{{ item.stat.path }}"
+
+    # --- Final summary ---
+    - name: Backup summary
+      ansible.builtin.debug:
+        msg:
+          - "Backup method: {{ backup_method }}"
+          - "Databases backed up: {{ databases_to_backup | map(attribute='name') | list }}"
+          - "Backup type: {{ backup_type if use_native else 'Cohesity managed' }}"
+          - "Backup path: {{ backup_path if use_native else cohesity_cluster }}"
+          - "Timestamp: {{ backup_timestamp | default('N/A') }}"
+          - "Status: Completed successfully"

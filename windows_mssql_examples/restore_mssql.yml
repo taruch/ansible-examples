@@ -1,0 +1,242 @@
+---
+- name: Restore Microsoft SQL Server database from backup
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: true
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: basic
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+    # SQL Server connection settings
+    mssql_instance: "{{ _mssql_instance | default('localhost') }}"
+    mssql_login_user: "{{ _mssql_login_user | default('sa') }}"
+    mssql_login_password: "{{ _mssql_login_password }}"
+
+    # Restore settings
+    backup_file: "{{ _backup_file }}"  # REQUIRED: Path to .bak file
+    database_name: "{{ _database_name | default('') }}"  # Optional: Restore to different name
+    restore_mode: "{{ _restore_mode | default('replace') }}"  # replace, norecovery, recovery
+    force: "{{ _force | default(false) }}"  # Force restore even if database exists
+
+    # Data/log file locations (optional - defaults to SQL Server defaults)
+    data_path: "{{ _data_path | default('') }}"
+    log_path: "{{ _log_path | default('') }}"
+
+  tasks:
+    # --- Validation ---
+    - name: Check if SQL Server service is running
+      ansible.windows.win_service:
+        name: MSSQLSERVER
+      register: mssql_service
+      failed_when: false
+
+    - name: Assert SQL Server service is running
+      ansible.builtin.assert:
+        that:
+          - mssql_service.exists | default(false)
+          - mssql_service.state == 'running'
+        fail_msg: "SQL Server service is not running"
+
+    - name: Assert backup file path is provided
+      ansible.builtin.assert:
+        that:
+          - backup_file is defined
+          - backup_file | length > 0
+        fail_msg: "Backup file path must be provided with -e _backup_file=..."
+
+    - name: Check if backup file exists
+      ansible.windows.win_stat:
+        path: "{{ backup_file }}"
+      register: backup_file_stat
+
+    - name: Assert backup file exists
+      ansible.builtin.assert:
+        that:
+          - backup_file_stat.stat.exists
+        fail_msg: "Backup file not found: {{ backup_file }}"
+
+    # --- Get backup information ---
+    - name: Read backup file header
+      ansible.windows.win_powershell:
+        script: |
+          $backupFile = "{{ backup_file }}"
+
+          # Get backup header information
+          $headerSql = "RESTORE HEADERONLY FROM DISK = N'$backupFile'"
+          $header = Invoke-Sqlcmd -Query $headerSql -ServerInstance "{{ mssql_instance }}"
+
+          # Get file list from backup
+          $filelistSql = "RESTORE FILELISTONLY FROM DISK = N'$backupFile'"
+          $filelist = Invoke-Sqlcmd -Query $filelistSql -ServerInstance "{{ mssql_instance }}"
+
+          @{
+            DatabaseName = $header.DatabaseName
+            BackupType = switch ($header.BackupType) {
+              1 { "Full" }
+              2 { "Transaction Log" }
+              5 { "Differential" }
+              default { "Unknown" }
+            }
+            BackupFinishDate = $header.BackupFinishDate.ToString()
+            ServerName = $header.ServerName
+            Files = @($filelist | ForEach-Object {
+              @{
+                LogicalName = $_.LogicalName
+                PhysicalName = $_.PhysicalName
+                Type = $_.Type
+                FileId = $_.FileId
+              }
+            })
+          } | ConvertTo-Json -Depth 3
+      register: backup_info
+
+    - name: Parse backup information
+      ansible.builtin.set_fact:
+        backup_details: "{{ backup_info.output[0] | from_json }}"
+
+    - name: Display backup information
+      ansible.builtin.debug:
+        msg:
+          - "=== Backup File Information ==="
+          - "Original Database: {{ backup_details.DatabaseName }}"
+          - "Backup Type: {{ backup_details.BackupType }}"
+          - "Backup Date: {{ backup_details.BackupFinishDate }}"
+          - "Source Server: {{ backup_details.ServerName }}"
+          - "Files in backup: {{ backup_details.Files | length }}"
+
+    - name: Set target database name
+      ansible.builtin.set_fact:
+        target_db_name: "{{ database_name if database_name else backup_details.DatabaseName }}"
+
+    # --- Check if target database exists ---
+    - name: Check if target database exists
+      ansible.windows.win_powershell:
+        script: |
+          $db = Invoke-Sqlcmd -Query "SELECT name, state_desc FROM sys.databases WHERE name = '{{ target_db_name }}'" -ServerInstance "{{ mssql_instance }}"
+          if ($db) {
+            @{Exists = $true; State = $db.state_desc} | ConvertTo-Json
+          } else {
+            @{Exists = $false} | ConvertTo-Json
+          }
+      register: db_exists_check
+
+    - name: Parse database existence check
+      ansible.builtin.set_fact:
+        db_exists: "{{ (db_exists_check.output[0] | from_json).Exists }}"
+
+    - name: Warn if database exists and force is not set
+      ansible.builtin.assert:
+        that:
+          - not db_exists | bool or force | bool or restore_mode == 'norecovery'
+        fail_msg: |
+          Database '{{ target_db_name }}' already exists!
+          Use -e _force=true to overwrite it, or -e _database_name=new_name to restore to a different database.
+        success_msg: "Proceeding with restore"
+
+    # --- Perform restore ---
+    - name: Restore database from backup
+      ansible.windows.win_powershell:
+        script: |
+          $backupFile = "{{ backup_file }}"
+          $targetDb = "{{ target_db_name }}"
+          $restoreMode = "{{ restore_mode }}"
+
+          # Build RESTORE command
+          $restoreSql = "RESTORE DATABASE [$targetDb] FROM DISK = N'$backupFile'"
+
+          # Build WITH clause
+          $withOptions = @()
+
+          # Add MOVE clauses if restoring to different name or custom paths
+          {% if database_name or data_path or log_path %}
+          $filelist = @(
+          {% for file in backup_details.Files %}
+            @{LogicalName = "{{ file.LogicalName }}"; Type = "{{ file.Type }}"; PhysicalName = "{{ file.PhysicalName }}"}{{ "," if not loop.last else "" }}
+          {% endfor %}
+          )
+
+          foreach ($file in $filelist) {
+            if ($file.Type -eq "D") {
+              # Data file
+              {% if data_path %}
+              $newPath = "{{ data_path }}\${targetDb}.mdf"
+              {% else %}
+              $newPath = "C:\SQLData\${targetDb}.mdf"
+              {% endif %}
+            } else {
+              # Log file
+              {% if log_path %}
+              $newPath = "{{ log_path }}\${targetDb}_log.ldf"
+              {% else %}
+              $newPath = "C:\SQLData\${targetDb}_log.ldf"
+              {% endif %}
+            }
+            $withOptions += "MOVE N'$($file.LogicalName)' TO N'$newPath'"
+          }
+          {% endif %}
+
+          # Add restore mode options
+          if ($restoreMode -eq "replace" -or {{ force | lower }}) {
+            $withOptions += "REPLACE"
+          }
+
+          if ($restoreMode -eq "norecovery") {
+            $withOptions += "NORECOVERY"
+          } elseif ($restoreMode -eq "recovery") {
+            $withOptions += "RECOVERY"
+          }
+
+          $withOptions += "STATS = 10"
+
+          if ($withOptions.Count -gt 0) {
+            $restoreSql += " WITH " + ($withOptions -join ", ")
+          }
+
+          # Execute restore
+          Write-Output "Executing: $restoreSql"
+          Invoke-Sqlcmd -Query $restoreSql -ServerInstance "{{ mssql_instance }}" -QueryTimeout 3600
+
+          "Restore completed successfully"
+      register: restore_result
+
+    - name: Display restore result
+      ansible.builtin.debug:
+        var: restore_result.output
+
+    # --- Verify restore ---
+    - name: Verify restored database
+      ansible.windows.win_powershell:
+        script: |
+          $db = Invoke-Sqlcmd -Query "
+            SELECT
+              name,
+              database_id,
+              state_desc,
+              recovery_model_desc,
+              create_date,
+              compatibility_level
+            FROM sys.databases
+            WHERE name = '{{ target_db_name }}'
+          " -ServerInstance "{{ mssql_instance }}"
+
+          $db | Format-Table -AutoSize | Out-String
+      register: verify_result
+
+    - name: Display database status
+      ansible.builtin.debug:
+        var: verify_result.output
+
+    # --- Summary ---
+    - name: Restore summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Restore Summary ==="
+          - "Backup file: {{ backup_file }}"
+          - "Backup type: {{ backup_details.BackupType }}"
+          - "Original database: {{ backup_details.DatabaseName }}"
+          - "Restored as: {{ target_db_name }}"
+          - "Restore mode: {{ restore_mode }}"
+          - "Status: SUCCESS"

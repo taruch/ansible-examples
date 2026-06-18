@@ -1,0 +1,64 @@
+---
+- name: Attach ansible database if detached
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: basic
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+    mssql_login_password: "{{ _mssql_login_password }}"
+
+  tasks:
+    - name: Check if ansible database is attached
+      ansible.windows.win_powershell:
+        script: |
+          $db = Invoke-Sqlcmd -Query "SELECT name FROM sys.databases WHERE name = 'ansible'" -ServerInstance "localhost"
+          if ($db) {
+            "ATTACHED"
+          } else {
+            "NOT_ATTACHED"
+          }
+      register: db_status
+
+    - name: Display database status
+      ansible.builtin.debug:
+        msg: "Database status: {{ db_status.output[0] }}"
+
+    - name: Attach ansible database if files exist
+      ansible.windows.win_powershell:
+        script: |
+          $mdfPath = "C:\SQLData\ansible.mdf"
+          $ldfPath = "C:\SQLData\ansible_log.ldf"
+
+          if ((Test-Path $mdfPath) -and (Test-Path $ldfPath)) {
+            $attachQuery = @"
+            CREATE DATABASE [ansible] ON
+            (FILENAME = '$mdfPath'),
+            (FILENAME = '$ldfPath')
+            FOR ATTACH;
+"@
+            Invoke-Sqlcmd -Query $attachQuery -ServerInstance "localhost"
+            "Database attached successfully"
+          } else {
+            "Database files not found at expected location"
+          }
+      register: attach_result
+      when: db_status.output[0] == 'NOT_ATTACHED'
+
+    - name: Display attach result
+      ansible.builtin.debug:
+        var: attach_result.output
+      when: db_status.output[0] == 'NOT_ATTACHED'
+
+    - name: Verify database is now online
+      ansible.windows.win_powershell:
+        script: |
+          Invoke-Sqlcmd -Query "SELECT database_id, name, state_desc FROM sys.databases WHERE name = 'ansible'" -ServerInstance "localhost" | Format-Table -AutoSize | Out-String
+      register: final_status
+
+    - name: Display final status
+      ansible.builtin.debug:
+        var: final_status.output

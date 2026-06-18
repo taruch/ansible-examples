@@ -1,0 +1,49 @@
+---
+- name: Create Ansible demo database with sample data
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: basic
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+    mssql_instance: "{{ _mssql_instance | default('localhost') }}"
+    mssql_login_user: "{{ _mssql_login_user | default('sa') }}"
+    mssql_login_password: "{{ _mssql_login_password }}"
+    database_name: "{{ _database_name | default('ansible') }}"
+
+  tasks:
+    - name: Copy PowerShell script to Windows host
+      ansible.windows.win_copy:
+        src: files/create_demo_database.ps1
+        dest: C:/Temp/create_demo_database.ps1
+
+    - name: Run PowerShell script to create database
+      ansible.windows.win_shell: |
+        C:\Temp\create_demo_database.ps1 -Server "{{ mssql_instance }}" -User "{{ mssql_login_user }}" -Password "{{ mssql_login_password }}" -Database "{{ database_name }}"
+      register: script_result
+
+    - name: Display script output
+      ansible.builtin.debug:
+        var: script_result.stdout_lines
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Demo Database Setup Complete ==="
+          - "Database: {{ database_name }}"
+          - "Server: {{ mssql_instance }}"
+          - ""
+          - "Tables created:"
+          - "  - Users (10 employees from IT, Sales, HR, etc.)"
+          - "  - Products (15 IT products: servers, software, hardware)"
+          - "  - Orders (15 purchase orders with different statuses)"
+          - ""
+          - "View created:"
+          - "  - vw_OrderSummary (joins all tables)"
+          - ""
+          - "Connect and query:"
+          - "  sqlcmd -S {{ mssql_instance }} -U {{ mssql_login_user }} -d {{ database_name }} -Q \"SELECT * FROM vw_OrderSummary\""

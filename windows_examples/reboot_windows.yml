@@ -1,0 +1,45 @@
+---
+- name: Reboot Windows server
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: basic
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+  tasks:
+    - name: Reboot Windows
+      ansible.windows.win_reboot:
+        reboot_timeout: 600
+        post_reboot_delay: 60
+        msg: "Rebooting to complete pending Windows updates"
+
+    - name: Wait for server to come back online
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Verify no reboot pending
+      ansible.windows.win_powershell:
+        script: |
+          $rebootPending = $false
+          $keys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+          )
+          foreach ($key in $keys) {
+            if (Test-Path $key) {
+              $rebootPending = $true
+              Write-Output "Still pending: $key"
+            }
+          }
+          if (-not $rebootPending) {
+            Write-Output "No reboot pending - ready for SQL Server installation"
+          }
+      register: reboot_verify
+
+    - name: Display reboot verification
+      ansible.builtin.debug:
+        var: reboot_verify.output

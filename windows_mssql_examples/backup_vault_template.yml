@@ -1,0 +1,23 @@
+---
+# Template for storing sensitive backup credentials
+#
+# Usage:
+#   1. Copy this file to backup_vault.yml
+#   2. Fill in your actual passwords
+#   3. Encrypt it with: ansible-vault encrypt backup_vault.yml
+#   4. Use in playbook: ansible-playbook backup_mssql.yml -e @backup_vault.yml --ask-vault-pass
+#
+# IMPORTANT: Add backup_vault.yml to .gitignore to prevent committing secrets
+
+# SQL Server credentials
+vault_mssql_login_password: CHANGEME_SQL_PASSWORD
+
+# Cohesity credentials (if using Cohesity backup method)
+vault_cohesity_password: CHANGEME_COHESITY_PASSWORD
+
+# WinRM credentials (if needed)
+vault_winrm_password: CHANGEME_WINRM_PASSWORD
+
+# Reference these in your playbook or variables file:
+# _mssql_login_password: "{{ vault_mssql_login_password }}"
+# _cohesity_password: "{{ vault_cohesity_password }}"

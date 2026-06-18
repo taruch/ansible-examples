@@ -1,0 +1,297 @@
+---
+# Ansible Automation Platform Setup - SQL Server Automation
+#
+# This playbook configures AAP with job templates for SQL Server operations:
+# - Deploy SQL Server
+# - Create Database
+# - Backup Database
+# - Restore Database
+#
+# Prerequisites:
+# 1. AAP controller is accessible and configured
+# 2. Project with this repository is created in AAP
+# 3. Windows inventory is configured
+# 4. Execution environment with microsoft collections is available
+#
+# Usage:
+#   ansible-playbook setup.yml
+#
+# Or use with variables:
+#   ansible-playbook setup.yml -e "aap_organization='IT Operations' aap_project='SQL Server Automation'"
+
+- name: Configure Ansible Automation Platform for SQL Server Operations
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # AAP Configuration
+    aap_organization: "{{ _aap_organization | default('Default') }}"
+    aap_project: "{{ _aap_project | default('ansible-examples') }}"
+    aap_inventory: "{{ _aap_inventory | default('Windows Servers') }}"
+    aap_execution_environment: "{{ _aap_execution_environment | default('quay.io/truch/microsoft:3.3') }}"
+
+    # Credential names
+    winrm_credential_name: "Windows WinRM Credential"
+    mssql_sa_credential_name: "SQL Server SA Credential"
+
+  tasks:
+    # =============================================================================
+    # STEP 1: Create Credentials
+    # =============================================================================
+
+    - name: Create custom credential type for SQL Server SA password
+      awx.awx.credential_type:
+        name: "SQL Server Credential"
+        description: "SQL Server login credentials (sa or other SQL auth user)"
+        kind: cloud
+        inputs:
+          fields:
+            - id: mssql_login_user
+              type: string
+              label: SQL Server Login User
+              help_text: SQL Server login username (e.g., sa)
+            - id: mssql_login_password
+              type: string
+              label: SQL Server Login Password
+              secret: true
+              help_text: Password for SQL Server login
+        injectors:
+          extra_vars:
+            _mssql_login_user: "{{ '{{ mssql_login_user }}' }}"
+            _mssql_login_password: "{{ '{{ mssql_login_password }}' }}"
+        state: present
+      register: mssql_credential_type
+
+    - name: Create SQL Server SA credential
+      awx.awx.credential:
+        name: "{{ mssql_sa_credential_name }}"
+        description: "SQL Server SA account credentials"
+        organization: "{{ aap_organization }}"
+        credential_type: "SQL Server Credential"
+        inputs:
+          mssql_login_user: sa
+          mssql_login_password: "{{ lookup('env', 'MSSQL_SA_PASSWORD') | default('ChangeMe123!', true) }}"
+        state: present
+      register: mssql_sa_credential
+
+    - name: Display credential creation info
+      ansible.builtin.debug:
+        msg:
+          - "SQL Server credential created: {{ mssql_sa_credential_name }}"
+          - "Note: Update the password in AAP UI if needed"
+          - "Environment variable MSSQL_SA_PASSWORD can override the default"
+
+    # =============================================================================
+    # STEP 2: Create Job Templates
+    # =============================================================================
+
+    - name: Create job template - Deploy SQL Server
+      awx.awx.job_template:
+        name: "MSSQL | Deploy SQL Server 2022"
+        description: |
+          Automated deployment of Microsoft SQL Server 2022 Developer Edition.
+
+          Downloads SQL Server from Microsoft and installs on Windows hosts.
+          Configures TCP/IP, firewall rules, and basic security settings.
+
+          Required Variables:
+          - mssql_sa_password (from credential or -e flag)
+
+          Optional Variables:
+          - sql_version: SQL Server version (default: 2022)
+          - mssql_max_memory_mb: Max server memory in MB (default: 4096)
+          - mssql_data_dir: Data directory (default: C:\SQLData)
+          - mssql_log_dir: Log directory (default: C:\SQLLogs)
+        job_type: run
+        inventory: "{{ aap_inventory }}"
+        project: "{{ aap_project }}"
+        playbook: windows_mssql_examples/deploy_mssql.yml
+        execution_environment: "{{ aap_execution_environment }}"
+        ask_variables_on_launch: true
+        ask_limit_on_launch: true
+        extra_vars:
+          mssql_sa_password: "{{ '{{ mssql_sa_password }}' }}"
+        state: present
+      register: deploy_template
+
+    - name: Create job template - Create Database
+      awx.awx.job_template:
+        name: "MSSQL | Create Demo Database"
+        description: |
+          Creates a demo database with sample data for testing.
+
+          Creates tables: Users, Products, Orders
+          Creates view: vw_OrderSummary
+          Populates with sample data.
+
+          Required Credentials:
+          - SQL Server Credential (for sa or other admin user)
+
+          Optional Variables:
+          - database_name: Database name (default: ansible)
+          - mssql_instance: SQL Server instance (default: localhost)
+        job_type: run
+        inventory: "{{ aap_inventory }}"
+        project: "{{ aap_project }}"
+        playbook: windows_mssql_examples/create_demo_database.yml
+        execution_environment: "{{ aap_execution_environment }}"
+        credentials:
+          - "{{ mssql_sa_credential_name }}"
+        ask_variables_on_launch: true
+        ask_limit_on_launch: true
+        state: present
+      register: create_db_template
+
+    - name: Create job template - Backup Database
+      awx.awx.job_template:
+        name: "MSSQL | Backup Database"
+        description: |
+          Backup SQL Server databases using native SQL Server backup or Cohesity.
+
+          Backup Methods:
+          - native: Uses lowlydba.sqlserver collection (default)
+          - cohesity: Uses Cohesity PowerShell SDK
+
+          Required Credentials:
+          - SQL Server Credential
+
+          Variables:
+          - backup_method: 'native' or 'cohesity' (default: native)
+          - backup_type: 'full', 'diff', or 'log' (default: full)
+          - mssql_database: Database name or 'all' (default: all)
+          - backup_path: Backup directory (default: C:\SQLBackups)
+          - backup_compression: Enable compression (default: true)
+          - backup_verify: Verify backup after creation (default: true)
+          - backup_retention_days: Days to retain backups (default: 7)
+        job_type: run
+        inventory: "{{ aap_inventory }}"
+        project: "{{ aap_project }}"
+        playbook: windows_mssql_examples/backup_mssql.yml
+        execution_environment: "{{ aap_execution_environment }}"
+        credentials:
+          - "{{ mssql_sa_credential_name }}"
+        ask_variables_on_launch: true
+        ask_limit_on_launch: true
+        extra_vars:
+          backup_method: native
+          backup_type: full
+          backup_compression: true
+          backup_verify: true
+        state: present
+      register: backup_template
+
+    - name: Create job template - Restore Database
+      awx.awx.job_template:
+        name: "MSSQL | Restore Database"
+        description: |
+          Restore SQL Server databases from backup files.
+
+          Supports:
+          - Full database restore
+          - Point-in-time recovery
+          - Restore to different database name
+          - Restore with file relocation
+
+          Required Credentials:
+          - SQL Server Credential
+
+          Required Variables:
+          - backup_file: Full path to backup file (e.g., C:\SQLBackups\ansible_backup.bak)
+
+          Optional Variables:
+          - mssql_database: Target database name (default: from backup)
+          - restore_with_replace: Overwrite existing database (default: false)
+          - restore_with_recovery: Leave database operational (default: true)
+        job_type: run
+        inventory: "{{ aap_inventory }}"
+        project: "{{ aap_project }}"
+        playbook: windows_mssql_examples/restore_mssql.yml
+        execution_environment: "{{ aap_execution_environment }}"
+        credentials:
+          - "{{ mssql_sa_credential_name }}"
+        ask_variables_on_launch: true
+        ask_limit_on_launch: true
+        state: present
+      register: restore_template
+
+    # =============================================================================
+    # STEP 3: Create Workflow (Optional)
+    # =============================================================================
+
+    - name: Create workflow template - Full SQL Server Setup
+      awx.awx.workflow_job_template:
+        name: "MSSQL | Full Setup Workflow"
+        description: |
+          Complete SQL Server deployment workflow:
+          1. Deploy SQL Server 2022
+          2. Create demo database
+          3. Perform initial backup
+
+          This workflow deploys a fully configured SQL Server instance
+          with a sample database and initial backup.
+        organization: "{{ aap_organization }}"
+        inventory: "{{ aap_inventory }}"
+        ask_variables_on_launch: true
+        ask_limit_on_launch: true
+        extra_vars:
+          mssql_sa_password: "{{ '{{ mssql_sa_password }}' }}"
+        state: present
+      register: workflow_template
+
+    - name: Add workflow nodes
+      awx.awx.workflow_job_template_node:
+        identifier: "{{ item.identifier }}"
+        workflow_job_template: "MSSQL | Full Setup Workflow"
+        unified_job_template: "{{ item.template }}"
+        success_nodes: "{{ item.success_nodes | default(omit) }}"
+        state: present
+      loop:
+        - identifier: deploy
+          template: "MSSQL | Deploy SQL Server 2022"
+          success_nodes:
+            - create_db
+        - identifier: create_db
+          template: "MSSQL | Create Demo Database"
+          success_nodes:
+            - backup
+        - identifier: backup
+          template: "MSSQL | Backup Database"
+      loop_control:
+        label: "{{ item.identifier }}"
+
+    # =============================================================================
+    # Summary
+    # =============================================================================
+
+    - name: Display setup summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "AAP SQL Server Automation Setup Complete"
+          - "=========================================="
+          - ""
+          - "Organization: {{ aap_organization }}"
+          - "Project: {{ aap_project }}"
+          - "Inventory: {{ aap_inventory }}"
+          - "Execution Environment: {{ aap_execution_environment }}"
+          - ""
+          - "Credentials Created:"
+          - "  - {{ mssql_sa_credential_name }}"
+          - ""
+          - "Job Templates Created:"
+          - "  1. MSSQL | Deploy SQL Server 2022"
+          - "  2. MSSQL | Create Demo Database"
+          - "  3. MSSQL | Backup Database"
+          - "  4. MSSQL | Restore Database"
+          - ""
+          - "Workflow Templates Created:"
+          - "  1. MSSQL | Full Setup Workflow"
+          - "     (Deploy -> Create DB -> Backup)"
+          - ""
+          - "Next Steps:"
+          - "  1. Update SQL Server SA credential password in AAP UI"
+          - "  2. Verify Windows inventory has WinRM connectivity"
+          - "  3. Test job template: MSSQL | Deploy SQL Server 2022"
+          - "  4. Run workflow: MSSQL | Full Setup Workflow"
+          - ""
+          - "=========================================="

@@ -61,11 +61,20 @@ Joins a Windows server to an existing Active Directory domain. Uses `microsoft.a
 
 **Survey variables**: `_hosts` (target server), `domain_controller` (hostname or IP of the DC — required, no default), `domain_name`, `domain_admin_user`, `domain_admin_password`
 
+## Microsoft SQL Server
+
+For SQL Server deployment, backup, and restore playbooks, see the [**windows_mssql_examples**](../windows_mssql_examples/) directory.
+
 ## Requirements
 - WinRM configured on target Windows hosts (HTTP port 5985 or HTTPS port 5986)
 - Windows host variables: `ansible_user`, `ansible_password`, `ansible_connection: winrm`
 - `ansible.windows`, `community.windows`, and `microsoft.ad` collections
 - `secrets.yml` present in the playbook directory (see `secrets.yml` for variable structure)
+
+Install required collections:
+```bash
+ansible-galaxy collection install ansible.windows community.windows microsoft.ad
+```
 
 ## Adding to Ansible Automation Platform
 

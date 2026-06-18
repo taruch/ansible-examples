@@ -1,4 +1,4 @@
-# Microsoft SQL Server on Windows
+# Microsoft SQL Server Automation for Windows
 
 Ansible playbooks for deploying, managing, backing up, and restoring Microsoft SQL Server on Windows Server.
 
@@ -6,47 +6,73 @@ Ansible playbooks for deploying, managing, backing up, and restoring Microsoft S
 
 This directory contains comprehensive automation for SQL Server lifecycle management:
 
-- **Deploy** - Install and configure SQL Server from ISO
+- **Deploy** - Automated download and installation of SQL Server from Microsoft
+- **Create** - Create databases with sample data
 - **Backup** - Flexible backup solutions (native SQL Server or Cohesity DataProtect)
 - **Restore** - Restore databases from backup files
-- **Manage** - Create databases, diagnose issues, attach databases
+- **AAP Integration** - Ready-to-use Ansible Automation Platform setup
+
+## Quick Start
+
+See [README_AAP.md](README_AAP.md) for Ansible Automation Platform integration.
 
 ## Playbooks
 
-### `deploy_mssql.yml`
+### `deploy_mssql.yml` ⭐ PRIMARY
 
-Installs and configures Microsoft SQL Server on Windows Server. Validates prerequisites (memory, .NET Framework), locates SQL Server ISO in Downloads directory, mounts and performs silent installation, configures TCP/IP networking, sets max memory limit, opens firewall ports, and verifies the installation.
+**Fully automated SQL Server 2022 deployment** - downloads and installs from Microsoft with zero manual steps.
+
+**What it does**:
+1. Downloads SQL Server bootstrap installer from Microsoft CDN
+2. Downloads SQL Server 2022 Developer Edition ISO automatically
+3. Installs SQL Server via scheduled task (bypasses WinRM limitations)
+4. Configures TCP/IP, firewall rules, and basic security
 
 **Prerequisites**: 
-- Download SQL Server ISO from Microsoft
-- Place ISO in `C:\Users\Administrator\Downloads\` on the Windows host
+- Windows Server 2016+ with WinRM configured
 - At least 2GB RAM on target server
-- .NET Framework 4.5+ installed (playbook will install if missing)
+- Internet connectivity from Windows host
+- .NET Framework 4.5+ (playbook auto-installs if missing)
 
-**Key variables**: 
-- `_mssql_iso_filename` (default: `SQLServer.iso`)
-- `_mssql_iso_source_path` - Full path to ISO file
+**Required variables**: 
+- `mssql_sa_password` - SA password (pass via `-e` or secrets.yml)
+
+**Optional variables**: 
+- `sql_version` - SQL Server version (default: `2022`)
 - `mssql_instance_name` (default: `MSSQLSERVER`)
-- `mssql_edition` (default: `Developer`)
-- `mssql_sa_password` - SA password (required, stored in secrets.yml)
 - `mssql_tcp_port` (default: `1433`)
 - `mssql_max_memory_mb` (default: `4096`)
-- `mssql_data_dir` (default: `C:/SQLData`)
-- `mssql_log_dir` (default: `C:/SQLLogs`)
+- `mssql_data_dir` (default: `C:\SQLData`)
+- `mssql_log_dir` (default: `C:\SQLLogs`)
 
 **Examples**:
 ```bash
-# Basic installation with ISO in Downloads
-ansible-navigator run -m stdout deploy_mssql.yml -i hosts --eei=quay.io/truch/microsoft:3.2
+# Basic installation - downloads SQL Server automatically
+ansible-navigator run deploy_mssql.yml -i hosts --eei=quay.io/truch/microsoft:3.3 \
+  -mstdout -e mssql_sa_password='SecurePassword123!'
 
-# Custom ISO filename
-ansible-navigator run -m stdout deploy_mssql.yml -i hosts --eei=quay.io/truch/microsoft:3.2 \
-  -e "_mssql_iso_filename=SQLServer2022-x64-ENU.iso"
+# Custom configuration
+ansible-navigator run deploy_mssql.yml -i hosts --eei=quay.io/truch/microsoft:3.3 \
+  -mstdout -e mssql_sa_password='SecurePassword123!' \
+  -e mssql_max_memory_mb=8192 \
+  -e mssql_data_dir='D:\SQLData'
 ```
 
 ---
 
-### `download_mssql_iso.yml`
+### `deploy_mssql_from_iso.yml` (Alternative)
+
+**For offline/air-gapped environments** - uses pre-downloaded ISO file instead of automatic download.
+
+**Prerequisites**: 
+- Download SQL Server ISO from Microsoft beforehand
+- Place ISO in `C:\Users\Administrator\Downloads\` on Windows host
+
+**Use this if**: You're in an air-gapped environment or have compliance requirements for offline installation
+
+---
+
+### `create_demo_database.yml`
 
 Downloads SQL Server ISO to the Windows host's Downloads directory from a specified URL.
 

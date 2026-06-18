@@ -1,0 +1,279 @@
+---
+# Example workflow combining native and Cohesity backups
+# Use case: Take a native copy-only backup for local retention,
+# then use Cohesity for long-term off-site storage
+#
+# This demonstrates how to orchestrate multiple backup methods
+# in a single workflow
+
+- name: SQL Server comprehensive backup workflow
+  hosts: "{{ _hosts | default('windows') }}"
+  gather_facts: false
+
+  vars:
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_port: 5986
+    ansible_winrm_scheme: https
+
+    # SQL Server settings
+    mssql_instance: localhost
+    mssql_login_user: sa
+    # mssql_login_password: "{{ vault_mssql_login_password }}"
+
+    # Workflow control
+    enable_local_backup: "{{ _enable_local_backup | default(true) }}"
+    enable_cohesity_backup: "{{ _enable_cohesity_backup | default(false) }}"
+    enable_verification: "{{ _enable_verification | default(true) }}"
+    send_notifications: "{{ _send_notifications | default(true) }}"
+
+  tasks:
+    - name: Workflow start notification
+      ansible.builtin.debug:
+        msg:
+          - "=== SQL Server Backup Workflow Started ==="
+          - "Host: {{ inventory_hostname }}"
+          - "Time: {{ ansible_date_time.iso8601 }}"
+          - "Local backup: {{ enable_local_backup }}"
+          - "Cohesity backup: {{ enable_cohesity_backup }}"
+
+    # ============================================
+    # PHASE 1: Pre-backup validation
+    # ============================================
+    - name: Check SQL Server health
+      ansible.windows.win_powershell:
+        script: |
+          $result = Invoke-Sqlcmd -Query "
+            SELECT
+              @@SERVERNAME AS ServerName,
+              SERVERPROPERTY('ProductVersion') AS Version,
+              SERVERPROPERTY('Edition') AS Edition,
+              (SELECT COUNT(*) FROM sys.databases WHERE database_id > 4 AND state_desc = 'ONLINE') AS OnlineDatabases
+          " -ServerInstance "{{ mssql_instance }}" -TrustServerCertificate
+          $result | ConvertTo-Json
+      register: sql_health
+
+    - name: Display SQL Server status
+      ansible.builtin.debug:
+        msg: "SQL Server is healthy: {{ sql_health.output[0] | from_json }}"
+
+    # ============================================
+    # PHASE 2: Local copy-only backup
+    # ============================================
+    - name: Local backup block
+      when: enable_local_backup | bool
+      block:
+        - name: Perform local copy-only backup
+          ansible.builtin.include_role:
+            name: local_sql_backup
+            apply:
+              tags: local_backup
+          vars:
+            backup_method: native
+            backup_type: full
+            backup_copy_only: true
+            backup_path: C:\SQLBackups\Local
+            backup_retention_days: 7
+          tags: local_backup
+
+        # Alternative: call backup playbook directly
+        - name: Run native backup playbook
+          ansible.builtin.import_playbook: backup_mssql.yml
+          vars:
+            _backup_method: native
+            _backup_type: full
+            _backup_copy_only: true
+            _backup_path: C:\SQLBackups\Local
+            _mssql_login_password: "{{ mssql_login_password }}"
+
+    # ============================================
+    # PHASE 3: Cohesity backup
+    # ============================================
+    - name: Cohesity backup block
+      when: enable_cohesity_backup | bool
+      block:
+        - name: Trigger Cohesity backup
+          ansible.builtin.import_playbook: backup_mssql.yml
+          vars:
+            _backup_method: cohesity
+            _cohesity_cluster: "{{ cohesity_cluster }}"
+            _cohesity_username: "{{ cohesity_username }}"
+            _cohesity_password: "{{ cohesity_password }}"
+            _cohesity_job_name: "SQL_{{ inventory_hostname }}_Backup"
+            _mssql_login_password: "{{ mssql_login_password }}"
+
+        - name: Wait for Cohesity backup to complete
+          ansible.builtin.pause:
+            minutes: 2
+          when: enable_verification | bool
+
+    # ============================================
+    # PHASE 4: Verification
+    # ============================================
+    - name: Verification block
+      when: enable_verification | bool
+      block:
+        - name: Verify local backup files
+          ansible.windows.win_powershell:
+            script: |
+              $backupPath = "C:\SQLBackups\Local"
+              $files = Get-ChildItem -Path $backupPath -Filter *.bak -Recurse |
+                Where-Object { $_.LastWriteTime -gt (Get-Date).AddHours(-1) } |
+                Select-Object Name, Length, LastWriteTime
+              $files | ConvertTo-Json -Depth 2
+          register: local_backups
+          when: enable_local_backup | bool
+
+        - name: Display local backup verification
+          ansible.builtin.debug:
+            msg: "Recent backups: {{ local_backups.output[0] | from_json }}"
+          when:
+            - enable_local_backup | bool
+            - local_backups.output | default([]) | length > 0
+
+        - name: Query SQL Server backup history
+          ansible.windows.win_powershell:
+            script: |
+              $result = Invoke-Sqlcmd -Query "
+                SELECT TOP 10
+                  database_name,
+                  type,
+                  backup_start_date,
+                  backup_finish_date,
+                  DATEDIFF(SECOND, backup_start_date, backup_finish_date) AS DurationSeconds,
+                  compressed_backup_size / 1024 / 1024 AS BackupSizeMB
+                FROM msdb.dbo.backupset
+                WHERE backup_start_date >= DATEADD(HOUR, -1, GETDATE())
+                ORDER BY backup_finish_date DESC
+              " -ServerInstance "{{ mssql_instance }}" -TrustServerCertificate
+              $result | ConvertTo-Json -Depth 2
+          register: backup_history
+
+        - name: Display backup history
+          ansible.builtin.debug:
+            var: backup_history.output
+
+    # ============================================
+    # PHASE 5: Cleanup and maintenance
+    # ============================================
+    - name: Maintenance block
+      tags: maintenance
+      block:
+        - name: Clean up old local backups
+          ansible.windows.win_powershell:
+            script: |
+              $backupPath = "C:\SQLBackups\Local"
+              $retentionDays = 7
+              $cutoffDate = (Get-Date).AddDays(-$retentionDays)
+              $deletedFiles = @()
+
+              Get-ChildItem -Path $backupPath -Filter *.bak -Recurse |
+                Where-Object { $_.LastWriteTime -lt $cutoffDate } |
+                ForEach-Object {
+                  $deletedFiles += $_.Name
+                  Remove-Item -Path $_.FullName -Force
+                }
+
+              [PSCustomObject]@{
+                DeletedCount = $deletedFiles.Count
+                DeletedFiles = $deletedFiles
+              } | ConvertTo-Json
+          register: cleanup_result
+          when: enable_local_backup | bool
+
+        - name: Display cleanup results
+          ansible.builtin.debug:
+            msg: "Cleaned up {{ (cleanup_result.output[0] | from_json).DeletedCount }} old backup files"
+          when:
+            - enable_local_backup | bool
+            - cleanup_result is defined
+
+        - name: Update backup index/catalog
+          ansible.windows.win_powershell:
+            script: |
+              # Create or update backup catalog CSV
+              $catalogPath = "C:\SQLBackups\backup_catalog.csv"
+              $backups = Get-ChildItem -Path "C:\SQLBackups\Local" -Filter *.bak -Recurse |
+                Select-Object Name,
+                  @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}},
+                  LastWriteTime,
+                  FullName
+
+              $backups | Export-Csv -Path $catalogPath -NoTypeInformation -Force
+              Write-Output "Catalog updated: $catalogPath"
+          register: catalog_update
+          when: enable_local_backup | bool
+
+    # ============================================
+    # PHASE 6: Notifications and reporting
+    # ============================================
+    - name: Notification block
+      when: send_notifications | bool
+      block:
+        - name: Generate backup report
+          ansible.builtin.set_fact:
+            backup_report:
+              server: "{{ inventory_hostname }}"
+              timestamp: "{{ ansible_date_time.iso8601 }}"
+              sql_version: "{{ (sql_health.output[0] | from_json).Version }}"
+              local_backup: "{{ 'Completed' if enable_local_backup else 'Skipped' }}"
+              cohesity_backup: "{{ 'Completed' if enable_cohesity_backup else 'Skipped' }}"
+              verification: "{{ 'Passed' if enable_verification else 'Skipped' }}"
+              status: "Success"
+
+        - name: Display final report
+          ansible.builtin.debug:
+            msg:
+              - "=== SQL Server Backup Workflow Completed ==="
+              - "{{ backup_report | to_nice_json }}"
+
+        # Example: Send email notification (requires mail configuration)
+        # - name: Send email notification
+        #   community.general.mail:
+        #     host: smtp.example.com
+        #     port: 587
+        #     username: backup-notifications@example.com
+        #     password: "{{ smtp_password }}"
+        #     to: dba-team@example.com
+        #     subject: "SQL Backup Success - {{ inventory_hostname }}"
+        #     body: "{{ backup_report | to_nice_json }}"
+        #   delegate_to: localhost
+
+        # Example: Send Slack notification
+        # - name: Send Slack notification
+        #   community.general.slack:
+        #     token: "{{ slack_token }}"
+        #     channel: '#database-backups'
+        #     msg: "SQL backup completed for {{ inventory_hostname }}"
+        #   delegate_to: localhost
+
+        # Example: Create ServiceNow ticket/update
+        # - name: Update ServiceNow
+        #   servicenow.itsm.change_request:
+        #     instance:
+        #       host: "{{ snow_instance }}"
+        #       username: "{{ snow_username }}"
+        #       password: "{{ snow_password }}"
+        #     state: closed
+        #     number: "{{ change_ticket }}"
+        #     close_notes: "SQL backup completed successfully"
+        #   delegate_to: localhost
+
+  rescue:
+    - name: Backup workflow failed
+      ansible.builtin.debug:
+        msg:
+          - "=== SQL Server Backup Workflow FAILED ==="
+          - "Host: {{ inventory_hostname }}"
+          - "Error: {{ ansible_failed_result.msg | default('Unknown error') }}"
+
+    - name: Send failure notification
+      ansible.builtin.debug:
+        msg: "Send alert to DBA team - backup failed on {{ inventory_hostname }}"
+      when: send_notifications | bool
+
+    # Re-raise the error
+    - name: Fail the playbook
+      ansible.builtin.fail:
+        msg: "Backup workflow failed - see logs above"

@@ -1,0 +1,18 @@
+---
+# Ansible collections required for SQL Server backup operations
+
+collections:
+  # Core Windows management
+  - name: ansible.windows
+    version: ">=2.0.0"
+
+  - name: community.windows
+    version: ">=2.0.0"
+
+  # Native SQL Server backup support
+  - name: lowlydba.sqlserver
+    version: ">=2.0.0"
+
+  # Cohesity DataProtect backup support
+  - name: cohesity.dataprotect
+    version: ">=1.4.4"
