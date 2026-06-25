@@ -5,10 +5,14 @@
   vars:
     token: "{{ lookup('env', 'AAP_TOKEN') }}"
     host: "{{ lookup('env', 'AAP_HOST') }}"
+    # Set to 'operator' for operator-based AAP deployments (uses port 443)
+    # Set to 'containerized' for containerized deployments (uses port 8448)
+    aap_deployment_type: "containerized"
+    mcp_port: "{{ '443' if aap_deployment_type == 'operator' else '8448' }}"
   tasks:
     - name: Initialize MCP Session
       ansible.builtin.uri:
-        url: "https://{{ host }}:8448/job_management/mcp"
+        url: "https://{{ host }}:{{ mcp_port }}/job_management/mcp"
         headers:
           Authorization: "Bearer {{ token }}"
           Accept: "application/json, text/event-stream"
@@ -34,7 +38,7 @@
 
     - name: List Available MCP Tools
       ansible.builtin.uri:
-        url: "https://ec2-3-12-163-224.us-east-2.compute.amazonaws.com:8448/job_management/mcp"
+        url: "https://{{ host }}:{{ mcp_port }}/job_management/mcp"
         headers:
           Authorization: "Bearer {{ token }}"
           Accept: "application/json, text/event-stream"
@@ -67,7 +71,7 @@
 
     - name: Call an MCP Tool via HTTP
       ansible.builtin.uri:
-        url: "https://ec2-3-12-163-224.us-east-2.compute.amazonaws.com:8448/job_management/mcp"
+        url: "https://{{ host }}:{{ mcp_port }}/job_management/mcp"
         headers:
           Authorization: "Bearer {{ token }}"
           Accept: "application/json, text/event-stream"
