@@ -1,0 +1,143 @@
+---
+- name: Unified Certificate Discovery
+  hosts: all
+  gather_facts: true
+  vars:
+    # Global report configuration
+    cert_discovery_report_dir: "./reports"
+    cert_discovery_expiry_warning_days: 60
+
+    # Discovery strategy:
+    # - auto: Automatically select role based on OS and detected packages (default)
+    # - config_based: Force config-based discovery
+    # - windows_comprehensive: Force Windows comprehensive discovery (Windows only)
+    cert_discovery_strategy: auto
+
+  tasks:
+    - name: Display discovery start
+      ansible.builtin.debug:
+        msg:
+          - "=== Starting Certificate Discovery ==="
+          - "Host: {{ inventory_hostname }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Strategy: {{ cert_discovery_strategy }}"
+
+    - name: Determine discovery method for Linux/Unix hosts
+      when:
+        - ansible_os_family != "Windows"
+        - cert_discovery_strategy in ['auto', 'config_based']
+      block:
+        - name: Gather package facts to detect installed software
+          ansible.builtin.package_facts:
+            manager: auto
+
+        - name: Check for certificate-related packages
+          ansible.builtin.set_fact:
+            _has_web_services: >-
+              {{
+                (ansible_facts.packages.keys() | list) |
+                intersect(['httpd', 'apache2', 'nginx', 'tomcat', 'tomcat9', 'tomcat10']) |
+                length > 0
+              }}
+            _has_mail_services: >-
+              {{
+                (ansible_facts.packages.keys() | list) |
+                intersect(['postfix', 'dovecot']) |
+                length > 0
+              }}
+            _has_database_services: >-
+              {{
+                (ansible_facts.packages.keys() | list) |
+                intersect(['postgresql', 'mysql', 'mariadb']) |
+                length > 0
+              }}
+            _has_loadbalancer: >-
+              {{
+                (ansible_facts.packages.keys() | list) |
+                intersect(['haproxy']) |
+                length > 0
+              }}
+
+        - name: Set discovery role for Linux
+          ansible.builtin.set_fact:
+            _selected_role: cert_discovery_config_based
+
+        - name: Display detected services (Linux)
+          ansible.builtin.debug:
+            msg:
+              - "Detected certificate-related services:"
+              - "  Web Services: {{ _has_web_services }}"
+              - "  Mail Services: {{ _has_mail_services }}"
+              - "  Database Services: {{ _has_database_services }}"
+              - "  Load Balancers: {{ _has_loadbalancer }}"
+              - "Selected Role: {{ _selected_role }}"
+
+    - name: Determine discovery method for Windows hosts
+      when: ansible_os_family == "Windows"
+      block:
+        - name: Check if IIS is installed
+          ansible.windows.win_powershell:
+            script: |
+              $feature = Get-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue
+              $Ansible.Result = if ($feature) { $feature.Installed } else { $false }
+          register: _windows_iis_check
+          changed_when: false
+
+        - name: Set discovery role for Windows
+          ansible.builtin.set_fact:
+            _selected_role: >-
+              {{
+                'cert_discovery_windows'
+                if (cert_discovery_strategy == 'windows_comprehensive' or _windows_iis_check.result)
+                else 'cert_discovery_config_based'
+              }}
+
+        - name: Display detected services (Windows)
+          ansible.builtin.debug:
+            msg:
+              - "Detected certificate-related services:"
+              - "  IIS Installed: {{ _windows_iis_check.result }}"
+              - "Selected Role: {{ _selected_role }}"
+
+    - name: Execute config-based discovery
+      when: _selected_role == "cert_discovery_config_based"
+      ansible.builtin.include_role:
+        name: cert_discovery_config_based
+      vars:
+        cert_discovery_report_dir: "{{ cert_discovery_report_dir }}"
+        cert_discovery_expiry_warning_days: "{{ cert_discovery_expiry_warning_days }}"
+
+    - name: Execute Windows comprehensive discovery
+      when:
+        - ansible_os_family == "Windows"
+        - _selected_role == "cert_discovery_windows"
+      ansible.builtin.include_role:
+        name: cert_discovery_windows
+      vars:
+        cert_discovery_report_dir: "{{ cert_discovery_report_dir }}"
+        cert_discovery_expiry_warning_days: "{{ cert_discovery_expiry_warning_days }}"
+
+    - name: Discovery complete
+      ansible.builtin.debug:
+        msg:
+          - "=== Certificate Discovery Complete ==="
+          - "Host: {{ inventory_hostname }}"
+          - "Role Used: {{ _selected_role }}"
+          - "Certificates Found: {{ cert_inventory.total_certificates | default(0) }}"
+          - "Report Directory: {{ cert_discovery_report_dir }}"
+
+- name: Generate consolidated report (optional)
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cert_discovery_report_dir: "./reports"
+    generate_consolidated_report: false  # Set to true to enable
+
+  tasks:
+    - name: Consolidation info
+      when: generate_consolidated_report | default(false)
+      ansible.builtin.debug:
+        msg:
+          - "Consolidated reporting is available via the legacy playbook:"
+          - "  ansible-playbook ../legacy_playbooks/generate_consolidated_report.yml"
+          - "Or integrate the consolidation logic from that playbook into your own workflow."

@@ -1,0 +1,346 @@
+---
+- name: Intelligent Certificate Discovery Based on Installed Packages
+  hosts: all
+  gather_facts: true
+  vars:
+    # Report output location
+    report_dir: "./reports"
+    report_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+
+    # Certificate file patterns
+    cert_extensions:
+      - "*.crt"
+      - "*.cer"
+      - "*.pem"
+      - "*.cert"
+      - "*.p12"
+      - "*.pfx"
+      - "*.jks"
+      - "*.keystore"
+
+    key_extensions:
+      - "*.key"
+      - "*.pem"
+
+    # Package-to-path mapping for intelligent discovery
+    package_cert_paths:
+      apache2:
+        - /etc/apache2/ssl
+        - /etc/apache2/certs
+        - /etc/ssl/apache2
+      httpd:
+        - /etc/httpd/ssl
+        - /etc/httpd/certs
+        - /etc/pki/tls/certs
+        - /etc/pki/tls/private
+      nginx:
+        - /etc/nginx/ssl
+        - /etc/nginx/certs
+        - /etc/ssl/nginx
+      tomcat:
+        - /etc/tomcat/conf
+        - /opt/tomcat/conf
+        - /var/lib/tomcat/conf
+      tomcat9:
+        - /etc/tomcat9/conf
+        - /opt/tomcat9/conf
+      tomcat10:
+        - /etc/tomcat10/conf
+        - /opt/tomcat10/conf
+      java:
+        - /etc/ssl/certs/java
+        - /usr/lib/jvm/*/jre/lib/security
+      postgresql:
+        - /var/lib/postgresql/*/data
+        - /etc/postgresql
+      mysql:
+        - /etc/mysql/ssl
+        - /var/lib/mysql
+      mariadb:
+        - /etc/mysql/ssl
+        - /var/lib/mysql
+      haproxy:
+        - /etc/haproxy/certs
+        - /etc/ssl/haproxy
+      dovecot:
+        - /etc/dovecot/ssl
+      postfix:
+        - /etc/postfix/ssl
+
+  tasks:
+    - name: Create local report directory
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Gather package facts (Linux)
+      ansible.builtin.package_facts:
+        manager: auto
+      when: ansible_os_family != "Windows"
+
+    - name: Gather Windows features and packages
+      when: ansible_os_family == "Windows"
+      block:
+        - name: Get Windows features
+          ansible.windows.win_powershell:
+            script: |
+              Get-WindowsFeature | Where-Object {$_.Installed -eq $true} |
+              Select-Object -ExpandProperty Name
+          register: windows_features
+          changed_when: false
+
+        - name: Get installed programs
+          ansible.windows.win_powershell:
+            script: |
+              Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* |
+              Select-Object DisplayName | Where-Object {$_.DisplayName -ne $null}
+          register: windows_programs
+          changed_when: false
+
+    - name: Determine packages that may have certificates (Linux)
+      ansible.builtin.set_fact:
+        detected_packages: "{{ ansible_facts.packages.keys() | list |
+          intersect(package_cert_paths.keys() | list) }}"
+      when: ansible_os_family != "Windows"
+
+    - name: Build scan paths based on detected packages (Linux)
+      ansible.builtin.set_fact:
+        scan_paths: "{{ detected_packages |
+          map('extract', package_cert_paths) |
+          flatten |
+          unique }}"
+      when:
+        - ansible_os_family != "Windows"
+        - detected_packages | length > 0
+
+    - name: Add standard system paths to scan (Linux)
+      ansible.builtin.set_fact:
+        scan_paths: "{{ (scan_paths | default([])) +
+          ['/etc/ssl/certs', '/etc/ssl/private', '/etc/pki/tls/certs',
+           '/etc/pki/tls/private', '/usr/local/share/ca-certificates'] }}"
+      when: ansible_os_family != "Windows"
+
+    - name: Set Windows scan paths
+      ansible.builtin.set_fact:
+        scan_paths:
+          - 'C:\inetpub\ssl'
+          - 'C:\certificates'
+          - 'C:\ssl'
+          - 'C:\Program Files\Apache*\conf'
+          - 'C:\Program Files\nginx\conf'
+          - 'C:\tomcat*\conf'
+      when: ansible_os_family == "Windows"
+
+    - name: Display discovered packages and scan paths
+      ansible.builtin.debug:
+        msg:
+          - "Detected packages with potential certificates: {{ detected_packages | default([]) }}"
+          - "Paths to scan: {{ scan_paths | default([]) }}"
+
+    - name: Find certificate files (Linux)
+      ansible.builtin.find:
+        paths: "{{ scan_paths | default([]) }}"
+        patterns: "{{ cert_extensions }}"
+        recurse: true
+        file_type: file
+        depth: 4
+      register: found_certs_linux
+      when:
+        - ansible_os_family != "Windows"
+        - scan_paths is defined
+        - scan_paths | length > 0
+      ignore_errors: true
+
+    - name: Find key files (Linux)
+      ansible.builtin.find:
+        paths: "{{ scan_paths | default([]) }}"
+        patterns: "{{ key_extensions }}"
+        recurse: true
+        file_type: file
+        depth: 4
+      register: found_keys_linux
+      when:
+        - ansible_os_family != "Windows"
+        - scan_paths is defined
+        - scan_paths | length > 0
+      ignore_errors: true
+
+    - name: Parse certificate details (Linux)
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [[ "{{ item.path }}" =~ \.(jks|keystore|p12|pfx)$ ]]; then
+          # Java keystore or PKCS12 - requires keytool
+          if command -v keytool >/dev/null 2>&1; then
+            echo "TYPE=keystore"
+            echo "FORMAT={{ item.path | regex_search('\\.(jks|keystore|p12|pfx)$') }}"
+            keytool -list -v -keystore "{{ item.path }}" -storepass changeit 2>/dev/null |
+            grep -E "(Alias|Owner|Issuer|Valid)" | head -10 || echo "PROTECTED=true"
+          else
+            echo "TYPE=keystore"
+            echo "KEYTOOL_MISSING=true"
+          fi
+        else
+          # Regular PEM/DER certificate
+          openssl x509 -in "{{ item.path }}" -noout -text -certopt no_header,no_version,no_serial,no_signame,no_pubkey,no_sigdump,no_aux 2>/dev/null || \
+          openssl x509 -in "{{ item.path }}" -inform DER -noout -text -certopt no_header,no_version,no_serial,no_signame,no_pubkey,no_sigdump,no_aux 2>/dev/null || \
+          echo "PARSE_ERROR=true"
+        fi
+      loop: "{{ found_certs_linux.files | default([]) }}"
+      register: cert_details_raw
+      when:
+        - ansible_os_family != "Windows"
+        - found_certs_linux.files is defined
+        - found_certs_linux.files | length > 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: Extract certificate expiration dates (Linux)
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [[ "{{ item.path }}" =~ \.(jks|keystore|p12|pfx)$ ]]; then
+          echo "keystore"
+        else
+          openssl x509 -in "{{ item.path }}" -noout -enddate 2>/dev/null | cut -d= -f2 || \
+          openssl x509 -in "{{ item.path }}" -inform DER -noout -enddate 2>/dev/null | cut -d= -f2 || \
+          echo "unknown"
+        fi
+      loop: "{{ found_certs_linux.files | default([]) }}"
+      register: cert_expiration
+      when:
+        - ansible_os_family != "Windows"
+        - found_certs_linux.files is defined
+        - found_certs_linux.files | length > 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: Extract certificate subject (Linux)
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [[ "{{ item.path }}" =~ \.(jks|keystore|p12|pfx)$ ]]; then
+          echo "keystore"
+        else
+          openssl x509 -in "{{ item.path }}" -noout -subject 2>/dev/null | sed 's/subject=//' || \
+          openssl x509 -in "{{ item.path }}" -inform DER -noout -subject 2>/dev/null | sed 's/subject=//' || \
+          echo "unknown"
+        fi
+      loop: "{{ found_certs_linux.files | default([]) }}"
+      register: cert_subject
+      when:
+        - ansible_os_family != "Windows"
+        - found_certs_linux.files is defined
+        - found_certs_linux.files | length > 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: Extract certificate issuer (Linux)
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [[ "{{ item.path }}" =~ \.(jks|keystore|p12|pfx)$ ]]; then
+          echo "keystore"
+        else
+          openssl x509 -in "{{ item.path }}" -noout -issuer 2>/dev/null | sed 's/issuer=//' || \
+          openssl x509 -in "{{ item.path }}" -inform DER -noout -issuer 2>/dev/null | sed 's/issuer=//' || \
+          echo "unknown"
+        fi
+      loop: "{{ found_certs_linux.files | default([]) }}"
+      register: cert_issuer
+      when:
+        - ansible_os_family != "Windows"
+        - found_certs_linux.files is defined
+        - found_certs_linux.files | length > 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get Windows Certificate Store certificates
+      ansible.windows.win_powershell:
+        script: |
+          $certs = @()
+          $stores = @('My', 'WebHosting', 'Root', 'CA')
+          foreach ($store in $stores) {
+              try {
+                  Get-ChildItem -Path "Cert:\LocalMachine\$store" -ErrorAction SilentlyContinue |
+                  ForEach-Object {
+                      $certs += [PSCustomObject]@{
+                          Store = $store
+                          Subject = $_.Subject
+                          Issuer = $_.Issuer
+                          Thumbprint = $_.Thumbprint
+                          NotBefore = $_.NotBefore.ToString('yyyy-MM-dd HH:mm:ss')
+                          NotAfter = $_.NotAfter.ToString('yyyy-MM-dd HH:mm:ss')
+                          HasPrivateKey = $_.HasPrivateKey
+                      }
+                  }
+              } catch {}
+          }
+          $Ansible.Result = $certs
+      register: windows_cert_store
+      when: ansible_os_family == "Windows"
+      changed_when: false
+      ignore_errors: true
+
+    - name: Build certificate inventory (Linux)
+      ansible.builtin.set_fact:
+        cert_inventory:
+          hostname: "{{ ansible_hostname }}"
+          fqdn: "{{ ansible_fqdn }}"
+          ip_address: "{{ ansible_default_ipv4.address | default('unknown') }}"
+          os_family: "{{ ansible_os_family }}"
+          os_distribution: "{{ ansible_distribution | default('unknown') }}"
+          os_version: "{{ ansible_distribution_version | default('unknown') }}"
+          scan_timestamp: "{{ ansible_date_time.iso8601 }}"
+          detected_packages: "{{ detected_packages | default([]) }}"
+          scanned_paths: "{{ scan_paths | default([]) }}"
+          certificate_count: "{{ found_certs_linux.matched | default(0) }}"
+          key_count: "{{ found_keys_linux.matched | default(0) }}"
+          certificates: "{{ found_certs_linux.files | default([]) |
+            zip(cert_expiration.results | default([]) | map(attribute='stdout') | list,
+                cert_subject.results | default([]) | map(attribute='stdout') | list,
+                cert_issuer.results | default([]) | map(attribute='stdout') | list) |
+            map('combine_cert_data') | list }}"
+          keys: "{{ found_keys_linux.files | default([]) |
+            map(attribute='path') | list }}"
+      when: ansible_os_family != "Windows"
+
+    - name: Build certificate inventory (Windows)
+      ansible.builtin.set_fact:
+        cert_inventory:
+          hostname: "{{ ansible_hostname }}"
+          fqdn: "{{ ansible_fqdn }}"
+          ip_address: "{{ ansible_ip_addresses[0] | default('unknown') }}"
+          os_family: "{{ ansible_os_family }}"
+          os_distribution: "{{ ansible_distribution | default('Windows') }}"
+          os_version: "{{ ansible_distribution_version | default('unknown') }}"
+          scan_timestamp: "{{ ansible_date_time.iso8601 }}"
+          detected_features: "{{ windows_features.output | default([]) }}"
+          certificate_stores: "{{ windows_cert_store.result | default([]) }}"
+      when: ansible_os_family == "Windows"
+
+    - name: Save individual host report (JSON)
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: "{{ cert_inventory | to_nice_json }}"
+        dest: "{{ report_dir }}/{{ inventory_hostname }}_cert_inventory_{{ report_timestamp }}.json"
+        mode: '0644'
+
+    - name: Generate summary statistics
+      ansible.builtin.set_fact:
+        summary_stats:
+          total_certificates: "{{ cert_inventory.certificate_count | default(cert_inventory.certificate_stores | default([]) | length) }}"
+          total_keys: "{{ cert_inventory.key_count | default(0) }}"
+          packages_scanned: "{{ cert_inventory.detected_packages | default([]) | length }}"
+          paths_scanned: "{{ cert_inventory.scanned_paths | default([]) | length }}"
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Certificate Discovery Summary for {{ inventory_hostname }} ==="
+          - "Total Certificates Found: {{ summary_stats.total_certificates }}"
+          - "Total Keys Found: {{ summary_stats.total_keys }}"
+          - "Packages with Certificates: {{ cert_inventory.detected_packages | default([]) | join(', ') }}"
+          - "Report saved to: {{ report_dir }}/{{ inventory_hostname }}_cert_inventory_{{ report_timestamp }}.json"
+
+# Custom filter plugin would go in filter_plugins/ directory, but for inline use:
+# This is a simplified version - the actual parsing happens in the shell tasks above

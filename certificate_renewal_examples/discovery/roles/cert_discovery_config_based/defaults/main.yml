@@ -1,0 +1,168 @@
+---
+# Default variables for cert_discovery_config_based role
+
+# Report output configuration
+cert_discovery_report_dir: "./reports"
+cert_discovery_report_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+cert_discovery_report_format: json  # json, yaml
+
+# Expiration warning threshold (days)
+cert_discovery_expiry_warning_days: 60
+
+# Package-to-configuration mapping
+cert_discovery_package_configs:
+  httpd:
+    name: "Apache HTTP Server"
+    config_files:
+      - /etc/httpd/conf/httpd.conf
+      - /etc/httpd/conf.d/ssl.conf
+      - /etc/httpd/conf.d/*.conf
+    cert_directives:
+      - regex: '^\s*SSLCertificateFile\s+(.+)$'
+        type: certificate
+      - regex: '^\s*SSLCertificateKeyFile\s+(.+)$'
+        type: key
+      - regex: '^\s*SSLCACertificateFile\s+(.+)$'
+        type: ca_cert
+      - regex: '^\s*SSLCertificateChainFile\s+(.+)$'
+        type: chain
+
+  apache2:
+    name: "Apache HTTP Server"
+    config_files:
+      - /etc/apache2/apache2.conf
+      - /etc/apache2/sites-enabled/*.conf
+      - /etc/apache2/conf-enabled/*.conf
+    cert_directives:
+      - regex: '^\s*SSLCertificateFile\s+(.+)$'
+        type: certificate
+      - regex: '^\s*SSLCertificateKeyFile\s+(.+)$'
+        type: key
+      - regex: '^\s*SSLCACertificateFile\s+(.+)$'
+        type: ca_cert
+
+  nginx:
+    name: "Nginx"
+    config_files:
+      - /etc/nginx/nginx.conf
+      - /etc/nginx/sites-enabled/*
+      - /etc/nginx/conf.d/*.conf
+    cert_directives:
+      - regex: '^\s*ssl_certificate\s+(.+);$'
+        type: certificate
+      - regex: '^\s*ssl_certificate_key\s+(.+);$'
+        type: key
+      - regex: '^\s*ssl_trusted_certificate\s+(.+);$'
+        type: ca_cert
+
+  tomcat:
+    name: "Apache Tomcat"
+    config_files:
+      - /etc/tomcat/server.xml
+      - /opt/tomcat/conf/server.xml
+      - /usr/share/tomcat/conf/server.xml
+    cert_directives:
+      - regex: 'keystoreFile="([^"]+)"'
+        type: keystore
+      - regex: 'truststoreFile="([^"]+)"'
+        type: truststore
+      - regex: 'certificateFile="([^"]+)"'
+        type: certificate
+      - regex: 'certificateKeyFile="([^"]+)"'
+        type: key
+
+  tomcat9:
+    name: "Apache Tomcat 9"
+    config_files:
+      - /etc/tomcat9/server.xml
+      - /opt/tomcat9/conf/server.xml
+    cert_directives:
+      - regex: 'keystoreFile="([^"]+)"'
+        type: keystore
+      - regex: 'certificateFile="([^"]+)"'
+        type: certificate
+
+  tomcat10:
+    name: "Apache Tomcat 10"
+    config_files:
+      - /etc/tomcat10/server.xml
+      - /opt/tomcat10/conf/server.xml
+    cert_directives:
+      - regex: 'keystoreFile="([^"]+)"'
+        type: keystore
+      - regex: 'certificateFile="([^"]+)"'
+        type: certificate
+
+  haproxy:
+    name: "HAProxy"
+    config_files:
+      - /etc/haproxy/haproxy.cfg
+    cert_directives:
+      - regex: 'bind\s+[^:]+:\d+\s+.*?crt\s+(\S+)'
+        type: certificate
+      - regex: 'ca-file\s+(\S+)'
+        type: ca_cert
+
+  postfix:
+    name: "Postfix"
+    config_files:
+      - /etc/postfix/main.cf
+    cert_directives:
+      - regex: '^smtpd_tls_cert_file\s*=\s*(.+)$'
+        type: certificate
+      - regex: '^smtpd_tls_key_file\s*=\s*(.+)$'
+        type: key
+      - regex: '^smtpd_tls_CAfile\s*=\s*(.+)$'
+        type: ca_cert
+
+  dovecot:
+    name: "Dovecot"
+    config_files:
+      - /etc/dovecot/dovecot.conf
+      - /etc/dovecot/conf.d/10-ssl.conf
+    cert_directives:
+      - regex: '^ssl_cert\s*=\s*<(.+)$'
+        type: certificate
+      - regex: '^ssl_key\s*=\s*<(.+)$'
+        type: key
+
+  postgresql:
+    name: "PostgreSQL"
+    config_files:
+      - /var/lib/postgresql/*/data/postgresql.conf
+      - /etc/postgresql/*/main/postgresql.conf
+    cert_directives:
+      - regex: "^ssl_cert_file\\s*=\\s*'([^']+)'"
+        type: certificate
+      - regex: "^ssl_key_file\\s*=\\s*'([^']+)'"
+        type: key
+      - regex: "^ssl_ca_file\\s*=\\s*'([^']+)'"
+        type: ca_cert
+
+  mysql:
+    name: "MySQL"
+    config_files:
+      - /etc/my.cnf
+      - /etc/mysql/my.cnf
+      - /etc/mysql/mysql.conf.d/*.cnf
+    cert_directives:
+      - regex: '^ssl-cert\s*=\s*(.+)$'
+        type: certificate
+      - regex: '^ssl-key\s*=\s*(.+)$'
+        type: key
+      - regex: '^ssl-ca\s*=\s*(.+)$'
+        type: ca_cert
+
+  mariadb:
+    name: "MariaDB"
+    config_files:
+      - /etc/my.cnf
+      - /etc/mysql/mariadb.conf.d/*.cnf
+    cert_directives:
+      - regex: '^ssl-cert\s*=\s*(.+)$'
+        type: certificate
+      - regex: '^ssl-key\s*=\s*(.+)$'
+        type: key
+
+# Allow user to extend or override package configs
+cert_discovery_custom_package_configs: {}

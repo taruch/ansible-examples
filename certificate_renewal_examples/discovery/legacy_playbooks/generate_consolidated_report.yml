@@ -1,0 +1,123 @@
+---
+- name: Generate Consolidated Certificate Discovery Report
+  hosts: localhost
+  gather_facts: false
+  vars:
+    report_dir: "./reports"
+    output_formats:
+      - json
+      - csv
+      - html
+
+  tasks:
+    - name: Find all individual host reports
+      ansible.builtin.find:
+        paths: "{{ report_dir }}"
+        patterns: "*_cert_inventory_*.json"
+      register: report_files
+
+    - name: Load all host reports
+      ansible.builtin.slurp:
+        src: "{{ item.path }}"
+      loop: "{{ report_files.files }}"
+      register: host_reports
+
+    - name: Parse report data
+      ansible.builtin.set_fact:
+        all_reports: "{{ host_reports.results |
+          map(attribute='content') |
+          map('b64decode') |
+          map('from_json') |
+          list }}"
+
+    - name: Calculate aggregate statistics
+      ansible.builtin.set_fact:
+        aggregate_stats:
+          total_hosts_scanned: "{{ all_reports | length }}"
+          total_certificates: "{{ all_reports |
+            map(attribute='certificate_count', default=0) |
+            map('int') |
+            sum }}"
+          total_keys: "{{ all_reports |
+            map(attribute='key_count', default=0) |
+            map('int') |
+            sum }}"
+          hosts_by_os: "{{ all_reports |
+            groupby('os_family') |
+            items2dict(key_name=0, value_name=1) |
+            dict2items |
+            map(attribute='key') |
+            list }}"
+          scan_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Flatten certificate data for CSV export
+      ansible.builtin.set_fact:
+        flattened_certs: "{{ all_reports |
+          subelements('certificates', skip_missing=True) |
+          map('flatten_cert_for_csv') |
+          list }}"
+
+    - name: Generate consolidated JSON report
+      ansible.builtin.copy:
+        content: |
+          {
+            "report_metadata": {
+              "generated_at": "{{ aggregate_stats.scan_timestamp }}",
+              "report_type": "Consolidated Certificate Inventory",
+              "total_hosts": {{ aggregate_stats.total_hosts_scanned }},
+              "total_certificates": {{ aggregate_stats.total_certificates }},
+              "total_keys": {{ aggregate_stats.total_keys }}
+            },
+            "summary": {{ aggregate_stats | to_nice_json }},
+            "hosts": {{ all_reports | to_nice_json }}
+          }
+        dest: "{{ report_dir }}/consolidated_cert_report_{{ ansible_date_time.iso8601_basic_short }}.json"
+        mode: '0644'
+      when: "'json' in output_formats"
+
+    - name: Generate CSV header
+      ansible.builtin.set_fact:
+        csv_header: "Hostname,IP Address,OS Family,OS Distribution,Certificate Path,Subject,Issuer,Expiration Date,Days to Expiry,Has Private Key"
+
+    - name: Build CSV rows from all hosts
+      ansible.builtin.set_fact:
+        csv_rows: |
+          {{ csv_header }}
+          {% for report in all_reports %}
+          {%   if report.certificates is defined %}
+          {%     for cert in report.certificates %}
+          {{ report.hostname }},{{ report.ip_address }},{{ report.os_family }},{{ report.os_distribution }},{{ cert.path }},{{ cert.subject | replace(',', ';') }},{{ cert.issuer | replace(',', ';') }},{{ cert.expiration }},{{ cert.days_to_expiry }},{{ 'Yes' if cert.path | regex_search('\\.key$') else 'No' }}
+          {%     endfor %}
+          {%   endif %}
+          {%   if report.certificate_stores is defined %}
+          {%     for cert in report.certificate_stores %}
+          {{ report.hostname }},{{ report.ip_address }},{{ report.os_family }},{{ report.os_distribution }},Cert:\LocalMachine\{{ cert.Store }}\{{ cert.Thumbprint }},{{ cert.Subject | replace(',', ';') }},{{ cert.Issuer | replace(',', ';') }},{{ cert.NotAfter }},N/A,{{ 'Yes' if cert.HasPrivateKey else 'No' }}
+          {%     endfor %}
+          {%   endif %}
+          {% endfor %}
+
+    - name: Generate CSV report
+      ansible.builtin.copy:
+        content: "{{ csv_rows }}"
+        dest: "{{ report_dir }}/consolidated_cert_report_{{ ansible_date_time.iso8601_basic_short }}.csv"
+        mode: '0644'
+      when: "'csv' in output_formats"
+
+    - name: Generate HTML report
+      ansible.builtin.template:
+        src: templates/cert_report.html.j2
+        dest: "{{ report_dir }}/consolidated_cert_report_{{ ansible_date_time.iso8601_basic_short }}.html"
+        mode: '0644'
+      when: "'html' in output_formats"
+      ignore_errors: true
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Consolidated Certificate Discovery Report ==="
+          - "Total Hosts Scanned: {{ aggregate_stats.total_hosts_scanned }}"
+          - "Total Certificates Found: {{ aggregate_stats.total_certificates }}"
+          - "Total Keys Found: {{ aggregate_stats.total_keys }}"
+          - "Reports generated in: {{ report_dir }}"
+          - "  - JSON: consolidated_cert_report_{{ ansible_date_time.iso8601_basic_short }}.json"
+          - "  - CSV: consolidated_cert_report_{{ ansible_date_time.iso8601_basic_short }}.csv"

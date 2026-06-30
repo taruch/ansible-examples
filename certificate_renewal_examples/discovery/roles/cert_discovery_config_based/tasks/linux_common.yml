@@ -1,0 +1,167 @@
+---
+# Common Linux certificate discovery tasks
+
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Identify installed packages with certificate configs
+  ansible.builtin.set_fact:
+    _detected_packages: "{{ ansible_facts.packages.keys() | list |
+      intersect(_cert_discovery_merged_configs.keys() | list) }}"
+
+- name: Display detected packages
+  ansible.builtin.debug:
+    msg: "Detected packages with SSL/TLS configurations: {{ _detected_packages | join(', ') }}"
+  when: _detected_packages | length > 0
+
+- name: Process detected packages
+  when: _detected_packages | length > 0
+  block:
+    - name: Find configuration files for detected packages
+      ansible.builtin.find:
+        paths: "{{ item.value.config_files | map('dirname') | unique | list }}"
+        patterns: "{{ item.value.config_files | map('basename') | list }}"
+        file_type: file
+        use_regex: false
+      loop: "{{ _detected_packages | map('extract', _cert_discovery_merged_configs) | dict2items }}"
+      register: _config_files_found
+      ignore_errors: true
+
+    - name: Read configuration file contents
+      ansible.builtin.slurp:
+        src: "{{ item.1.path }}"
+      loop: "{{ _config_files_found.results | subelements('files', skip_missing=True) }}"
+      register: _config_contents
+      ignore_errors: true
+      loop_control:
+        label: "{{ item.1.path }}"
+
+    - name: Extract certificate paths from configurations
+      ansible.builtin.set_fact:
+        _extracted_cert_info: >-
+          {% set info_list = [] %}
+          {% for result in _config_contents.results %}
+            {% set package_name = result.item.0.item.key %}
+            {% set config_file = result.item.1.path %}
+            {% set config_content = result.content | b64decode %}
+            {% set directives = result.item.0.item.value.cert_directives %}
+            {% set cert_paths = [] %}
+            {% for directive in directives %}
+              {% set matches = config_content | regex_findall(directive.regex, multiline=True) %}
+              {% for match in matches %}
+                {% set _ = cert_paths.append({'path': match.strip(), 'type': directive.type}) %}
+              {% endfor %}
+            {% endfor %}
+            {% if cert_paths | length > 0 %}
+              {% set _ = info_list.append({
+                'package': package_name,
+                'package_name': result.item.0.item.value.name,
+                'config_file': config_file,
+                'cert_paths': cert_paths
+              }) %}
+            {% endif %}
+          {% endfor %}
+          {{ info_list }}
+      when: _config_contents.results is defined
+
+    - name: Collect all unique certificate paths
+      ansible.builtin.set_fact:
+        _all_cert_paths: "{{ _extracted_cert_info |
+          default([]) |
+          map(attribute='cert_paths') |
+          flatten |
+          map(attribute='path') |
+          unique |
+          list }}"
+
+    - name: Check if certificate files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ _all_cert_paths | default([]) }}"
+      register: _cert_files_stat
+      when: _all_cert_paths is defined and _all_cert_paths | length > 0
+
+    - name: Filter to existing certificate files
+      ansible.builtin.set_fact:
+        _existing_certs: "{{ _cert_files_stat.results |
+          default([]) |
+          selectattr('stat.exists', 'defined') |
+          selectattr('stat.exists', 'equalto', true) |
+          map(attribute='item') |
+          list }}"
+
+    - name: Parse certificate details for existing files
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [[ "{{ item }}" =~ \.(jks|keystore|p12|pfx)$ ]]; then
+          echo "TYPE=keystore"
+          echo "PATH={{ item }}"
+          if command -v keytool >/dev/null 2>&1; then
+            keytool -list -v -keystore "{{ item }}" -storepass changeit 2>/dev/null | \
+              grep -A2 "Alias name:" | head -20 || echo "PROTECTED=true"
+          else
+            echo "KEYTOOL_UNAVAILABLE=true"
+          fi
+        elif [[ "{{ item }}" =~ \.key$ ]] || [[ "{{ item }}" =~ \.pem$ ]] && grep -q "PRIVATE KEY" "{{ item }}" 2>/dev/null; then
+          echo "TYPE=private_key"
+          echo "PATH={{ item }}"
+        else
+          echo "TYPE=certificate"
+          echo "PATH={{ item }}"
+          echo "SUBJECT=$(openssl x509 -in "{{ item }}" -noout -subject 2>/dev/null | sed 's/subject=//' || echo 'parse_error')"
+          echo "ISSUER=$(openssl x509 -in "{{ item }}" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo 'parse_error')"
+          echo "EXPIRY=$(openssl x509 -in "{{ item }}" -noout -enddate 2>/dev/null | cut -d= -f2 || echo 'parse_error')"
+          echo "SERIAL=$(openssl x509 -in "{{ item }}" -noout -serial 2>/dev/null | cut -d= -f2 || echo 'parse_error')"
+        fi
+      args:
+        executable: /bin/bash
+      loop: "{{ _existing_certs | default([]) }}"
+      register: _cert_details
+      changed_when: false
+      when: _existing_certs is defined and _existing_certs | length > 0
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Parse certificate output into structured data
+      ansible.builtin.set_fact:
+        _parsed_certificates: >-
+          {% set certs = [] %}
+          {% for result in _cert_details.results | default([]) %}
+            {% set lines = result.stdout_lines %}
+            {% set cert = {'path': ''} %}
+            {% for line in lines %}
+              {% if line.startswith('TYPE=') %}
+                {% set _ = cert.update({'type': line.split('=', 1)[1]}) %}
+              {% elif line.startswith('PATH=') %}
+                {% set _ = cert.update({'path': line.split('=', 1)[1]}) %}
+              {% elif line.startswith('SUBJECT=') %}
+                {% set _ = cert.update({'subject': line.split('=', 1)[1]}) %}
+              {% elif line.startswith('ISSUER=') %}
+                {% set _ = cert.update({'issuer': line.split('=', 1)[1]}) %}
+              {% elif line.startswith('EXPIRY=') %}
+                {% set _ = cert.update({'expiration': line.split('=', 1)[1]}) %}
+              {% elif line.startswith('SERIAL=') %}
+                {% set _ = cert.update({'serial_number': line.split('=', 1)[1]}) %}
+              {% endif %}
+            {% endfor %}
+            {% set _ = certs.append(cert) %}
+          {% endfor %}
+          {{ certs }}
+      when: _cert_details.results is defined
+
+- name: Build structured certificate inventory
+  ansible.builtin.set_fact:
+    cert_inventory:
+      hostname: "{{ ansible_hostname }}"
+      fqdn: "{{ ansible_fqdn }}"
+      ip_address: "{{ ansible_default_ipv4.address | default('unknown') }}"
+      os_family: "{{ ansible_os_family }}"
+      os_distribution: "{{ ansible_distribution }}"
+      os_version: "{{ ansible_distribution_version }}"
+      scan_timestamp: "{{ ansible_date_time.iso8601 }}"
+      scan_method: "config_based"
+      detected_packages: "{{ _detected_packages | default([]) }}"
+      packages_details: "{{ _extracted_cert_info | default([]) }}"
+      total_certificates: "{{ _existing_certs | default([]) | length }}"
+      certificates: "{{ _parsed_certificates | default([]) }}"

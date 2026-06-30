@@ -1,0 +1,351 @@
+---
+- name: Comprehensive Windows Certificate Discovery
+  hosts: windows
+  gather_facts: true
+  vars:
+    report_dir: "./reports"
+    report_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    expiry_warning_days: 60
+    certificate_stores:
+      - My
+      - WebHosting
+      - Root
+      - CA
+
+  tasks:
+    - name: Create local report directory
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check if IIS is installed
+      ansible.windows.win_powershell:
+        script: |
+          $feature = Get-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue
+          $Ansible.Result = @{
+              Installed = if ($feature) { $feature.Installed } else { $false }
+              InstallState = if ($feature) { $feature.InstallState.ToString() } else { "NotPresent" }
+          }
+      register: iis_status
+      changed_when: false
+
+    - name: Get IIS version and sites (if installed)
+      when: iis_status.result.Installed
+      block:
+        - name: Get IIS version
+          ansible.windows.win_powershell:
+            script: |
+              $iisVersion = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\InetStp' -ErrorAction SilentlyContinue
+              $Ansible.Result = @{
+                  MajorVersion = $iisVersion.MajorVersion
+                  MinorVersion = $iisVersion.MinorVersion
+                  VersionString = $iisVersion.VersionString
+              }
+          register: iis_version
+          changed_when: false
+
+        - name: Get all IIS sites
+          ansible.windows.win_powershell:
+            script: |
+              Import-Module WebAdministration -ErrorAction Stop
+              $sites = Get-Website | Select-Object Name, Id, State, @{
+                  Name='PhysicalPath'; Expression={$_.PhysicalPath}
+              }, @{
+                  Name='Bindings'; Expression={
+                      ($_.Bindings.Collection | ForEach-Object {
+                          $_.protocol + '://' + $_.bindingInformation
+                      }) -join '; '
+                  }
+              }
+              $Ansible.Result = $sites
+          register: iis_sites
+          changed_when: false
+
+        - name: Get IIS HTTPS bindings with certificate details
+          ansible.windows.win_powershell:
+            script: |
+              Import-Module WebAdministration -ErrorAction Stop
+
+              $bindings = @()
+              Get-WebBinding | Where-Object { $_.protocol -eq 'https' } | ForEach-Object {
+                  $binding = $_
+                  $siteName = $binding.ItemXPath -replace '.*name=''([^'']+)''.*', '$1'
+                  $certHash = $binding.certificateHash
+                  $storeName = if ($binding.certificateStoreName) { $binding.certificateStoreName } else { 'My' }
+
+                  if ($certHash) {
+                      try {
+                          $cert = Get-ChildItem -Path "Cert:\LocalMachine\$storeName" -ErrorAction Stop |
+                                  Where-Object { $_.Thumbprint -eq $certHash }
+
+                          if ($cert) {
+                              $daysToExpiry = [math]::Round(($cert.NotAfter - (Get-Date)).TotalDays)
+
+                              $bindings += [PSCustomObject]@{
+                                  SiteName = $siteName
+                                  BindingInformation = $binding.bindingInformation
+                                  Protocol = $binding.protocol
+                                  SniEnabled = $binding.sslFlags -band 1  # SNI flag
+                                  CertificateHash = $certHash
+                                  CertificateStore = "Cert:\LocalMachine\$storeName"
+                                  Subject = $cert.Subject
+                                  Issuer = $cert.Issuer
+                                  SerialNumber = $cert.SerialNumber
+                                  Thumbprint = $cert.Thumbprint
+                                  NotBefore = $cert.NotBefore.ToString('yyyy-MM-dd HH:mm:ss')
+                                  NotAfter = $cert.NotAfter.ToString('yyyy-MM-dd HH:mm:ss')
+                                  DaysToExpiry = $daysToExpiry
+                                  HasPrivateKey = $cert.HasPrivateKey
+                                  DnsNameList = ($cert.DnsNameList.Unicode -join ',')
+                                  FriendlyName = $cert.FriendlyName
+                                  EnhancedKeyUsage = ($cert.EnhancedKeyUsageList.FriendlyName -join ',')
+                              }
+                          } else {
+                              $bindings += [PSCustomObject]@{
+                                  SiteName = $siteName
+                                  BindingInformation = $binding.bindingInformation
+                                  CertificateHash = $certHash
+                                  Error = "Certificate not found in store: Cert:\LocalMachine\$storeName"
+                              }
+                          }
+                      } catch {
+                          $bindings += [PSCustomObject]@{
+                              SiteName = $siteName
+                              BindingInformation = $binding.bindingInformation
+                              CertificateHash = $certHash
+                              Error = $_.Exception.Message
+                          }
+                      }
+                  }
+              }
+              $Ansible.Result = $bindings
+          register: iis_bindings
+          changed_when: false
+
+    - name: Scan all certificate stores
+      ansible.windows.win_powershell:
+        script: |
+          $stores = @('{{ certificate_stores | join("','") }}')
+          $allCerts = @()
+
+          foreach ($storeName in $stores) {
+              try {
+                  $certs = Get-ChildItem -Path "Cert:\LocalMachine\$storeName" -ErrorAction Stop
+
+                  foreach ($cert in $certs) {
+                      $daysToExpiry = [math]::Round(($cert.NotAfter - (Get-Date)).TotalDays)
+
+                      # Check if used in IIS
+                      $usedInIIS = $false
+                      $iisSites = @()
+                      if ((Get-Command Get-WebBinding -ErrorAction SilentlyContinue)) {
+                          $bindings = Get-WebBinding | Where-Object {
+                              $_.certificateHash -eq $cert.Thumbprint
+                          }
+                          if ($bindings) {
+                              $usedInIIS = $true
+                              $iisSites = $bindings | ForEach-Object {
+                                  $_.ItemXPath -replace '.*name=''([^'']+)''.*', '$1'
+                              }
+                          }
+                      }
+
+                      $allCerts += [PSCustomObject]@{
+                          Store = $storeName
+                          Subject = $cert.Subject
+                          Issuer = $cert.Issuer
+                          SerialNumber = $cert.SerialNumber
+                          Thumbprint = $cert.Thumbprint
+                          NotBefore = $cert.NotBefore.ToString('yyyy-MM-dd HH:mm:ss')
+                          NotAfter = $cert.NotAfter.ToString('yyyy-MM-dd HH:mm:ss')
+                          DaysToExpiry = $daysToExpiry
+                          HasPrivateKey = $cert.HasPrivateKey
+                          DnsNameList = ($cert.DnsNameList.Unicode -join ',')
+                          FriendlyName = $cert.FriendlyName
+                          EnhancedKeyUsage = ($cert.EnhancedKeyUsageList.FriendlyName -join ',')
+                          UsedInIIS = $usedInIIS
+                          IISSites = ($iisSites -join ',')
+                      }
+                  }
+              } catch {
+                  Write-Host "Error accessing store $storeName : $($_.Exception.Message)"
+              }
+          }
+
+          $Ansible.Result = $allCerts
+      register: all_certificates
+      changed_when: false
+
+    - name: Identify expiring certificates
+      ansible.builtin.set_fact:
+        expiring_certs: "{{ all_certificates.result |
+          selectattr('DaysToExpiry', 'defined') |
+          selectattr('DaysToExpiry', 'lessthan', expiry_warning_days) |
+          selectattr('HasPrivateKey', 'equalto', true) |
+          list }}"
+
+    - name: Identify orphaned certificates (not used in IIS)
+      ansible.builtin.set_fact:
+        orphaned_certs: "{{ all_certificates.result |
+          selectattr('Store', 'in', ['My', 'WebHosting']) |
+          selectattr('HasPrivateKey', 'equalto', true) |
+          selectattr('UsedInIIS', 'equalto', false) |
+          list }}"
+
+    - name: Get additional Windows certificate info
+      ansible.windows.win_powershell:
+        script: |
+          $result = @{}
+
+          # Get certificate auto-enrollment configuration
+          try {
+              $autoEnroll = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Cryptography\AutoEnrollment' -ErrorAction SilentlyContinue
+              $result['AutoEnrollmentEnabled'] = if ($autoEnroll) { $autoEnroll.AEPolicy -ne 0 } else { $false }
+          } catch {
+              $result['AutoEnrollmentEnabled'] = $false
+          }
+
+          # Check if ADCS (Certificate Services) is installed
+          $adcs = Get-WindowsFeature -Name AD-Certificate -ErrorAction SilentlyContinue
+          $result['ADCSInstalled'] = if ($adcs) { $adcs.Installed } else { $false }
+
+          # Get pending certificate requests
+          $certReq = certutil -store -silent REQUEST 2>&1
+          $result['PendingRequests'] = if ($LASTEXITCODE -eq 0) {
+              ($certReq | Select-String "CertReq" | Measure-Object).Count
+          } else { 0 }
+
+          $Ansible.Result = $result
+      register: cert_system_info
+      changed_when: false
+
+    - name: Build comprehensive certificate inventory
+      ansible.builtin.set_fact:
+        cert_inventory:
+          hostname: "{{ ansible_hostname }}"
+          fqdn: "{{ ansible_fqdn }}"
+          ip_address: "{{ ansible_ip_addresses[0] | default('unknown') }}"
+          os_family: "{{ ansible_os_family }}"
+          os_version: "{{ ansible_distribution_version }}"
+          scan_timestamp: "{{ ansible_date_time.iso8601 }}"
+          scan_method: "comprehensive_windows_discovery"
+          iis_installed: "{{ iis_status.result.Installed }}"
+          iis_version: "{{ iis_version.result | default({}) }}"
+          iis_sites: "{{ iis_sites.result | default([]) }}"
+          iis_bindings: "{{ iis_bindings.result | default([]) }}"
+          certificate_summary:
+            total_certificates: "{{ all_certificates.result | length }}"
+            certificates_with_private_keys: "{{ all_certificates.result |
+              selectattr('HasPrivateKey', 'equalto', true) | list | length }}"
+            certificates_in_use: "{{ all_certificates.result |
+              selectattr('UsedInIIS', 'equalto', true) | list | length }}"
+            orphaned_certificates: "{{ orphaned_certs | length }}"
+            expiring_soon: "{{ expiring_certs | length }}"
+          certificate_stores:
+            scanned_stores: "{{ certificate_stores }}"
+            all_certificates: "{{ all_certificates.result }}"
+          expiring_certificates: "{{ expiring_certs }}"
+          orphaned_certificates: "{{ orphaned_certs }}"
+          system_info: "{{ cert_system_info.result }}"
+
+    - name: Save individual host report (JSON)
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: "{{ cert_inventory | to_nice_json }}"
+        dest: "{{ report_dir }}/{{ inventory_hostname }}_windows_comprehensive_{{ report_timestamp }}.json"
+        mode: '0644'
+
+    - name: Generate human-readable summary report
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: |
+          ================================================================================
+          Windows Certificate Discovery Report
+          ================================================================================
+
+          Host Information:
+          -----------------
+          Hostname:        {{ cert_inventory.hostname }}
+          FQDN:            {{ cert_inventory.fqdn }}
+          IP Address:      {{ cert_inventory.ip_address }}
+          OS Version:      {{ cert_inventory.os_version }}
+          Scan Time:       {{ cert_inventory.scan_timestamp }}
+
+          IIS Configuration:
+          ------------------
+          IIS Installed:   {{ cert_inventory.iis_installed }}
+          {% if cert_inventory.iis_installed %}
+          IIS Version:     {{ cert_inventory.iis_version.VersionString | default('Unknown') }}
+          Total Sites:     {{ cert_inventory.iis_sites | length }}
+          HTTPS Bindings:  {{ cert_inventory.iis_bindings | length }}
+          {% endif %}
+
+          Certificate Summary:
+          --------------------
+          Total Certificates:              {{ cert_inventory.certificate_summary.total_certificates }}
+          With Private Keys:               {{ cert_inventory.certificate_summary.certificates_with_private_keys }}
+          Currently Used in IIS:           {{ cert_inventory.certificate_summary.certificates_in_use }}
+          Orphaned (not in use):           {{ cert_inventory.certificate_summary.orphaned_certificates }}
+          Expiring within {{ expiry_warning_days }} days:   {{ cert_inventory.certificate_summary.expiring_soon }}
+
+          {% if cert_inventory.expiring_certificates | length > 0 %}
+          CERTIFICATES EXPIRING SOON:
+          ---------------------------
+          {% for cert in cert_inventory.expiring_certificates %}
+          Subject:     {{ cert.Subject }}
+          Expires:     {{ cert.NotAfter }} ({{ cert.DaysToExpiry }} days)
+          Thumbprint:  {{ cert.Thumbprint }}
+          Store:       {{ cert.Store }}
+          {% if cert.IISSites %}
+          Used By:     {{ cert.IISSites }}
+          {% endif %}
+
+          {% endfor %}
+          {% endif %}
+
+          {% if cert_inventory.orphaned_certificates | length > 0 %}
+          ORPHANED CERTIFICATES:
+          ----------------------
+          (Certificates with private keys not currently bound to IIS)
+
+          {% for cert in cert_inventory.orphaned_certificates %}
+          Subject:     {{ cert.Subject }}
+          Expires:     {{ cert.NotAfter }}
+          Thumbprint:  {{ cert.Thumbprint }}
+          Store:       {{ cert.Store }}
+
+          {% endfor %}
+          {% endif %}
+
+          ================================================================================
+          Full details available in JSON: {{ inventory_hostname }}_windows_comprehensive_{{ report_timestamp }}.json
+          ================================================================================
+        dest: "{{ report_dir }}/{{ inventory_hostname }}_windows_summary_{{ report_timestamp }}.txt"
+        mode: '0644'
+
+    - name: Display discovery summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Windows Certificate Discovery Complete ==="
+          - "Host: {{ inventory_hostname }}"
+          - "Total Certificates: {{ cert_inventory.certificate_summary.total_certificates }}"
+          - "Certificates with Private Keys: {{ cert_inventory.certificate_summary.certificates_with_private_keys }}"
+          - "Expiring Soon ({{ expiry_warning_days }} days): {{ cert_inventory.certificate_summary.expiring_soon }}"
+          - "Orphaned Certificates: {{ cert_inventory.certificate_summary.orphaned_certificates }}"
+          - ""
+          - "Reports saved:"
+          - "  - JSON: {{ report_dir }}/{{ inventory_hostname }}_windows_comprehensive_{{ report_timestamp }}.json"
+          - "  - TXT:  {{ report_dir }}/{{ inventory_hostname }}_windows_summary_{{ report_timestamp }}.txt"
+
+    - name: Alert on critical findings
+      ansible.builtin.debug:
+        msg:
+          - "!!! ATTENTION REQUIRED !!!"
+          - "{{ cert_inventory.certificate_summary.expiring_soon }} certificate(s) expiring within {{ expiry_warning_days }} days"
+          - "{{ cert_inventory.certificate_summary.orphaned_certificates }} orphaned certificate(s) found"
+      when:
+        - (cert_inventory.certificate_summary.expiring_soon | int > 0) or
+          (cert_inventory.certificate_summary.orphaned_certificates | int > 0)

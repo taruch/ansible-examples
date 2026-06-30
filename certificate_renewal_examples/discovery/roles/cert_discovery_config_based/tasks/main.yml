@@ -1,0 +1,52 @@
+---
+# Main tasks for cert_discovery_config_based role
+
+- name: Create local report directory
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ cert_discovery_report_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Merge custom package configs with defaults
+  ansible.builtin.set_fact:
+    _cert_discovery_merged_configs: "{{ cert_discovery_package_configs | combine(cert_discovery_custom_package_configs, recursive=true) }}"
+
+- name: Include OS-specific discovery tasks
+  ansible.builtin.include_tasks: "{{ ansible_os_family | lower }}.yml"
+  when: ansible_os_family in ['RedHat', 'Debian', 'Windows']
+
+- name: Handle unsupported OS family
+  when: ansible_os_family not in ['RedHat', 'Debian', 'Windows']
+  block:
+    - name: Log unsupported OS
+      ansible.builtin.debug:
+        msg: "Certificate discovery not yet supported for OS family: {{ ansible_os_family }}"
+
+    - name: Create minimal inventory for unsupported OS
+      ansible.builtin.set_fact:
+        cert_inventory:
+          hostname: "{{ ansible_hostname }}"
+          os_family: "{{ ansible_os_family }}"
+          scan_timestamp: "{{ ansible_date_time.iso8601 }}"
+          scan_method: "config_based"
+          error: "OS family {{ ansible_os_family }} not supported"
+
+- name: Save individual host report
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ cert_inventory | to_nice_json }}"
+    dest: "{{ cert_discovery_report_dir }}/{{ inventory_hostname }}_config_based_{{ cert_discovery_report_timestamp }}.json"
+    mode: '0644'
+
+- name: Display discovery summary
+  ansible.builtin.debug:
+    msg:
+      - "=== Configuration-Based Certificate Discovery Summary ==="
+      - "Host: {{ inventory_hostname }}"
+      - "OS Family: {{ ansible_os_family }}"
+      - "Packages Scanned: {{ cert_inventory.detected_packages | default([]) | join(', ') | default('None') }}"
+      - "Certificates Found: {{ cert_inventory.total_certificates | default(0) }}"
+      - "Discovery Method: {{ cert_inventory.scan_method }}"
+      - "Report: {{ cert_discovery_report_dir }}/{{ inventory_hostname }}_config_based_{{ cert_discovery_report_timestamp }}.json"

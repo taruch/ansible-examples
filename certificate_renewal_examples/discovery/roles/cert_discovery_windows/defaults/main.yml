@@ -1,0 +1,19 @@
+---
+# Default variables for cert_discovery_windows role
+
+# Report output configuration
+cert_discovery_report_dir: "./reports"
+cert_discovery_report_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+
+# Expiration warning threshold (days)
+cert_discovery_expiry_warning_days: 60
+
+# Certificate stores to scan
+cert_discovery_certificate_stores:
+  - My
+  - WebHosting
+  - Root
+  - CA
+
+# Generate text summary in addition to JSON
+cert_discovery_generate_text_summary: true

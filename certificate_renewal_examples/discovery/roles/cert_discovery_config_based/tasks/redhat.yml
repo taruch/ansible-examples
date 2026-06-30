@@ -1,0 +1,5 @@
+---
+# RedHat/CentOS/Rocky Linux specific tasks
+
+- name: Include common Linux tasks
+  ansible.builtin.include_tasks: linux_common.yml

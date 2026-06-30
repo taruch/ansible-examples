@@ -1,0 +1,9 @@
+{# Template to extract certificate paths from configuration content #}
+{% set cert_list = [] %}
+{% for directive in directives %}
+  {% set matches = content | regex_findall(directive.regex) %}
+  {% for match in matches %}
+    {% if cert_list.append(match.strip()) %}{% endif %}
+  {% endfor %}
+{% endfor %}
+{{ cert_list | unique }}
