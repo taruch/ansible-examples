@@ -82,32 +82,11 @@
   gather_facts: false
   serial: "{{ batch_size | default('20%') }}"
 
-  vars:
-    # Application deployment settings
-    app_source_path: "https://artifacts.example.com/apps/MyApp_v2.5.exe"
-    app_destination: 'C:\Windows\Temp\MyApp_v2.5.exe'
-    app_install_path: 'C:\Program Files\MyApp'
-    app_name: "MyApplication"
-    app_version: "2.5.0"
-    app_product_id: "{12345678-1234-1234-1234-123456789012}"  # MSI Product ID or app name
-
-    # Installation parameters
-    install_arguments: '/S /D={{ app_install_path }}'
-    reboot_required: false
-    max_install_timeout: 600
-
-    # Validation settings
-    validate_installation: true
-    app_executable: 'MyApp.exe'
-    expected_service_name: "MyAppService"
-
-    # Rollback settings
-    enable_rollback: true
-    backup_existing: true
-    backup_path: 'C:\Windows\Temp\MyApp_backup'
-
-    # Pre-deployment checks
-    minimum_disk_space_gb: 2
+  # All variables should be provided via variable files or extra-vars
+  # See vars/myapp_template.yml for a complete template
+  # See vars/notepadpp_deployment.yml for a working example
+  #
+  # Usage: ansible-playbook mass_application_deployment.yml -e @vars/notepadpp_deployment.yml
 
   tasks:
     - name: Main deployment block with error handling

@@ -336,7 +336,26 @@ You can apply this pattern to existing PowerShell scripts for:
 | `backup_existing` | `true` | Backup before overwriting |
 | `minimum_disk_space_gb` | `2` | Required free space in GB |
 
-**Example Execution**:
+**Example Execution with Variable Files**:
+
+The playbook supports loading all variables from external YAML files for easier management and reusability:
+
+```bash
+# Deploy Notepad++ using pre-configured variable file
+ansible-playbook mass_application_deployment.yml -e @vars/notepadpp_deployment.yml
+
+# Override specific variables from the file
+ansible-playbook mass_application_deployment.yml \
+  -e @vars/notepadpp_deployment.yml \
+  -e "batch_size=10%" \
+  -e "_hosts=windows_workstations"
+```
+
+**Available Variable Files** (`vars/` directory):
+- `myapp_template.yml` - Fully commented template with examples for creating your own deployment configurations
+- `notepadpp_deployment.yml` - Working example: Notepad++ 8.9.6.2 deployment (ready to run)
+
+**Example Execution with Inline Variables**:
 
 Deploy to 2,500 machines in batches of 250 (10%):
 ```bash

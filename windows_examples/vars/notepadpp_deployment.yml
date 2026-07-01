@@ -1,0 +1,36 @@
+---
+# Variable file for deploying Notepad++ v8.9.6.2
+# Usage: ansible-playbook mass_application_deployment.yml -e @vars/notepadpp_deployment.yml
+
+# Application deployment settings
+app_source_path: "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.6.2/npp.8.9.6.2.Installer.x64.exe"
+app_destination: 'C:\Windows\Temp\npp.8.9.6.2.Installer.x64.exe'
+app_install_path: 'C:\Program Files\Notepad++'
+app_name: "Notepad++"
+app_version: "8.9.6.2"
+
+# Notepad++ uses NSIS installer, not MSI, so product_id is the display name from registry
+app_product_id: "Notepad++ (64-bit x64)"
+
+# Installation parameters
+# /S = Silent install (NSIS standard)
+# /D = Installation directory (must be last parameter for NSIS)
+install_arguments: '/S /D={{ app_install_path }}'
+reboot_required: false
+max_install_timeout: 300  # 5 minutes should be plenty for Notepad++
+
+# Validation settings
+validate_installation: true
+app_executable: 'notepad++.exe'
+expected_service_name: ""  # Notepad++ does not run as a service
+
+# Rollback settings
+enable_rollback: true
+backup_existing: true
+backup_path: 'C:\Windows\Temp\Notepad_backup'
+
+# Pre-deployment checks
+minimum_disk_space_gb: 1  # Notepad++ is small, only needs ~100MB
+
+# Optional: Batch size override for testing
+# batch_size: "10%"  # Uncomment to deploy to 10% of hosts at a time

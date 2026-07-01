@@ -1,0 +1,108 @@
+---
+# Template variable file for mass_application_deployment.yml
+# Copy this file and customize for your application
+# Usage: ansible-playbook mass_application_deployment.yml -e @vars/your_app.yml
+
+# Application deployment settings
+app_source_path: "https://artifacts.example.com/apps/MyApp_v2.5.exe"
+  # URL or UNC path to the installer
+  # Examples:
+  #   - https://artifacts.company.com/releases/MyApp_v3.0.exe
+  #   - https://github.com/org/repo/releases/download/v1.0/installer.exe
+  #   - \\fileserver\apps\MyApp_v2.5.exe
+
+app_destination: 'C:\Windows\Temp\MyApp_v2.5.exe'
+  # Temporary download location on target hosts
+  # Must match the filename from app_source_path
+
+app_install_path: 'C:\Program Files\MyApp'
+  # Where the application will be installed
+  # Common locations:
+  #   - C:\Program Files\AppName (64-bit)
+  #   - C:\Program Files (x86)\AppName (32-bit)
+  #   - C:\Apps\AppName (custom location)
+
+app_name: "MyApplication"
+  # Application display name for reporting
+
+app_version: "2.5.0"
+  # Target version number for reporting and validation
+
+app_product_id: "{12345678-1234-1234-1234-123456789012}"
+  # For MSI installers: Product GUID from MSI properties
+  # For EXE installers (NSIS, InstallShield): Registry display name
+  # Examples:
+  #   - MSI: "{12345678-1234-1234-1234-123456789012}"
+  #   - NSIS: "MyApp 2.5"
+  #   - Notepad++: "Notepad++ (64-bit x64)"
+  #
+  # To find the product ID:
+  #   - MSI: msiexec /i installer.msi /qn /l*v log.txt (check log)
+  #   - EXE: Check registry after manual install:
+  #     HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*
+
+# Installation parameters
+install_arguments: '/S /D={{ app_install_path }}'
+  # Silent/quiet install arguments - varies by installer type
+  # Common patterns:
+  #   - NSIS: /S /D=<path>
+  #   - MSI: /qn INSTALLDIR="<path>"
+  #   - InstallShield: /s /v"/qn INSTALLDIR=<path>"
+  #   - Inno Setup: /VERYSILENT /DIR="<path>"
+  #
+  # Check installer vendor documentation for correct syntax
+
+reboot_required: false
+  # Set to true if the installer requires a reboot
+  # Note: Playbook does not handle reboots automatically
+
+max_install_timeout: 600
+  # Maximum time (seconds) to wait for installation
+  # Adjust based on application size/complexity:
+  #   - Small apps (< 100MB): 300 (5 min)
+  #   - Medium apps (100MB-1GB): 600 (10 min)
+  #   - Large apps (> 1GB): 1200-1800 (20-30 min)
+
+# Validation settings
+validate_installation: true
+  # Enable post-install validation checks
+  # Recommended: true for production deployments
+
+app_executable: 'MyApp.exe'
+  # Main executable filename (not full path)
+  # Used to verify installation succeeded
+
+expected_service_name: "MyAppService"
+  # Windows service name if application runs as a service
+  # Set to empty string "" if no service
+  # Example: "MyAppService" or "W3SVC" or ""
+
+# Rollback settings
+enable_rollback: true
+  # Enable automatic rollback on installation failure
+  # Recommended: true for production
+
+backup_existing: true
+  # Backup existing installation before upgrading
+  # Recommended: true for upgrades, false for new installs
+
+backup_path: 'C:\Windows\Temp\MyApp_backup'
+  # Directory for installation backups
+  # Ensure sufficient disk space (2x installation size)
+
+# Pre-deployment checks
+minimum_disk_space_gb: 2
+  # Required free disk space in GB
+  # Set to 2-3x the installer size to account for:
+  #   - Installer download
+  #   - Extraction
+  #   - Installation
+  #   - Backup (if enabled)
+
+# Optional: Batch size override
+# Uncomment and adjust based on deployment size:
+# batch_size: "50%"  # Small deployment (< 100 hosts)
+# batch_size: "25%"  # Medium deployment (100-500 hosts)
+# batch_size: "20%"  # Large deployment (500-2500 hosts) - DEFAULT
+# batch_size: "10%"  # Very large deployment (2500+ hosts)
+# batch_size: 5      # Critical infrastructure (absolute number)
