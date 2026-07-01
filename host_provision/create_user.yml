@@ -20,3 +20,5 @@
         msg:
           - "Random Salt Hash: {{ hashed_password_random_salt }}"
           - "Custom Salt Hash: {{ hashed_password_custom_salt }}"
+
+...

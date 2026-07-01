@@ -1,7 +1,7 @@
 ---
-# Large-scale application deployment to thousands of Windows machines
-# Use case: Deploy an executable to 2,500+ machines with validation and rollback capability
-# Optimized for performance with parallel execution and smart batching
+# Large-scale application deployment using native Ansible modules where possible
+# This version leverages ansible.windows modules for better idempotency and performance
+# Use case: Deploy an executable to 2,500+ machines with validation and rollback
 #
 # BATCH SIZE CONSIDERATIONS (serial parameter):
 #
@@ -31,6 +31,7 @@
 #    - Default PostgreSQL max_connections often set to 200-500
 #    - Large batches (>500 hosts) can exhaust connection pools
 #    - Symptoms: "too many connections" errors, job hangs, slow dashboard updates
+#      This is not typically an issue because CPU/RAM (forks) is the constraint, not db
 #
 # 5. Target Network Impact:
 #    - Concurrent WinRM connections can saturate network links
@@ -76,28 +77,29 @@
 #   - Observe target network utilization and DNS query rates
 #   - Review AAP job output for patterns (timeouts, connection refused, etc.)
 
-- name: Mass Application Deployment to Windows Hosts
+- name: Mass Application Deployment to Windows Hosts (Optimized)
   hosts: "{{ _hosts | default('all') }}"
   gather_facts: false
-  serial: "{{ batch_size | default('20%') }}"  # Process 20% of hosts at a time by default
+  serial: "{{ batch_size | default('20%') }}"
 
   vars:
-    # Application deployment settings (override via survey or extra vars)
+    # Application deployment settings
     app_source_path: "https://artifacts.example.com/apps/MyApp_v2.5.exe"
     app_destination: 'C:\Windows\Temp\MyApp_v2.5.exe'
     app_install_path: 'C:\Program Files\MyApp'
     app_name: "MyApplication"
     app_version: "2.5.0"
+    app_product_id: "{12345678-1234-1234-1234-123456789012}"  # MSI Product ID or app name
 
     # Installation parameters
-    install_arguments: '/S /D={{ app_install_path }}'  # Silent install to specified directory
+    install_arguments: '/S /D={{ app_install_path }}'
     reboot_required: false
-    max_install_timeout: 600  # 10 minutes
+    max_install_timeout: 600
 
     # Validation settings
     validate_installation: true
     app_executable: 'MyApp.exe'
-    expected_service_name: "MyAppService"  # Leave empty if no service
+    expected_service_name: "MyAppService"
 
     # Rollback settings
     enable_rollback: true
@@ -106,279 +108,239 @@
 
     # Pre-deployment checks
     minimum_disk_space_gb: 2
-    required_os_versions:
-      - "Microsoft Windows Server 2016"
-      - "Microsoft Windows Server 2019"
-      - "Microsoft Windows Server 2022"
-      - "Microsoft Windows 10"
-      - "Microsoft Windows 11"
 
   tasks:
-    - name: Gather minimal facts for deployment
-      ansible.windows.setup:
-        gather_subset:
-          - '!all'
-          - '!min'
-          - distribution
-          - distribution_version
-
-    - name: Pre-deployment validation block
+    - name: Main deployment block with error handling
       block:
-        - name: Check available disk space
-          ansible.windows.win_powershell:
-            script: |
-              $drive = "{{ app_destination.split(':')[0] }}"
-              $volume = Get-Volume -DriveLetter $drive -ErrorAction SilentlyContinue
-              if ($volume) {
-                  $freeSpaceGB = [math]::Round($volume.SizeRemaining / 1GB, 2)
-                  [PSCustomObject]@{
-                      drive = $drive
-                      free_space_gb = $freeSpaceGB
-                      sufficient = $freeSpaceGB -ge {{ minimum_disk_space_gb }}
+        - name: Gather Windows distribution facts
+          ansible.windows.setup:
+            gather_subset:
+              - distribution
+              - date_time
+
+        - name: Pre-deployment validation
+          block:
+            # Use native win_disk_facts instead of PowerShell
+            - name: Gather disk information
+              community.windows.win_disk_facts:
+
+            - name: Check available disk space on target drive
+              ansible.builtin.set_fact:
+                target_drive: "{{ app_destination.split(':')[0] }}"
+
+            - name: Get volume information for target drive
+              ansible.windows.win_powershell:
+                script: |
+                  $volume = Get-Volume -DriveLetter "{{ target_drive }}" -ErrorAction SilentlyContinue
+                  if ($volume) {
+                      [PSCustomObject]@{
+                          free_space_gb = [math]::Round($volume.SizeRemaining / 1GB, 2)
+                      }
                   }
-              }
-          register: disk_check
+              register: disk_check
 
-        - name: Fail if insufficient disk space
-          ansible.builtin.fail:
-            msg: "Insufficient disk space. Required: {{ minimum_disk_space_gb }}GB, Available: {{ disk_check.output[0].free_space_gb }}GB"
-          when:
-            - disk_check.output is defined
-            - not disk_check.output[0].sufficient | bool
+            - name: Fail if insufficient disk space
+              ansible.builtin.fail:
+                msg: "Insufficient disk space. Required: {{ minimum_disk_space_gb }}GB, Available: {{ disk_check.output[0].free_space_gb }}GB"
+              when:
+                - disk_check.output is defined
+                - disk_check.output[0].free_space_gb < minimum_disk_space_gb
 
-        - name: Check if application is already installed with correct version
-          ansible.windows.win_powershell:
-            script: |
-              $app = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
-                     Where-Object { $_.DisplayName -like "*{{ app_name }}*" } |
-                     Select-Object DisplayName, DisplayVersion, InstallLocation
+            # Use native win_package to check installation status
+            - name: Check if application is already installed
+              ansible.windows.win_package:
+                path: "{{ app_destination }}"
+                product_id: "{{ app_product_id }}"
+                state: present
+                arguments: "{{ install_arguments }}"
+              check_mode: true
+              register: app_check
+              failed_when: false
 
-              if ($app) {
-                  [PSCustomObject]@{
-                      installed = $true
-                      name = $app.DisplayName
-                      version = $app.DisplayVersion
-                      location = $app.InstallLocation
-                      is_target_version = $app.DisplayVersion -eq "{{ app_version }}"
-                  }
-              } else {
-                  [PSCustomObject]@{
-                      installed = $false
-                      is_target_version = $false
-                  }
-              }
-          register: app_check
+            - name: Skip if already installed with correct version
+              ansible.builtin.meta: end_host
+              when:
+                - app_check is not changed
 
-        - name: Skip if correct version already installed
-          ansible.builtin.meta: end_host
-          when:
-            - app_check.output is defined
-            - app_check.output[0].installed | bool
-            - app_check.output[0].is_target_version | bool
-
-      tags: ['pre-check']
-
-    - name: Backup existing installation
-      block:
-        - name: Check if application exists
-          ansible.windows.win_stat:
-            path: "{{ app_install_path }}"
-          register: existing_app
-
-        - name: Create backup directory
-          ansible.windows.win_file:
-            path: "{{ backup_path }}"
-            state: directory
-          when:
-            - existing_app.stat.exists
-            - backup_existing | bool
+          tags: ['pre-check']
 
         - name: Backup existing installation
-          ansible.windows.win_powershell:
-            script: |
-              $source = "{{ app_install_path }}"
-              $dest = "{{ backup_path }}\MyApp_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+          block:
+            # Use native win_stat instead of PowerShell
+            - name: Check if application directory exists
+              ansible.windows.win_stat:
+                path: "{{ app_install_path }}"
+              register: existing_app
 
-              if (Test-Path $source) {
-                  Copy-Item -Path $source -Destination $dest -Recurse -Force
-                  [PSCustomObject]@{
-                      backed_up = $true
-                      backup_location = $dest
-                      backup_size_mb = [math]::Round((Get-ChildItem $dest -Recurse |
-                                       Measure-Object -Property Length -Sum).Sum / 1MB, 2)
-                  }
-              } else {
-                  [PSCustomObject]@{
-                      backed_up = $false
-                      reason = "Source path does not exist"
-                  }
-              }
-          register: backup_result
-          when:
-            - existing_app.stat.exists
-            - backup_existing | bool
+            # Use native win_file instead of PowerShell
+            - name: Create backup directory
+              ansible.windows.win_file:
+                path: "{{ backup_path }}"
+                state: directory
+              when:
+                - existing_app.stat.exists
+                - backup_existing | bool
 
-      when: enable_rollback | bool
-      tags: ['backup']
+            # Use native win_copy for backup instead of PowerShell
+            - name: Backup existing installation
+              ansible.windows.win_copy:
+                src: "{{ app_install_path }}"
+                dest: "{{ backup_path }}\\MyApp_backup_{{ ansible_date_time.epoch }}"
+                remote_src: true
+              register: backup_result
+              when:
+                - existing_app.stat.exists
+                - backup_existing | bool
 
-    - name: Download application installer
-      ansible.windows.win_get_url:
-        url: "{{ app_source_path }}"
-        dest: "{{ app_destination }}"
-        timeout: 120
-        force: true
-      register: download_result
-      retries: 3
-      delay: 10
-      until: download_result is succeeded
+            - name: Set backup location fact
+              ansible.builtin.set_fact:
+                backup_location: "{{ backup_path }}\\MyApp_backup_{{ ansible_date_time.epoch }}"
+                backup_created: true
+              when:
+                - backup_result is changed
 
-    - name: Verify downloaded file integrity
-      ansible.windows.win_stat:
-        path: "{{ app_destination }}"
-        checksum_algorithm: sha256
-      register: downloaded_file
+          when: enable_rollback | bool
+          tags: ['backup']
 
-    - name: Install application
-      ansible.windows.win_package:
-        path: "{{ app_destination }}"
-        arguments: "{{ install_arguments }}"
-        state: present
-        product_id: "{{ app_name }}"
-        expected_return_code: [0, 3010]  # 0 = success, 3010 = success with reboot required
-      register: install_result
-      async: "{{ max_install_timeout }}"
-      poll: 10
+        # Use native win_get_url (already optimal)
+        - name: Download application installer
+          ansible.windows.win_get_url:
+            url: "{{ app_source_path }}"
+            dest: "{{ app_destination }}"
+            timeout: 120
+            force: true
+          register: download_result
+          retries: 3
+          delay: 10
+          until: download_result is succeeded
 
-    - name: Post-installation validation
-      block:
-        - name: Wait for installation to complete
-          ansible.builtin.wait_for:
-            timeout: 30
+        # Use native win_stat for file verification (already optimal)
+        - name: Verify downloaded file integrity
+          ansible.windows.win_stat:
+            path: "{{ app_destination }}"
+            checksum_algorithm: sha256
+          register: downloaded_file
 
-        - name: Verify application installation
-          ansible.windows.win_powershell:
-            script: |
-              $checks = @{
-                  timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-                  installation_verified = $false
-                  executable_exists = $false
-                  service_running = $false
-                  registry_entry_exists = $false
-              }
+        # Use native win_package (already optimal)
+        - name: Install application
+          ansible.windows.win_package:
+            path: "{{ app_destination }}"
+            arguments: "{{ install_arguments }}"
+            state: present
+            product_id: "{{ app_product_id }}"
+            expected_return_code: [0, 3010]
+          register: install_result
+          async: "{{ max_install_timeout }}"
+          poll: 10
 
-              # Check registry
-              $app = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
-                     Where-Object { $_.DisplayName -like "*{{ app_name }}*" }
-              $checks.registry_entry_exists = $app -ne $null
+        - name: Post-installation validation
+          block:
+            # Use native win_wait_for instead of ansible.builtin.wait_for
+            - name: Wait for installation to settle
+              ansible.windows.win_wait_for:
+                timeout: 30
 
-              # Check executable
-              $exePath = Join-Path "{{ app_install_path }}" "{{ app_executable }}"
-              $checks.executable_exists = Test-Path $exePath
-              if ($checks.executable_exists) {
-                  $checks.executable_path = $exePath
-                  $exeVersion = (Get-Item $exePath).VersionInfo.FileVersion
-                  $checks.executable_version = $exeVersion
-              }
+            # Use native win_stat to verify executable
+            - name: Verify application executable exists
+              ansible.windows.win_stat:
+                path: "{{ app_install_path }}\\{{ app_executable }}"
+                get_checksum: false
+              register: exe_check
 
-              # Check service if applicable
-              {% if expected_service_name %}
-              $service = Get-Service -Name "{{ expected_service_name }}" -ErrorAction SilentlyContinue
-              if ($service) {
-                  $checks.service_running = $service.Status -eq 'Running'
-                  $checks.service_status = $service.Status
-              }
-              {% endif %}
+            # Use native win_reg_stat for registry validation
+            - name: Check application registry entry
+              ansible.windows.win_reg_stat:
+                path: HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall
+                name: "{{ app_product_id }}"
+              register: reg_check
 
-              # Overall validation
-              $checks.installation_verified = $checks.registry_entry_exists -and $checks.executable_exists
-              {% if expected_service_name %}
-              $checks.installation_verified = $checks.installation_verified -and $checks.service_running
-              {% endif %}
+            # Use native win_service_info for service validation
+            - name: Check application service status
+              ansible.windows.win_service_info:
+                name: "{{ expected_service_name }}"
+              register: service_check
+              when: expected_service_name | length > 0
 
-              [PSCustomObject]$checks
-          register: validation_result
+            - name: Set validation result
+              ansible.builtin.set_fact:
+                installation_verified: >-
+                  {{ exe_check.stat.exists and
+                     (expected_service_name | length == 0 or
+                      (service_check.services is defined and
+                       service_check.services | length > 0 and
+                       service_check.services[0].state == 'started')) }}
 
-        - name: Fail if validation fails
-          ansible.builtin.fail:
-            msg: "Application validation failed: {{ validation_result.output[0] }}"
-          when:
-            - validate_installation | bool
-            - not validation_result.output[0].installation_verified | bool
+            - name: Fail if validation fails
+              ansible.builtin.fail:
+                msg: |
+                  Application validation failed:
+                  - Executable exists: {{ exe_check.stat.exists }}
+                  - Service running: {{ service_check.services[0].state if expected_service_name else 'N/A' }}
+              when:
+                - validate_installation | bool
+                - not installation_verified | bool
 
-      when: validate_installation | bool
-      tags: ['validate']
+          when: validate_installation | bool
+          tags: ['validate']
 
-    - name: Cleanup installer file
-      ansible.windows.win_file:
-        path: "{{ app_destination }}"
-        state: absent
+        # Use native win_file for cleanup (already optimal)
+        - name: Cleanup installer file
+          ansible.windows.win_file:
+            path: "{{ app_destination }}"
+            state: absent
 
-    - name: Set deployment stats
-      ansible.builtin.set_stats:
-        data:
-          deployed_version: "{{ app_version }}"
-          deployment_status: "{{ 'success' if validation_result.output[0].installation_verified else 'failed' }}"
-          executable_verified: "{{ validation_result.output[0].executable_exists }}"
-          backup_created: "{{ backup_result.backed_up | default(false) }}"
+        - name: Set deployment stats
+          ansible.builtin.set_stats:
+            data:
+              deployed_version: "{{ app_version }}"
+              deployment_status: "{{ 'success' if installation_verified else 'failed' }}"
+              executable_verified: "{{ exe_check.stat.exists }}"
+              backup_created: "{{ backup_created | default(false) }}"
 
-    - name: Report deployment success
-      ansible.builtin.debug:
-        msg:
-          - "=== DEPLOYMENT SUCCESSFUL ==="
-          - "Host: {{ inventory_hostname }}"
-          - "Application: {{ app_name }} v{{ app_version }}"
-          - "Install Path: {{ app_install_path }}"
-          - "Validation: {{ validation_result.output[0] }}"
-          - "Backup: {{ backup_result.backup_location | default('Not created') }}"
+        - name: Report deployment success
+          ansible.builtin.debug:
+            msg:
+              - "=== DEPLOYMENT SUCCESSFUL ==="
+              - "Host: {{ inventory_hostname }}"
+              - "Application: {{ app_name }} v{{ app_version }}"
+              - "Install Path: {{ app_install_path }}"
+              - "Executable: {{ exe_check.stat.path }}"
+              - "Backup: {{ backup_location | default('Not created') }}"
 
-  rescue:
-    - name: Deployment failed - initiate rollback
-      block:
+      rescue:
         - name: Log deployment failure
           ansible.builtin.debug:
             msg:
               - "DEPLOYMENT FAILED on {{ inventory_hostname }}"
               - "Error: {{ ansible_failed_result.msg | default('Unknown error') }}"
 
-        - name: Restore from backup if available
-          ansible.windows.win_powershell:
-            script: |
-              $backupPath = "{{ backup_result.backup_location | default('') }}"
-              $installPath = "{{ app_install_path }}"
+        # Use native win_file to remove failed installation
+        - name: Remove failed installation directory
+          ansible.windows.win_file:
+            path: "{{ app_install_path }}"
+            state: absent
+          when:
+            - enable_rollback | bool
+            - backup_created | default(false) | bool
 
-              if (Test-Path $backupPath) {
-                  # Remove failed installation
-                  if (Test-Path $installPath) {
-                      Remove-Item -Path $installPath -Recurse -Force
-                  }
-
-                  # Restore backup
-                  Copy-Item -Path $backupPath -Destination $installPath -Recurse -Force
-
-                  [PSCustomObject]@{
-                      rollback_successful = $true
-                      restored_from = $backupPath
-                  }
-              } else {
-                  [PSCustomObject]@{
-                      rollback_successful = $false
-                      reason = "No backup available"
-                  }
-              }
+        # Use native win_copy to restore backup
+        - name: Restore from backup
+          ansible.windows.win_copy:
+            src: "{{ backup_location }}"
+            dest: "{{ app_install_path }}"
+            remote_src: true
           register: rollback_result
           when:
             - enable_rollback | bool
-            - backup_result.backed_up | default(false) | bool
+            - backup_created | default(false) | bool
 
         - name: Set failure stats
           ansible.builtin.set_stats:
             data:
               deployment_status: "failed"
               rollback_attempted: "{{ enable_rollback }}"
-              rollback_successful: "{{ rollback_result.output[0].rollback_successful | default(false) }}"
+              rollback_successful: "{{ rollback_result is succeeded }}"
 
         - name: Re-raise the error
           ansible.builtin.fail:
             msg: "Deployment failed on {{ inventory_hostname }}"
-
-      when: enable_rollback | bool
