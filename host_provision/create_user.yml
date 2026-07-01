@@ -1,0 +1,22 @@
+---
+- name: Generate a SHA256 Password Hash
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # In a real scenario, use Ansible Vault to encrypt this plaintext variable!
+    plaintext_password: "MySuperSecretPassword123"
+
+  tasks:
+    - name: Generate SHA256 hash with a random salt
+      ansible.builtin.set_fact:
+        hashed_password_random_salt: "{{ plaintext_password | ansible.builtin.password_hash('sha256') }}"
+
+    - name: Generate SHA256 hash with a specific custom salt
+      ansible.builtin.set_fact:
+        hashed_password_custom_salt: "{{ plaintext_password | ansible.builtin.password_hash('sha256', 'mycustomsalt') }}"
+
+    - name: Display the generated hashes
+      ansible.builtin.debug:
+        msg:
+          - "Random Salt Hash: {{ hashed_password_random_salt }}"
+          - "Custom Salt Hash: {{ hashed_password_custom_salt }}"

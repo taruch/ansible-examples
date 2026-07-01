@@ -61,6 +61,24 @@ Joins a Windows server to an existing Active Directory domain. Uses `microsoft.a
 
 **Survey variables**: `_hosts` (target server), `domain_controller` (hostname or IP of the DC — required, no default), `domain_name`, `domain_admin_user`, `domain_admin_password`
 
+## Advanced Examples
+
+See **[ADVANCED_EXAMPLES_README.md](ADVANCED_EXAMPLES_README.md)** for detailed documentation on:
+
+### System Monitoring & Alert Response
+- **`system_monitoring_cpu_alert.yml`** — Investigate high CPU alerts with detailed performance analysis
+- **`system_monitoring_memory_alert.yml`** — Investigate memory issues with process and page file analysis
+- **`system_monitoring_disk_alert.yml`** — Investigate disk space alerts with large file/folder identification
+
+### PowerShell Script Integration
+- **`create_shared_drive.yml`** — Create Windows file shares using existing PowerShell scripts
+- **`files/Create-SharedDrive.ps1`** — Reusable PowerShell script for share creation with NTFS/SMB permissions
+
+### Large-Scale Deployment
+- **`mass_application_deployment.yml`** — Deploy applications to thousands of machines with batch processing, validation, and rollback
+
+These playbooks demonstrate enterprise patterns for alert-driven automation, PowerShell integration, and large-scale deployments with proper error handling and reporting.
+
 ## Microsoft SQL Server
 
 For SQL Server deployment, backup, and restore playbooks, see the [**windows_mssql_examples**](../windows_mssql_examples/) directory.

@@ -65,3 +65,7 @@ certificate_renewal_examples/*/ee/context/
 *.cer
 *.jks
 *.keystore
+
+
+mcp.json
+CLAUDE.md

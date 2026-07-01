@@ -1,0 +1,103 @@
+---
+# Create Windows file shares using existing PowerShell scripts
+# Demonstrates how to utilize existing PowerShell scripts with parameters from Ansible
+
+- name: Create Windows File Share Using PowerShell Script
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: false
+
+  vars:
+    # Share configuration (can be passed via survey or extra vars)
+    share_name: "TeamShare"
+    share_path: "C:\\Shares\\TeamShare"
+    share_description: "Team collaboration share created by Ansible"
+
+    # Permission groups/users
+    read_only_users:
+      - "Domain Users"
+    change_users:
+      - "TeamA"
+      - "TeamB"
+    full_control_users:
+      - "Administrators"
+      - "ShareAdmins"
+
+    # Script location
+    powershell_script_path: "files/Create-SharedDrive.ps1"
+
+  tasks:
+    - name: Copy PowerShell script to remote host
+      ansible.windows.win_copy:
+        src: "{{ powershell_script_path }}"
+        dest: 'C:\Windows\Temp\Create-SharedDrive.ps1'
+
+    - name: Execute PowerShell script to create shared drive
+      ansible.windows.win_powershell:
+        script: |
+          $params = @{
+              ShareName = "{{ share_name }}"
+              SharePath = "{{ share_path }}"
+              Description = "{{ share_description }}"
+              ReadUsers = @({{ read_only_users | map('to_json') | join(', ') }})
+              ChangeUsers = @({{ change_users | map('to_json') | join(', ') }})
+              FullControlUsers = @({{ full_control_users | map('to_json') | join(', ') }})
+              RemoveExisting = $true
+          }
+
+          & 'C:\Windows\Temp\Create-SharedDrive.ps1' @params
+      register: share_result
+
+    - name: Parse PowerShell script output
+      ansible.builtin.set_fact:
+        share_info: "{{ share_result.output[-1] }}"
+
+    - name: Display share creation results
+      ansible.builtin.debug:
+        msg:
+          - "Share Created Successfully!"
+          - "Share Name: {{ share_info.share_name }}"
+          - "Share Path: {{ share_info.share_path }}"
+          - "UNC Path: {{ share_info.unc_path }}"
+          - "Description: {{ share_info.description }}"
+          - "Permissions Applied:"
+          - "  Read: {{ share_info.permissions.read | join(', ') }}"
+          - "  Change: {{ share_info.permissions.change | join(', ') }}"
+          - "  Full Control: {{ share_info.permissions.full_control | join(', ') }}"
+
+    - name: Verify share exists
+      ansible.windows.win_powershell:
+        script: |
+          $share = Get-SmbShare -Name "{{ share_name }}" -ErrorAction SilentlyContinue
+          if ($share) {
+              [PSCustomObject]@{
+                  exists = $true
+                  name = $share.Name
+                  path = $share.Path
+                  description = $share.Description
+              }
+          } else {
+              [PSCustomObject]@{
+                  exists = $false
+              }
+          }
+      register: share_verification
+
+    - name: Assert share was created successfully
+      ansible.builtin.assert:
+        that:
+          - share_info.success | bool
+          - share_verification.output[0].exists | bool
+        fail_msg: "Share creation failed or share does not exist"
+        success_msg: "Share {{ share_name }} verified and accessible"
+
+    - name: Clean up temporary script file
+      ansible.windows.win_file:
+        path: 'C:\Windows\Temp\Create-SharedDrive.ps1'
+        state: absent
+
+    - name: Set stats for AAP dashboard
+      ansible.builtin.set_stats:
+        data:
+          share_created: "{{ share_info.share_name }}"
+          share_unc_path: "{{ share_info.unc_path }}"
+          share_permissions_count: "{{ (share_info.permissions.read | length) + (share_info.permissions.change | length) + (share_info.permissions.full_control | length) }}"
