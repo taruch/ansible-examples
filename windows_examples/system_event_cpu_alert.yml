@@ -156,7 +156,7 @@
       ignore_errors: true
       register: cpu_check
 
-    - name: Set stats for AAP dashboard
+    - name: Set stats for AAP dashboard and workflow
       ansible.builtin.set_stats:
         data:
           cpu_current: "{{ cpu_usage.output[0].CurrentCPU }}"
@@ -164,3 +164,9 @@
           top_process: "{{ top_processes.output[0].Name }}"
           top_process_cpu: "{{ top_processes.output[0]['CPU(s)'] }}"
           alert_severity: "{{ 'CRITICAL' if cpu_usage.output[0].CurrentCPU | float > cpu_threshold | float else 'OK' }}"
+          hostname: "{{ inventory_hostname }}"
+          processor_queue_length: "{{ perf_counters.output[0]['Processor Queue Length'] }}"
+          uptime_hours: "{{ ansible_facts.ansible_uptime_seconds // 3600 }}"
+          running_tasks_count: "{{ running_tasks.output | length }}"
+        per_host: true
+        aggregate: false

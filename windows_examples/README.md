@@ -108,12 +108,33 @@ ansible-playbook system_event_cpu_alert.yml \
 - File: `/tmp/windows_reports/cpu_alert_<hostname>_<timestamp>.json`
 - AAP Stats: `cpu_current`, `top_process`, `alert_severity`
 
+**Workflow Stats** (available to downstream workflow nodes):
+- `hostname` - Target host that triggered alert
+- `cpu_current` - Current CPU percentage
+- `cpu_threshold` - Configured threshold
+- `top_process` - Name of highest CPU process
+- `top_process_cpu` - CPU usage of top process
+- `processor_queue_length` - CPU queue depth
+- `uptime_hours` - System uptime in hours
+- `running_tasks_count` - Number of active scheduled tasks
+- `alert_severity` - "CRITICAL" or "OK"
+
 **AAP Integration**:
 Configure as a job template with webhook enabled. Your monitoring system calls:
 ```bash
 curl -X POST https://aap-host/api/v2/job_templates/<id>/launch/ \
   -H "Authorization: Bearer <token>" \
   -d '{"extra_vars": {"_hosts": "server01", "cpu_threshold": 90}}'
+```
+
+**Workflow Usage Example**:
+Use in an AAP workflow to trigger remediation based on findings:
+```yaml
+# Downstream workflow node can access stats:
+extra_vars:
+  alert_host: "{{ workflow_job.artifacts.hostname }}"
+  severity: "{{ workflow_job.artifacts.alert_severity }}"
+  cpu_usage: "{{ workflow_job.artifacts.cpu_current }}"
 ```
 
 ---
@@ -152,6 +173,19 @@ ansible-playbook system_event_memory_alert.yml \
 - Console: Memory usage summary, top processes, page file status
 - File: `/tmp/windows_reports/memory_alert_<hostname>_<timestamp>.json`
 - AAP Stats: `memory_percent_used`, `memory_used_gb`, `top_process_memory_mb`
+
+**Workflow Stats** (available to downstream workflow nodes):
+- `hostname` - Target host that triggered alert
+- `memory_percent_used` - Current memory usage percentage
+- `memory_threshold` - Configured threshold
+- `memory_used_gb` - Used memory in GB
+- `memory_free_gb` - Free memory in GB
+- `top_process` - Name of highest memory process
+- `top_process_memory_mb` - Memory usage of top process in MB
+- `page_file_percent_used` - Page file usage percentage
+- `available_memory_mb` - Available memory in MB
+- `committed_bytes_percent` - Committed memory percentage
+- `alert_severity` - "CRITICAL" or "OK"
 
 **Key Metrics Collected**:
 - Working Set vs Private Memory vs Virtual Memory (per process)
@@ -199,6 +233,18 @@ ansible-playbook system_event_disk_alert.yml \
 - Console: Disk volume summary, largest folders/files, log sizes
 - File: `/tmp/windows_reports/disk_alert_<hostname>_<timestamp>.json`
 - AAP Stats: `critical_drives_count`, `largest_folder_gb`, `alert_severity`
+
+**Workflow Stats** (available to downstream workflow nodes):
+- `hostname` - Target host that triggered alert
+- `alert_threshold` - Configured threshold percentage
+- `critical_drives_count` - Number of drives exceeding threshold
+- `critical_drive_letters` - Comma-separated list of critical drive letters
+- `drives_checked` - Total number of drives scanned
+- `largest_folder_gb` - Size of largest folder in GB
+- `largest_folder_path` - Path to largest folder
+- `windows_update_cache_gb` - Windows Update cache size in GB
+- `log_files_total_gb` - Total log file size in GB
+- `alert_severity` - "CRITICAL" or "OK"
 
 **Performance Notes**:
 - Large file/folder scanning uses `async: 300` with polling to prevent timeouts

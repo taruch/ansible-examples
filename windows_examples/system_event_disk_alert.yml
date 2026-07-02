@@ -8,8 +8,10 @@
   gather_facts: true
 
   vars:
-    # Alert threshold percentage (can be passed as extra var)
-    disk_threshold: 85
+    # The disk usage threshold percentage that triggered the monitoring alert
+    # Used to filter which drives need deep investigation (large file scanning)
+    # Should match the threshold configured in your monitoring system
+    alert_threshold: 85
     # Drives to check (empty means all local drives)
     target_drives: []
     # Report output directory on the controller
@@ -73,7 +75,7 @@
 
           foreach ($vol in $volumes) {
               $percentUsed = if ($vol.Size -gt 0) { (($vol.Size - $vol.SizeRemaining) / $vol.Size) * 100 } else { 0 }
-              if ($percentUsed -gt {{ disk_threshold }}) {
+              if ($percentUsed -gt {{ alert_threshold }}) {
                   $criticalDrives += $vol.DriveLetter
               }
           }
@@ -116,7 +118,7 @@
 
           foreach ($vol in $volumes) {
               $percentUsed = if ($vol.Size -gt 0) { (($vol.Size - $vol.SizeRemaining) / $vol.Size) * 100 } else { 0 }
-              if ($percentUsed -gt {{ disk_threshold }}) {
+              if ($percentUsed -gt {{ alert_threshold }}) {
                   $criticalDrives += $vol.DriveLetter
               }
           }
@@ -193,7 +195,7 @@
           - "=== HIGH DISK USAGE ALERT INVESTIGATION ==="
           - "Host: {{ inventory_hostname }}"
           - "Alert Time: {{ ansible_date_time.iso8601 }}"
-          - "Threshold: {{ disk_threshold }}%"
+          - "Threshold: {{ alert_threshold }}%"
           - "=== DISK VOLUMES ==="
           - "{{ all_volumes.output }}"
           - "=== DISK PERFORMANCE COUNTERS ==="
@@ -222,7 +224,7 @@
             "alert_type": "high_disk_usage",
             "host": "{{ inventory_hostname }}",
             "timestamp": "{{ ansible_date_time.iso8601 }}",
-            "threshold_percent": {{ disk_threshold }},
+            "threshold_percent": {{ alert_threshold }},
             "disk_volumes": {{ all_volumes.output | to_json }},
             "disk_performance_counters": {{ disk_counters.output[0] | to_json }},
             "largest_folders": {{ large_folders.output | to_json }},
@@ -230,7 +232,7 @@
             "log_file_sizes": {{ log_sizes.output | to_json }},
             "windows_update_cache": {{ windows_update_cache.output | to_json }},
             "critical_drives": {{ all_volumes.output |
-                selectattr('PercentUsed', 'gt', disk_threshold) |
+                selectattr('PercentUsed', 'gt', alert_threshold) |
                 map(attribute='DriveLetter') | list | to_json }}
           }
         dest: "{{ report_dir }}/disk_alert_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.json"
@@ -238,22 +240,28 @@
 
     - name: Check if any drive exceeds threshold
       ansible.builtin.set_fact:
-        critical_drives: "{{ all_volumes.output | selectattr('PercentUsed', 'gt', disk_threshold) | list }}"
+        critical_drives: "{{ all_volumes.output | selectattr('PercentUsed', 'gt', alert_threshold) | list }}"
 
     - name: Alert if disk usage exceeds threshold
       ansible.builtin.assert:
         that:
           - critical_drives | length == 0
-        fail_msg: "CRITICAL: {{ critical_drives | length }} drive(s) exceed {{ disk_threshold }}% usage threshold"
+        fail_msg: "CRITICAL: {{ critical_drives | length }} drive(s) exceed {{ alert_threshold }}% usage threshold"
         success_msg: "All drives are within acceptable disk usage range"
       ignore_errors: true
 
-    - name: Set stats for AAP dashboard
+    - name: Set stats for AAP dashboard and workflow
       ansible.builtin.set_stats:
         data:
-          disk_threshold: "{{ disk_threshold }}"
+          alert_threshold: "{{ alert_threshold }}"
           critical_drives_count: "{{ critical_drives | length }}"
           drives_checked: "{{ all_volumes.output | length }}"
           largest_folder_gb: "{{ large_folders.output[0].SizeGB | default(0) }}"
+          largest_folder_path: "{{ large_folders.output[0].Path | default('N/A') }}"
           alert_severity: "{{ 'CRITICAL' if critical_drives | length > 0 else 'OK' }}"
-      when: large_folders.output is defined and large_folders.output | length > 0
+          hostname: "{{ inventory_hostname }}"
+          critical_drive_letters: "{{ critical_drives | map(attribute='DriveLetter') | list | join(',') if critical_drives | length > 0 else 'None' }}"
+          windows_update_cache_gb: "{{ windows_update_cache.output[0].SizeGB | default(0) }}"
+          log_files_total_gb: "{{ (log_sizes.output | sum(attribute='SizeGB')) | default(0) }}"
+        per_host: true
+        aggregate: false

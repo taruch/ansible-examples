@@ -192,7 +192,7 @@
       ignore_errors: true
       register: memory_check
 
-    - name: Set stats for AAP dashboard
+    - name: Set stats for AAP dashboard and workflow
       ansible.builtin.set_stats:
         data:
           memory_percent_used: "{{ memory_usage.output[0].PercentUsed }}"
@@ -202,3 +202,9 @@
           top_process: "{{ top_processes.output[0].Name }}"
           top_process_memory_mb: "{{ top_processes.output[0]['Memory(MB)'] }}"
           alert_severity: "{{ 'CRITICAL' if memory_usage.output[0].PercentUsed | float > memory_threshold | float else 'OK' }}"
+          hostname: "{{ inventory_hostname }}"
+          page_file_percent_used: "{{ page_file_info.output[0].PercentUsed | default(0) }}"
+          available_memory_mb: "{{ memory_counters.output[0]['Available MBytes'] | default(0) }}"
+          committed_bytes_percent: "{{ memory_counters.output[0]['% Committed Bytes In Use'] | default(0) }}"
+        per_host: true
+        aggregate: false
