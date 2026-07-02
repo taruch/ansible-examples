@@ -181,7 +181,7 @@ ansible-playbook system_event_memory_alert.yml \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `_hosts` | `all` | Target hosts |
-| `disk_threshold` | `85` | Alert threshold percentage |
+| `alert_threshold` | `85` | The threshold percentage from your monitoring system |
 | `target_drives` | `[]` | Specific drives to check (empty = all) |
 | `large_file_size_mb` | `100` | Minimum file size for large file scan |
 | `top_folder_count` | `10` | Number of largest folders to report |
@@ -190,7 +190,7 @@ ansible-playbook system_event_memory_alert.yml \
 **Example Execution**:
 ```bash
 ansible-playbook system_event_disk_alert.yml \
-  -e "disk_threshold=90" \
+  -e "alert_threshold=90" \
   -e "large_file_size_mb=500" \
   -e "_hosts=file_servers"
 ```
