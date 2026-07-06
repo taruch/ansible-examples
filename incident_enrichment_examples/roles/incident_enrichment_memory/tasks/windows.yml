@@ -140,8 +140,8 @@
     path: "{{ report_dir }}"
     state: directory
     mode: '0755'
-      delegate_to: localhost
-      run_once: true
+  delegate_to: localhost
+  run_once: true
 
 - name: Generate detailed JSON report
   ansible.builtin.copy:
@@ -164,7 +164,7 @@
         "memory_intensive_services": {{ service_memory.output | to_json }}
       }
     dest: "{{ report_dir }}/memory_alert_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.json"
-      delegate_to: localhost
+  delegate_to: localhost
 
 - name: Alert if memory exceeds threshold
   ansible.builtin.assert:
