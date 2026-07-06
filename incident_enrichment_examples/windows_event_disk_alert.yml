@@ -57,10 +57,11 @@
                       "\PhysicalDisk(*)\Disk Writes/sec"
                   ) -ErrorAction SilentlyContinue
 
-                  $results[$drive] = @{}
+                  $driveKey = [string]$drive
+                  $results[$driveKey] = @{}
                   foreach ($counter in $diskCounters.CounterSamples) {
-                      $counterName = ($counter.Path -split '\\')[-1]
-                      $results[$drive][$counterName] = [math]::Round($counter.CookedValue, 2)
+                      $counterName = [string](($counter.Path -split '\\')[-1])
+                      $results[$driveKey][$counterName] = [math]::Round($counter.CookedValue, 2)
                   }
               } catch {}
           }
