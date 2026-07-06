@@ -1,0 +1,227 @@
+---
+# Update ServiceNow incident with Windows system alert data
+# Use case: Second node in AAP workflow after system_event_* playbooks
+# Receives alert data via set_stats from previous workflow node
+#
+# Required variables (passed from previous workflow node via set_stats):
+#   - incident_number: ServiceNow incident number (e.g., INC0010001)
+#   - alert_data: JSON string containing the alert report from previous node
+#   - servicenow_host: ServiceNow instance URL
+#   - servicenow_username: ServiceNow username
+#   - vault_servicenow_password: ServiceNow password (use AAP credential)
+
+- name: Update ServiceNow Incident with Windows Alert Data
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # ServiceNow connection details (provide via AAP credential or extra-vars)
+    servicenow_host: "{{ servicenow_host | default('') }}"
+    servicenow_username: "{{ servicenow_username | default('admin') }}"
+
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - incident_number is defined
+          - alert_data is defined
+          - servicenow_host | length > 0
+          - vault_servicenow_password is defined
+        fail_msg: "Missing required variables: incident_number, alert_data, servicenow_host, or vault_servicenow_password"
+
+    - name: Parse alert data from workflow
+      ansible.builtin.set_fact:
+        alert_report: "{{ alert_data if alert_data is mapping else (alert_data | from_json) }}"
+
+    - name: Build incident work notes for CPU alert
+      ansible.builtin.set_fact:
+        work_notes_text: |
+          === AUTOMATED CPU ALERT INVESTIGATION ===
+          Report Timestamp: {{ ansible_date_time.iso8601 }}
+
+          Alert Type: HIGH CPU
+          Host: {{ alert_report.host }}
+          Alert Time: {{ alert_report.timestamp }}
+
+          CPU Metrics:
+            - Current CPU Usage: {{ alert_report.cpu_metrics.current_cpu_percent }}%
+            - Threshold: {{ alert_report.cpu_metrics.threshold_percent }}%
+            - Processor: {{ alert_report.cpu_metrics.processor_info.name }}
+            - Physical CPUs: {{ alert_report.cpu_metrics.processor_info.physical_count }}
+            - Cores per Processor: {{ alert_report.cpu_metrics.processor_info.cores_per_processor }}
+            - Logical Processors: {{ alert_report.cpu_metrics.processor_info.logical_processors }}
+
+          System Information:
+            - Uptime: {{ alert_report.system_info.uptime_hours }} hours
+            - Last Boot: {{ alert_report.system_info.last_boot_time }}
+            - OS: {{ alert_report.system_info.os_name }} {{ alert_report.system_info.os_version }}
+            - Hostname: {{ alert_report.system_info.hostname }}
+
+          Top CPU-Consuming Processes:
+          {% for proc in alert_report.top_processes[:5] %}
+            {{ loop.index }}. {{ proc.Name }} - CPU: {{ proc['CPU(s)'] }}s, Memory: {{ proc['Memory(MB)'] }} MB, Threads: {{ proc.Threads }}, PID: {{ proc.Id }}
+          {% endfor %}
+
+          Performance Counters:
+            - Processor Queue Length: {{ alert_report.cpu_metrics.performance_counters['Processor Queue Length'] | default('N/A') }}
+            - % Privileged Time: {{ alert_report.cpu_metrics.performance_counters['% Privileged Time'] | default('N/A') }}%
+            - % User Time: {{ alert_report.cpu_metrics.performance_counters['% User Time'] | default('N/A') }}%
+            - Context Switches/sec: {{ alert_report.cpu_metrics.performance_counters['Context Switches/sec'] | default('N/A') }}
+
+          Running Scheduled Tasks: {{ alert_report.running_scheduled_tasks | length }}
+          Windows Update Service: {{ alert_report.windows_update_status }}
+
+          === END AUTOMATED REPORT ===
+      when: alert_report.alert_type == 'high_cpu'
+
+    - name: Build incident work notes for memory alert
+      ansible.builtin.set_fact:
+        work_notes_text: |
+          === AUTOMATED MEMORY ALERT INVESTIGATION ===
+          Report Timestamp: {{ ansible_date_time.iso8601 }}
+
+          Alert Type: HIGH MEMORY
+          Host: {{ alert_report.host }}
+          Alert Time: {{ alert_report.timestamp }}
+
+          Memory Metrics:
+            - Current Memory Usage: {{ alert_report.memory_metrics.percent_used }}%
+            - Threshold: {{ alert_report.memory_metrics.threshold_percent }}%
+            - Total Memory: {{ alert_report.memory_metrics.total_memory_gb }} GB
+            - Used Memory: {{ alert_report.memory_metrics.used_memory_gb }} GB
+            - Free Memory: {{ alert_report.memory_metrics.free_memory_gb }} GB
+
+          System Information:
+            - Total Physical Memory: {{ alert_report.system_info.TotalPhysicalMemoryGB }} GB
+            - Manufacturer: {{ alert_report.system_info.Manufacturer }}
+            - Model: {{ alert_report.system_info.Model }}
+            - Processors: {{ alert_report.system_info.NumberOfProcessors }}
+            - Logical Processors: {{ alert_report.system_info.NumberOfLogicalProcessors }}
+
+          Top Memory-Consuming Processes:
+          {% for proc in alert_report.top_processes[:5] %}
+            {{ loop.index }}. {{ proc.Name }} - Memory: {{ proc['Memory(MB)'] }} MB, Private: {{ proc['PrivateMemory(MB)'] }} MB, Virtual: {{ proc['VirtualMemory(MB)'] }} MB, PID: {{ proc.Id }}
+          {% endfor %}
+
+          {% if alert_report.page_file | length > 0 %}
+          Page File Usage:
+            - File: {{ alert_report.page_file[0].Name }}
+            - Usage: {{ alert_report.page_file[0].PercentUsed }}%
+            - Current: {{ alert_report.page_file[0].CurrentUsageMB }} MB
+            - Peak: {{ alert_report.page_file[0].PeakUsageMB }} MB
+            - Allocated: {{ alert_report.page_file[0].AllocatedMB }} MB
+          {% endif %}
+
+          Memory Performance Counters:
+            - Available MBytes: {{ alert_report.memory_metrics.performance_counters['Available MBytes'] | default('N/A') }}
+            - % Committed Bytes In Use: {{ alert_report.memory_metrics.performance_counters['% Committed Bytes In Use'] | default('N/A') }}%
+            - Page Faults/sec: {{ alert_report.memory_metrics.performance_counters['Page Faults/sec'] | default('N/A') }}
+
+          === END AUTOMATED REPORT ===
+      when: alert_report.alert_type == 'high_memory'
+
+    - name: Build incident work notes for disk alert
+      ansible.builtin.set_fact:
+        work_notes_text: |
+          === AUTOMATED DISK ALERT INVESTIGATION ===
+          Report Timestamp: {{ ansible_date_time.iso8601 }}
+
+          Alert Type: HIGH DISK USAGE
+          Host: {{ alert_report.host }}
+          Alert Time: {{ alert_report.timestamp }}
+          Threshold: {{ alert_report.threshold_percent }}%
+
+          Critical Drives: {{ alert_report.critical_drives | join(', ') if alert_report.critical_drives | length > 0 else 'None' }}
+
+          Disk Volumes:
+          {% for volume in alert_report.disk_volumes %}
+            - Drive {{ volume.DriveLetter }}: {{ volume.FileSystemLabel | default('Unlabeled') }}
+              - Usage: {{ volume.PercentUsed }}% ({{ volume.UsedGB }} GB used / {{ volume.SizeGB }} GB total)
+              - Free Space: {{ volume.FreeGB }} GB
+              - File System: {{ volume.FileSystem }}
+              - Health: {{ volume.HealthStatus }}
+          {% endfor %}
+
+          {% if alert_report.largest_folders | length > 0 %}
+          Top 5 Largest Folders on Critical Drives:
+          {% for folder in alert_report.largest_folders[:5] %}
+            {{ loop.index }}. {{ folder.Path }} - {{ folder.SizeGB }} GB ({{ folder.SizeMB }} MB)
+               Last Modified: {{ folder.LastModified }}
+          {% endfor %}
+          {% endif %}
+
+          {% if alert_report.large_files | length > 0 %}
+          Large Files (>{{ alert_report.large_file_size_mb | default(100) }}MB):
+          {% for file in alert_report.large_files[:10] %}
+            {{ loop.index }}. {{ file.FullName }} - {{ file.SizeGB }} GB
+               Extension: {{ file.Extension }}, Last Modified: {{ file.LastWriteTime }}
+          {% endfor %}
+          {% endif %}
+
+          {% if alert_report.windows_update_cache %}
+          Windows Update Cache: {{ alert_report.windows_update_cache[0].SizeGB | default(0) }} GB
+          Path: {{ alert_report.windows_update_cache[0].Path | default('N/A') }}
+          {% endif %}
+
+          {% if alert_report.log_file_sizes | length > 0 %}
+          Log File Directories:
+          {% for log_dir in alert_report.log_file_sizes %}
+            - {{ log_dir.Path }}: {{ log_dir.SizeGB }} GB
+          {% endfor %}
+          Total Log Files: {{ (alert_report.log_file_sizes | sum(attribute='SizeGB')) | round(2) }} GB
+          {% endif %}
+
+          === END AUTOMATED REPORT ===
+      when: alert_report.alert_type == 'high_disk_usage'
+
+    - name: Get ServiceNow incident details
+      servicenow.servicenow.snow_record_find:
+        username: "{{ servicenow_username }}"
+        password: "{{ vault_servicenow_password }}"
+        host: "{{ servicenow_host }}"
+        table: incident
+        query:
+          number: "{{ incident_number }}"
+      register: incident_lookup
+
+    - name: Validate incident exists
+      ansible.builtin.assert:
+        that:
+          - incident_lookup.record | length > 0
+        fail_msg: "Incident {{ incident_number }} not found in ServiceNow"
+
+    - name: Update ServiceNow incident with work notes
+      servicenow.servicenow.snow_record:
+        username: "{{ servicenow_username }}"
+        password: "{{ vault_servicenow_password }}"
+        host: "{{ servicenow_host }}"
+        table: incident
+        state: present
+        number: "{{ incident_number }}"
+        data:
+          work_notes: "{{ work_notes_text }}"
+          # Optionally update incident state
+          # state: 2  # In Progress
+          # assigned_to: "{{ servicenow_username }}"
+      register: incident_update
+
+    - name: Display update summary
+      ansible.builtin.debug:
+        msg:
+          - "=== SERVICENOW INCIDENT UPDATE SUMMARY ==="
+          - "Incident Number: {{ incident_number }}"
+          - "Alert Type: {{ alert_report.alert_type | upper }}"
+          - "Affected Host: {{ alert_report.host }}"
+          - "Incident Sys ID: {{ incident_update.record.sys_id }}"
+          - "ServiceNow Link: {{ servicenow_host }}/nav_to.do?uri=incident.do?sys_id={{ incident_update.record.sys_id }}"
+
+    - name: Set stats for AAP dashboard
+      ansible.builtin.set_stats:
+        data:
+          incident_number: "{{ incident_number }}"
+          incident_sys_id: "{{ incident_update.record.sys_id }}"
+          alert_type: "{{ alert_report.alert_type }}"
+          affected_host: "{{ alert_report.host }}"
+          servicenow_link: "{{ servicenow_host }}/nav_to.do?uri=incident.do?sys_id={{ incident_update.record.sys_id }}"
+          update_status: "success"
+        aggregate: false
