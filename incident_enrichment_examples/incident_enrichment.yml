@@ -1,0 +1,28 @@
+---
+- name: Incident Enrichment Investigation
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: true
+
+  tasks:
+    - name: Validate issue parameter
+      ansible.builtin.assert:
+        that:
+          - issue is defined
+          - issue in ['cpu', 'memory', 'storage']
+        fail_msg: "Issue must be defined and set to 'cpu', 'memory', or 'storage'"
+        success_msg: "Valid issue type: {{ issue }}"
+
+    - name: Include CPU enrichment role
+      ansible.builtin.include_role:
+        name: incident_enrichment_cpu
+      when: issue == 'cpu'
+
+    - name: Include memory enrichment role
+      ansible.builtin.include_role:
+        name: incident_enrichment_memory
+      when: issue == 'memory'
+
+    - name: Include disk/storage enrichment role
+      ansible.builtin.include_role:
+        name: incident_enrichment_disk
+      when: issue == 'storage'
