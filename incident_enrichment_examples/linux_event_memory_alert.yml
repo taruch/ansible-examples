@@ -39,17 +39,17 @@
 
     - name: Calculate memory metrics
       ansible.builtin.set_fact:
-        mem_total_gb: "{{ (mem_total_kb | float / 1024 / 1024) | round(2) }}"
-        mem_free_gb: "{{ (mem_free_kb | float / 1024 / 1024) | round(2) }}"
-        mem_available_gb: "{{ (mem_available_kb | float / 1024 / 1024) | round(2) }}"
-        mem_used_gb: "{{ ((mem_total_kb - mem_available_kb) | float / 1024 / 1024) | round(2) }}"
-        mem_percent_used: "{{ (((mem_total_kb - mem_available_kb) | float / mem_total_kb) * 100) | round(2) }}"
-        buffers_gb: "{{ (buffers_kb | float / 1024 / 1024) | round(2) }}"
-        cached_gb: "{{ (cached_kb | float / 1024 / 1024) | round(2) }}"
-        swap_total_gb: "{{ (swap_total_kb | float / 1024 / 1024) | round(2) }}"
-        swap_free_gb: "{{ (swap_free_kb | float / 1024 / 1024) | round(2) }}"
-        swap_used_gb: "{{ ((swap_total_kb - swap_free_kb) | float / 1024 / 1024) | round(2) }}"
-        swap_percent_used: "{{ ((swap_total_kb - swap_free_kb) | float / swap_total_kb * 100) | round(2) if swap_total_kb > 0 else 0 }}"
+        mem_total_gb: "{{ (mem_total_kb | int / 1024 / 1024) | round(2) }}"
+        mem_free_gb: "{{ (mem_free_kb | int / 1024 / 1024) | round(2) }}"
+        mem_available_gb: "{{ (mem_available_kb | int / 1024 / 1024) | round(2) }}"
+        mem_used_gb: "{{ ((mem_total_kb | int - mem_available_kb | int) / 1024 / 1024) | round(2) }}"
+        mem_percent_used: "{{ (((mem_total_kb | int - mem_available_kb | int) / (mem_total_kb | int)) * 100) | round(2) }}"
+        buffers_gb: "{{ (buffers_kb | int / 1024 / 1024) | round(2) }}"
+        cached_gb: "{{ (cached_kb | int / 1024 / 1024) | round(2) }}"
+        swap_total_gb: "{{ (swap_total_kb | int / 1024 / 1024) | round(2) }}"
+        swap_free_gb: "{{ (swap_free_kb | int / 1024 / 1024) | round(2) }}"
+        swap_used_gb: "{{ ((swap_total_kb | int - swap_free_kb | int) / 1024 / 1024) | round(2) }}"
+        swap_percent_used: "{{ (((swap_total_kb | int - swap_free_kb | int) / (swap_total_kb | int) * 100) | round(2)) if swap_total_kb | int > 0 else 0 }}"
 
     - name: Get top memory consuming processes
       ansible.builtin.shell: |
