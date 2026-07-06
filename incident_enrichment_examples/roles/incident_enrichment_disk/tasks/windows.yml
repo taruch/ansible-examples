@@ -219,3 +219,20 @@
 - name: Check if any drive exceeds threshold
   ansible.builtin.set_fact:
     critical_drives: "{{ all_volumes.output | selectattr('PercentUsed', 'gt', alert_threshold) | list }}"
+
+- name: Build full alert report for workflow
+  ansible.builtin.set_fact:
+    alert_report_json: |
+      {
+        "alert_type": "high_disk_usage",
+        "host": "{{ inventory_hostname }}",
+        "timestamp": "{{ ansible_date_time.iso8601 }}",
+        "threshold_percent": {{ alert_threshold }},
+        "disk_volumes": {{ all_volumes.output | to_json }},
+        "disk_performance_counters": {{ disk_counters.output[0] | to_json }},
+        "largest_folders": {{ large_folders.output | to_json }},
+        "large_files": {{ large_files.output | to_json }},
+        "log_file_sizes": {{ log_sizes.output | to_json }},
+        "windows_update_cache": {{ windows_update_cache.output | to_json }},
+        "critical_drives": {{ critical_drives | map(attribute='DriveLetter') | list | to_json }}
+      }
