@@ -113,6 +113,18 @@
           }
       register: processor_info
 
+    - name: Get OS and hostname information
+      ansible.windows.win_powershell:
+        script: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          $cs = Get-CimInstance Win32_ComputerSystem
+          [PSCustomObject]@{
+              OSName = $os.Caption
+              OSVersion = $os.Version
+              Hostname = $cs.Name
+          }
+      register: os_info
+
     - name: Display CPU alert summary
       ansible.builtin.debug:
         msg:
@@ -164,14 +176,15 @@
               "uptime_hours": {{ system_uptime.output[0].UptimeHours }},
               "uptime_seconds": {{ system_uptime.output[0].UptimeSeconds }},
               "last_boot_time": "{{ system_uptime.output[0].LastBootTime }}",
-              "os_version": "{{ ansible_facts.ansible_distribution }} {{ ansible_facts.ansible_distribution_version }}",
-              "hostname": "{{ ansible_facts.ansible_hostname }}"
+              "os_name": "{{ os_info.output[0].OSName }}",
+              "os_version": "{{ os_info.output[0].OSVersion }}",
+              "hostname": "{{ os_info.output[0].Hostname }}"
             },
             "top_processes": {{ top_processes.output | to_json }},
             "running_scheduled_tasks": {{ running_tasks.output | to_json }},
             "windows_update_status": "{{ windows_update_service.services[0].state if windows_update_service.services else 'Not Found' }}"
           }
-        dest: "{{ report_dir }}/cpu_alert_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.json"
+        dest: "{{ report_dir }}/cpu_alert_{{ inventory_hostname }}_{{ cpu_usage.output[0].Timestamp | regex_replace('[^0-9]', '') }}.json"
       delegate_to: localhost
 
     - name: Alert if CPU exceeds threshold
