@@ -172,7 +172,7 @@
       - memory_usage.output[0].PercentUsed | float < memory_threshold | float
     fail_msg: "CRITICAL: Memory usage ({{ memory_usage.output[0].PercentUsed }}%) exceeds threshold ({{ memory_threshold }}%)"
     success_msg: "Memory usage ({{ memory_usage.output[0].PercentUsed }}%) is within acceptable range"
-      ignore_errors: true
+  ignore_errors: true
   register: memory_check
 
 - name: Build full alert report for workflow
