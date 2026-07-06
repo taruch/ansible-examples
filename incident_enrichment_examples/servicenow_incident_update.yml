@@ -175,30 +175,29 @@
       when: alert_report.alert_type == 'high_disk_usage'
 
     - name: Get ServiceNow incident details
-      servicenow.servicenow.snow_record_find:
-        username: "{{ servicenow_username }}"
-        password: "{{ vault_servicenow_password }}"
-        host: "{{ servicenow_host }}"
-        table: incident
-        query:
-          number: "{{ incident_number }}"
+      servicenow.itsm.incident_info:
+        instance:
+          host: "{{ servicenow_host }}"
+          username: "{{ servicenow_username }}"
+          password: "{{ vault_servicenow_password }}"
+        number: "{{ incident_number }}"
       register: incident_lookup
 
     - name: Validate incident exists
       ansible.builtin.assert:
         that:
-          - incident_lookup.record | length > 0
+          - incident_lookup.records | length > 0
         fail_msg: "Incident {{ incident_number }} not found in ServiceNow"
 
     - name: Update ServiceNow incident with work notes
-      servicenow.servicenow.snow_record:
-        username: "{{ servicenow_username }}"
-        password: "{{ vault_servicenow_password }}"
-        host: "{{ servicenow_host }}"
-        table: incident
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ servicenow_host }}"
+          username: "{{ servicenow_username }}"
+          password: "{{ vault_servicenow_password }}"
         state: present
         number: "{{ incident_number }}"
-        data:
+        other:
           work_notes: "{{ work_notes_text }}"
           # Optionally update incident state
           # state: 2  # In Progress
