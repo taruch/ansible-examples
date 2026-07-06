@@ -91,11 +91,12 @@
   ansible.windows.win_powershell:
     script: |
       $proc = Get-CimInstance Win32_Processor | Select-Object -First 1
+      $allProcs = @(Get-CimInstance Win32_Processor)
       [PSCustomObject]@{
           Name = $proc.Name
           NumberOfCores = $proc.NumberOfCores
           NumberOfLogicalProcessors = $proc.NumberOfLogicalProcessors
-          ProcessorCount = (Get-CimInstance Win32_Processor).Count
+          ProcessorCount = $allProcs.Count
       }
   register: processor_info
 
