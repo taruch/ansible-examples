@@ -8,4 +8,4 @@
   gather_facts: true
 
   roles:
-    - incident_enrichment_cpu
+    - roles/incident_enrichment_cpu

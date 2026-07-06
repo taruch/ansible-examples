@@ -8,4 +8,4 @@
   gather_facts: true
 
   roles:
-    - incident_enrichment_disk
+    - roles/incident_enrichment_disk
