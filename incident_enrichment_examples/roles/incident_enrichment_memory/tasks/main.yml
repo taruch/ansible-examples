@@ -1,13 +1,13 @@
 ---
 # Main tasks file for memory incident enrichment
 
-- name: Include OS-specific tasks
-  ansible.builtin.include_tasks: "{{ ansible_os_family | lower }}.yml"
-  when: ansible_os_family | lower in ['windows', 'redhat', 'debian', 'suse']
+- name: Include Windows-specific tasks
+  ansible.builtin.include_tasks: windows.yml
+  when: ansible_os_family == 'Windows'
 
-- name: Include Linux tasks for unsupported distro
+- name: Include Linux-specific tasks
   ansible.builtin.include_tasks: linux.yml
-  when: ansible_os_family | lower not in ['windows', 'redhat', 'debian', 'suse']
+  when: ansible_os_family != 'Windows'
 
 - name: Set stats for AAP dashboard and workflow
   ansible.builtin.set_stats:
