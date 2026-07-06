@@ -68,7 +68,11 @@
       ansible.builtin.set_fact:
         largest_directories: "{{ largest_directories | default([]) + [{'filesystem': item.split('|')[0], 'size_kb': item.split('|')[1], 'size_mb': (item.split('|')[1] | int / 1024) | round(2), 'size_gb': (item.split('|')[1] | int / 1024 / 1024) | round(2), 'path': item.split('|')[2]}] }}"
       loop: "{{ large_directories_raw.stdout_lines }}"
-      when: large_directories_raw is defined and large_directories_raw.stdout_lines | length > 0
+      when:
+        - large_directories_raw is defined
+        - large_directories_raw is not skipped
+        - large_directories_raw.stdout_lines is defined
+        - large_directories_raw.stdout_lines | length > 0
 
     - name: Find large files on critical filesystems
       ansible.builtin.shell: |
@@ -85,7 +89,11 @@
       ansible.builtin.set_fact:
         large_files: "{{ large_files | default([]) + [{'size': item.split('|')[0], 'modified': item.split('|')[1], 'path': item.split('|')[2]}] }}"
       loop: "{{ large_files_raw.stdout_lines }}"
-      when: large_files_raw is defined and large_files_raw.stdout_lines | length > 0
+      when:
+        - large_files_raw is defined
+        - large_files_raw is not skipped
+        - large_files_raw.stdout_lines is defined
+        - large_files_raw.stdout_lines | length > 0
 
     - name: Check common log directories
       ansible.builtin.shell: |
