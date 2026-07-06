@@ -84,7 +84,7 @@
           === END AUTOMATED REPORT ===
       when: alert_report.alert_type == 'high_cpu'
 
-    - name: Build incident work notes for memory alert
+    - name: Build incident work notes for memory alert (Windows)
       ansible.builtin.set_fact:
         work_notes_text: |
           === AUTOMATED MEMORY ALERT INVESTIGATION ===
@@ -129,7 +129,69 @@
             - Page Faults/sec: {{ alert_report.memory_metrics.performance_counters['Page Faults/sec'] | default('N/A') }}
 
           === END AUTOMATED REPORT ===
-      when: alert_report.alert_type == 'high_memory'
+      when:
+        - alert_report.alert_type == 'high_memory'
+        - alert_report.system_info.TotalPhysicalMemoryGB is defined
+
+    - name: Build incident work notes for memory alert (Linux)
+      ansible.builtin.set_fact:
+        work_notes_text: |
+          === AUTOMATED MEMORY ALERT INVESTIGATION ===
+          Report Timestamp: {{ current_timestamp }}
+
+          Alert Type: HIGH MEMORY
+          Host: {{ alert_report.host }}
+          Alert Time: {{ alert_report.timestamp }}
+
+          Memory Metrics:
+            - Current Memory Usage: {{ alert_report.memory_metrics.percent_used }}%
+            - Threshold: {{ alert_report.memory_metrics.threshold_percent }}%
+            - Total Memory: {{ alert_report.memory_metrics.total_memory_gb }} GB
+            - Used Memory: {{ alert_report.memory_metrics.used_memory_gb }} GB
+            - Available Memory: {{ alert_report.memory_metrics.available_memory_gb }} GB
+            - Free Memory: {{ alert_report.memory_metrics.free_memory_gb }} GB
+            - Buffers: {{ alert_report.memory_metrics.buffers_gb }} GB
+            - Cached: {{ alert_report.memory_metrics.cached_gb }} GB
+
+          Swap Information:
+            - Total: {{ alert_report.memory_metrics.swap.total_gb }} GB
+            - Used: {{ alert_report.memory_metrics.swap.used_gb }} GB
+            - Free: {{ alert_report.memory_metrics.swap.free_gb }} GB
+            - Usage: {{ alert_report.memory_metrics.swap.percent_used }}%
+
+          System Information:
+            - Distribution: {{ alert_report.system_info.os_distribution }} {{ alert_report.system_info.os_version }}
+            - Kernel: {{ alert_report.system_info.kernel_version }}
+            - Hostname: {{ alert_report.system_info.hostname }}
+            - FQDN: {{ alert_report.system_info.fqdn }}
+            - Transparent Huge Pages: {{ alert_report.system_info.transparent_huge_pages }}
+
+          Top Memory-Consuming Processes:
+          {% for proc in alert_report.top_processes[:10] %}
+            {{ loop.index }}. {{ proc.command }} (PID {{ proc.pid }})
+               - User: {{ proc.user }}, Memory: {{ proc.mem_percent }}%, RSS: {{ proc.rss_kb }} KB
+          {% endfor %}
+
+          {% if alert_report.oom_killer_history | length > 0 %}
+          OOM Killer History:
+          {% for line in alert_report.oom_killer_history %}
+            {{ line }}
+          {% endfor %}
+          {% else %}
+          OOM Killer History: None
+          {% endif %}
+
+          {% if alert_report.numa_info | length > 0 and alert_report.numa_info[0] != 'numactl not available' %}
+          NUMA Memory Info:
+          {% for line in alert_report.numa_info %}
+            {{ line }}
+          {% endfor %}
+          {% endif %}
+
+          === END AUTOMATED REPORT ===
+      when:
+        - alert_report.alert_type == 'high_memory'
+        - alert_report.system_info.os_distribution is defined
 
     - name: Build incident work notes for disk alert
       ansible.builtin.set_fact:
