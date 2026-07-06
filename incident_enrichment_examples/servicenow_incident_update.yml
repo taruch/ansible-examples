@@ -15,6 +15,10 @@
   gather_facts: false
 
   tasks:
+    - name: Set current timestamp
+      ansible.builtin.set_fact:
+        current_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
     - name: Validate required variables
       ansible.builtin.assert:
         that:
@@ -43,7 +47,7 @@
       ansible.builtin.set_fact:
         work_notes_text: |
           === AUTOMATED CPU ALERT INVESTIGATION ===
-          Report Timestamp: {{ ansible_date_time.iso8601 }}
+          Report Timestamp: {{ current_timestamp }}
 
           Alert Type: HIGH CPU
           Host: {{ alert_report.host }}
@@ -84,7 +88,7 @@
       ansible.builtin.set_fact:
         work_notes_text: |
           === AUTOMATED MEMORY ALERT INVESTIGATION ===
-          Report Timestamp: {{ ansible_date_time.iso8601 }}
+          Report Timestamp: {{ current_timestamp }}
 
           Alert Type: HIGH MEMORY
           Host: {{ alert_report.host }}
@@ -131,7 +135,7 @@
       ansible.builtin.set_fact:
         work_notes_text: |
           === AUTOMATED DISK ALERT INVESTIGATION ===
-          Report Timestamp: {{ ansible_date_time.iso8601 }}
+          Report Timestamp: {{ current_timestamp }}
 
           Alert Type: HIGH DISK USAGE
           Host: {{ alert_report.host }}
