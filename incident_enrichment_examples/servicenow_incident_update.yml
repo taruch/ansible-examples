@@ -19,10 +19,21 @@
       ansible.builtin.assert:
         that:
           - incident_number is defined
-          - alert_data is defined
           - SN_HOST | length > 0
           - SN_PASSWORD is defined
-        fail_msg: "Missing required variables: incident_number, alert_data, SN_HOST, or SN_PASSWORD"
+        fail_msg: "Missing required variables: incident_number, SN_HOST, or SN_PASSWORD"
+
+    - name: Get alert_data from workflow artifacts (set_stats from previous node)
+      ansible.builtin.set_fact:
+        alert_data: "{{ workflow_job.artifacts.alert_data | default(alert_data | default('')) }}"
+      when: workflow_job is defined
+
+    - name: Validate alert_data is available
+      ansible.builtin.assert:
+        that:
+          - alert_data is defined
+          - alert_data | length > 0
+        fail_msg: "alert_data not found in workflow artifacts or extra_vars"
 
     - name: Parse alert data from workflow
       ansible.builtin.set_fact:
