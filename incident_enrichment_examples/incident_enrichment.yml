@@ -26,3 +26,10 @@
       ansible.builtin.include_role:
         name: incident_enrichment_disk
       when: issue == 'storage'
+
+    - name: Set workflow artifacts for next node (ServiceNow update)
+      ansible.builtin.set_stats:
+        data:
+          alert_data: "{{ alert_report_json }}"
+        per_host: false
+        aggregate: true

@@ -9,18 +9,3 @@
   ansible.builtin.include_tasks: linux.yml
   when: ansible_os_family != 'Windows'
 
-- name: Set stats for AAP dashboard and workflow
-  ansible.builtin.set_stats:
-    data:
-      memory_percent_used: "{{ memory_usage.output[0].PercentUsed if ansible_os_family == 'Windows' else mem_percent_used }}"
-      memory_threshold: "{{ memory_threshold }}"
-      memory_used_gb: "{{ memory_usage.output[0].UsedMemoryGB if ansible_os_family == 'Windows' else mem_used_gb }}"
-      memory_available_gb: "{{ memory_usage.output[0].FreeMemoryGB if ansible_os_family == 'Windows' else mem_available_gb }}"
-      swap_percent_used: "{{ page_file_usage.output[0].PercentUsed | default(0) if ansible_os_family == 'Windows' else swap_percent_used }}"
-      top_process: "{{ top_processes.output[0].Name if ansible_os_family == 'Windows' else top_mem_processes[0].command }}"
-      top_process_memory_percent: "{{ top_processes.output[0]['Memory(MB)'] if ansible_os_family == 'Windows' else top_mem_processes[0].mem_percent }}"
-      alert_severity: "{{ 'CRITICAL' if ((memory_usage.output[0].PercentUsed | float if ansible_os_family == 'Windows' else mem_percent_used | float) > memory_threshold | float) else 'OK' }}"
-      hostname: "{{ inventory_hostname }}"
-      alert_data: "{{ alert_report_json }}"
-    per_host: true
-    aggregate: false

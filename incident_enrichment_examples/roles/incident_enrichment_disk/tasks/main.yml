@@ -9,13 +9,3 @@
   ansible.builtin.include_tasks: linux.yml
   when: ansible_os_family != 'Windows'
 
-- name: Set stats for AAP dashboard and workflow
-  ansible.builtin.set_stats:
-    data:
-      alert_threshold: "{{ alert_threshold }}"
-      critical_drives_count: "{{ critical_drives | length if ansible_os_family == 'Windows' else critical_filesystems | length }}"
-      alert_severity: "{{ 'CRITICAL' if ((critical_drives | length if ansible_os_family == 'Windows' else critical_filesystems | length) > 0) else 'OK' }}"
-      hostname: "{{ inventory_hostname }}"
-      alert_data: "{{ alert_report_json }}"
-    per_host: true
-    aggregate: false

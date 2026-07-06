@@ -9,16 +9,3 @@
   ansible.builtin.include_tasks: linux.yml
   when: ansible_os_family != 'Windows'
 
-- name: Set stats for AAP dashboard and workflow
-  ansible.builtin.set_stats:
-    data:
-      cpu_current: "{{ cpu_usage.output[0].CurrentCPU if ansible_os_family == 'Windows' else current_cpu_percent }}"
-      cpu_threshold: "{{ cpu_threshold }}"
-      top_process: "{{ top_processes.output[0].Name if ansible_os_family == 'Windows' else top_cpu_processes[0].command }}"
-      top_process_cpu: "{{ top_processes.output[0]['CPU(s)'] if ansible_os_family == 'Windows' else top_cpu_processes[0].cpu_percent }}"
-      alert_severity: "{{ 'CRITICAL' if ((cpu_usage.output[0].CurrentCPU | float if ansible_os_family == 'Windows' else current_cpu_percent | int) > cpu_threshold | float) else 'OK' }}"
-      hostname: "{{ inventory_hostname }}"
-      uptime_hours: "{{ system_uptime.output[0].UptimeHours if ansible_os_family == 'Windows' else uptime_hours }}"
-      alert_data: "{{ alert_report_json }}"
-    per_host: true
-    aggregate: false
