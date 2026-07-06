@@ -6,18 +6,13 @@
 # Required variables (passed from previous workflow node via set_stats):
 #   - incident_number: ServiceNow incident number (e.g., INC0010001)
 #   - alert_data: JSON string containing the alert report from previous node
-#   - servicenow_host: ServiceNow instance URL
-#   - servicenow_username: ServiceNow username
-#   - vault_servicenow_password: ServiceNow password (use AAP credential)
+#   - SN_HOST: ServiceNow instance URL
+#   - SN_USERNAME: ServiceNow username
+#   - SN_PASSWORD: ServiceNow password (use AAP credential)
 
 - name: Update ServiceNow Incident with Windows Alert Data
   hosts: localhost
   gather_facts: false
-
-  vars:
-    # ServiceNow connection details (provide via AAP credential or extra-vars)
-    servicenow_host: "{{ servicenow_host | default('') }}"
-    servicenow_username: "{{ servicenow_username | default('admin') }}"
 
   tasks:
     - name: Validate required variables
@@ -25,9 +20,9 @@
         that:
           - incident_number is defined
           - alert_data is defined
-          - servicenow_host | length > 0
-          - vault_servicenow_password is defined
-        fail_msg: "Missing required variables: incident_number, alert_data, servicenow_host, or vault_servicenow_password"
+          - SN_HOST | length > 0
+          - SN_PASSWORD is defined
+        fail_msg: "Missing required variables: incident_number, alert_data, SN_HOST, or SN_PASSWORD"
 
     - name: Parse alert data from workflow
       ansible.builtin.set_fact:
@@ -100,7 +95,8 @@
 
           Top Memory-Consuming Processes:
           {% for proc in alert_report.top_processes[:5] %}
-            {{ loop.index }}. {{ proc.Name }} - Memory: {{ proc['Memory(MB)'] }} MB, Private: {{ proc['PrivateMemory(MB)'] }} MB, Virtual: {{ proc['VirtualMemory(MB)'] }} MB, PID: {{ proc.Id }}
+            {{ loop.index }}. {{ proc.Name }} - Memory: {{ proc['Memory(MB)'] }} MB,
+               Private: {{ proc['PrivateMemory(MB)'] }} MB, Virtual: {{ proc['VirtualMemory(MB)'] }} MB, PID: {{ proc.Id }}
           {% endfor %}
 
           {% if alert_report.page_file | length > 0 %}
@@ -174,35 +170,23 @@
           === END AUTOMATED REPORT ===
       when: alert_report.alert_type == 'high_disk_usage'
 
-    - name: Get ServiceNow incident details
-      servicenow.itsm.incident_info:
-        instance:
-          host: "{{ servicenow_host }}"
-          username: "{{ servicenow_username }}"
-          password: "{{ vault_servicenow_password }}"
-        number: "{{ incident_number }}"
-      register: incident_lookup
-
-    - name: Validate incident exists
-      ansible.builtin.assert:
-        that:
-          - incident_lookup.records | length > 0
-        fail_msg: "Incident {{ incident_number }} not found in ServiceNow"
-
     - name: Update ServiceNow incident with work notes
       servicenow.itsm.incident:
         instance:
-          host: "{{ servicenow_host }}"
-          username: "{{ servicenow_username }}"
-          password: "{{ vault_servicenow_password }}"
+          host: "{{ SN_HOST }}"
+          username: "{{ SN_USERNAME }}"
+          password: "{{ SN_PASSWORD }}"
         state: present
         number: "{{ incident_number }}"
         other:
           work_notes: "{{ work_notes_text }}"
           # Optionally update incident state
           # state: 2  # In Progress
-          # assigned_to: "{{ servicenow_username }}"
       register: incident_update
+
+    - name: Extract sys_id from response
+      ansible.builtin.set_fact:
+        incident_sys_id: "{{ incident_update.record.sys_id }}"
 
     - name: Display update summary
       ansible.builtin.debug:
@@ -211,16 +195,16 @@
           - "Incident Number: {{ incident_number }}"
           - "Alert Type: {{ alert_report.alert_type | upper }}"
           - "Affected Host: {{ alert_report.host }}"
-          - "Incident Sys ID: {{ incident_update.record.sys_id }}"
-          - "ServiceNow Link: {{ servicenow_host }}/nav_to.do?uri=incident.do?sys_id={{ incident_update.record.sys_id }}"
+          - "Incident Sys ID: {{ incident_sys_id }}"
+          - "ServiceNow Link: https://{{ SN_HOST }}/nav_to.do?uri=incident.do?sys_id={{ incident_sys_id }}"
 
     - name: Set stats for AAP dashboard
       ansible.builtin.set_stats:
         data:
           incident_number: "{{ incident_number }}"
-          incident_sys_id: "{{ incident_update.record.sys_id }}"
+          incident_sys_id: "{{ incident_sys_id }}"
           alert_type: "{{ alert_report.alert_type }}"
           affected_host: "{{ alert_report.host }}"
-          servicenow_link: "{{ servicenow_host }}/nav_to.do?uri=incident.do?sys_id={{ incident_update.record.sys_id }}"
+          servicenow_link: "https://{{ SN_HOST }}/nav_to.do?uri=incident.do?sys_id={{ incident_sys_id }}"
           update_status: "success"
         aggregate: false
