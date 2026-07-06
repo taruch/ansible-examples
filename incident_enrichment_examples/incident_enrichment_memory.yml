@@ -1,0 +1,11 @@
+---
+# Memory Investigation Report - OS-agnostic wrapper using incident_enrichment_memory role
+# Use case: Alert system detects high memory and triggers this playbook via AAP webhook
+# Works on both Windows and Linux systems by detecting OS and running appropriate tasks
+
+- name: Memory Investigation Report
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: true
+
+  roles:
+    - incident_enrichment_memory

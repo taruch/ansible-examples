@@ -1,0 +1,224 @@
+  tasks:
+- name: Gather system facts
+      ansible.builtin.setup:
+        gather_subset:
+          - hardware
+          - date_time
+
+- name: Get detailed memory information from /proc/meminfo
+      ansible.builtin.command: cat /proc/meminfo
+      register: meminfo_raw
+      changed_when: false
+
+- name: Parse memory info
+      ansible.builtin.set_fact:
+        mem_total_kb: "{{ (meminfo_raw.stdout_lines | select('match', '^MemTotal:') | first).split()[1] | int }}"
+        mem_free_kb: "{{ (meminfo_raw.stdout_lines | select('match', '^MemFree:') | first).split()[1] | int }}"
+        mem_available_kb: "{{ (meminfo_raw.stdout_lines | select('match', '^MemAvailable:') | first).split()[1] | int }}"
+        buffers_kb: "{{ (meminfo_raw.stdout_lines | select('match', '^Buffers:') | first).split()[1] | int }}"
+        cached_kb: "{{ (meminfo_raw.stdout_lines | select('match', '^Cached:') | first).split()[1] | int }}"
+        swap_total_kb: "{{ (meminfo_raw.stdout_lines | select('match', '^SwapTotal:') | first).split()[1] | int }}"
+        swap_free_kb: "{{ (meminfo_raw.stdout_lines | select('match', '^SwapFree:') | first).split()[1] | int }}"
+
+- name: Calculate memory metrics
+      ansible.builtin.set_fact:
+        mem_total_gb: "{{ (mem_total_kb | int / 1024 / 1024) | round(2) }}"
+        mem_free_gb: "{{ (mem_free_kb | int / 1024 / 1024) | round(2) }}"
+        mem_available_gb: "{{ (mem_available_kb | int / 1024 / 1024) | round(2) }}"
+        mem_used_gb: "{{ ((mem_total_kb | int - mem_available_kb | int) / 1024 / 1024) | round(2) }}"
+        mem_percent_used: "{{ (((mem_total_kb | int - mem_available_kb | int) / (mem_total_kb | int)) * 100) | round(2) }}"
+        buffers_gb: "{{ (buffers_kb | int / 1024 / 1024) | round(2) }}"
+        cached_gb: "{{ (cached_kb | int / 1024 / 1024) | round(2) }}"
+        swap_total_gb: "{{ (swap_total_kb | int / 1024 / 1024) | round(2) }}"
+        swap_free_gb: "{{ (swap_free_kb | int / 1024 / 1024) | round(2) }}"
+        swap_used_gb: "{{ ((swap_total_kb | int - swap_free_kb | int) / 1024 / 1024) | round(2) }}"
+        swap_percent_used: "{{ (((swap_total_kb | int - swap_free_kb | int) / (swap_total_kb | int) * 100) | round(2)) if swap_total_kb | int > 0 else 0 }}"
+
+- name: Get top memory consuming processes
+      ansible.builtin.shell: |
+        ps aux --sort=-%mem | head -n {{ top_process_count + 1 }} | tail -n {{ top_process_count }} | awk '{print $1,$2,$3,$4,$5,$6,$11}'
+      register: top_mem_processes_raw
+      changed_when: false
+
+- name: Parse top memory processes
+      ansible.builtin.set_fact:
+        top_mem_processes: "{{ top_mem_processes | default([]) + [{'user': item.split()[0], 'pid': item.split()[1], 'cpu_percent': item.split()[2], 'mem_percent': item.split()[3], 'vsz_kb': item.split()[4], 'rss_kb': item.split()[5], 'command': item.split()[6:] | join(' ')}] }}"
+      loop: "{{ top_mem_processes_raw.stdout_lines }}"
+
+- name: Get OOM killer history
+      ansible.builtin.shell: |
+        dmesg -T | grep -i "killed process" | tail -10
+      register: oom_killer
+      changed_when: false
+      failed_when: false
+
+- name: Get swap activity
+      ansible.builtin.shell: |
+        vmstat 1 3 | tail -1 | awk '{print "swap_in:"$7, "swap_out:"$8}'
+      register: swap_activity
+      changed_when: false
+
+- name: Get memory-intensive systemd services
+      ansible.builtin.shell: |
+        systemctl --type=service --state=running | awk 'NR>1 {print $1}' | while read svc; do
+          pid=$(systemctl show -p MainPID --value "$svc")
+          if [ "$pid" != "0" ] && [ -d "/proc/$pid" ]; then
+            mem=$(awk '/VmRSS/ {print $2}' /proc/$pid/status 2>/dev/null || echo 0)
+            if [ "$mem" -gt 51200 ]; then  # > 50MB
+              echo "$svc $mem"
+            fi
+          fi
+        done | sort -k2 -rn | head -10
+      register: memory_services_raw
+      changed_when: false
+      failed_when: false
+
+- name: Parse memory-intensive services
+      ansible.builtin.set_fact:
+        memory_services: "{{ memory_services | default([]) + [{'service': item.split()[0], 'rss_kb': item.split()[1]}] }}"
+      loop: "{{ memory_services_raw.stdout_lines }}"
+      when: memory_services_raw.stdout_lines | length > 0
+
+- name: Get transparent huge pages status
+      ansible.builtin.shell: |
+        cat /sys/kernel/mm/transparent_hugepage/enabled
+      register: thp_status
+      changed_when: false
+      failed_when: false
+
+- name: Get NUMA memory info
+      ansible.builtin.shell: |
+        if command -v numactl &>/dev/null; then
+          numactl --hardware | grep "node.*size"
+        else
+          echo "numactl not available"
+        fi
+      register: numa_info
+      changed_when: false
+      failed_when: false
+
+- name: Display memory alert summary
+      ansible.builtin.debug:
+        msg:
+          - "=== HIGH MEMORY ALERT INVESTIGATION ==="
+          - "Host: {{ inventory_hostname }}"
+          - "Alert Time: {{ ansible_date_time.iso8601 }}"
+          - "Total Memory: {{ mem_total_gb }} GB"
+          - "Used Memory: {{ mem_used_gb }} GB"
+          - "Available Memory: {{ mem_available_gb }} GB"
+          - "Memory Usage: {{ mem_percent_used }}%"
+          - "Threshold: {{ memory_threshold }}%"
+          - "=== MEMORY BREAKDOWN ==="
+          - "Buffers: {{ buffers_gb }} GB"
+          - "Cached: {{ cached_gb }} GB"
+          - "Free: {{ mem_free_gb }} GB"
+          - "=== SWAP INFORMATION ==="
+          - "Swap Total: {{ swap_total_gb }} GB"
+          - "Swap Used: {{ swap_used_gb }} GB"
+          - "Swap Free: {{ swap_free_gb }} GB"
+          - "Swap Usage: {{ swap_percent_used }}%"
+          - "Swap Activity: {{ swap_activity.stdout }}"
+          - "=== SYSTEM INFORMATION ==="
+          - "Distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Kernel: {{ ansible_kernel }}"
+          - "Transparent Huge Pages: {{ thp_status.stdout | default('N/A') }}"
+          - "=== TOP {{ top_process_count }} MEMORY PROCESSES ==="
+          - "{{ top_mem_processes }}"
+          - "=== MEMORY-INTENSIVE SERVICES ==="
+          - "{{ memory_services | default([]) }}"
+          - "=== OOM KILLER HISTORY ==="
+          - "{{ oom_killer.stdout_lines | default(['None']) }}"
+
+- name: Create report directory on controller
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+- name: Generate detailed JSON report
+      ansible.builtin.copy:
+        content: |
+          {
+            "alert_type": "high_memory",
+            "host": "{{ inventory_hostname }}",
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "memory_metrics": {
+              "total_memory_gb": {{ mem_total_gb }},
+              "used_memory_gb": {{ mem_used_gb }},
+              "available_memory_gb": {{ mem_available_gb }},
+              "free_memory_gb": {{ mem_free_gb }},
+              "percent_used": {{ mem_percent_used }},
+              "threshold_percent": {{ memory_threshold }},
+              "buffers_gb": {{ buffers_gb }},
+              "cached_gb": {{ cached_gb }},
+              "swap": {
+                "total_gb": {{ swap_total_gb }},
+                "used_gb": {{ swap_used_gb }},
+                "free_gb": {{ swap_free_gb }},
+                "percent_used": {{ swap_percent_used }}
+              }
+            },
+            "system_info": {
+              "os_distribution": "{{ ansible_distribution }}",
+              "os_version": "{{ ansible_distribution_version }}",
+              "kernel_version": "{{ ansible_kernel }}",
+              "hostname": "{{ ansible_hostname }}",
+              "fqdn": "{{ ansible_fqdn }}",
+              "transparent_huge_pages": "{{ thp_status.stdout | default('N/A') }}"
+            },
+            "top_processes": {{ top_mem_processes | to_json }},
+            "memory_intensive_services": {{ memory_services | default([]) | to_json }},
+            "oom_killer_history": {{ oom_killer.stdout_lines | default([]) | to_json }},
+            "numa_info": {{ numa_info.stdout_lines | default([]) | to_json }}
+          }
+        dest: "{{ report_dir }}/memory_alert_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.json"
+      delegate_to: localhost
+
+- name: Alert if memory exceeds threshold
+      ansible.builtin.assert:
+        that:
+          - mem_percent_used | float < memory_threshold | float
+        fail_msg: "CRITICAL: Memory usage ({{ mem_percent_used }}%) exceeds threshold ({{ memory_threshold }}%)"
+        success_msg: "Memory usage ({{ mem_percent_used }}%) is within acceptable range"
+      ignore_errors: true
+      register: memory_check
+
+- name: Build full alert report for workflow
+      ansible.builtin.set_fact:
+        alert_report_json: |
+          {
+            "alert_type": "high_memory",
+            "host": "{{ inventory_hostname }}",
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "memory_metrics": {
+              "total_memory_gb": {{ mem_total_gb }},
+              "used_memory_gb": {{ mem_used_gb }},
+              "available_memory_gb": {{ mem_available_gb }},
+              "free_memory_gb": {{ mem_free_gb }},
+              "percent_used": {{ mem_percent_used }},
+              "threshold_percent": {{ memory_threshold }},
+              "buffers_gb": {{ buffers_gb }},
+              "cached_gb": {{ cached_gb }},
+              "swap": {
+                "total_gb": {{ swap_total_gb }},
+                "used_gb": {{ swap_used_gb }},
+                "free_gb": {{ swap_free_gb }},
+                "percent_used": {{ swap_percent_used }}
+              }
+            },
+            "system_info": {
+              "os_distribution": "{{ ansible_distribution }}",
+              "os_version": "{{ ansible_distribution_version }}",
+              "kernel_version": "{{ ansible_kernel }}",
+              "hostname": "{{ ansible_hostname }}",
+              "fqdn": "{{ ansible_fqdn }}",
+              "transparent_huge_pages": "{{ thp_status.stdout | default('N/A') }}"
+            },
+            "top_processes": {{ top_mem_processes | to_json }},
+            "memory_intensive_services": {{ memory_services | default([]) | to_json }},
+            "oom_killer_history": {{ oom_killer.stdout_lines | default([]) | to_json }},
+            "numa_info": {{ numa_info.stdout_lines | default([]) | to_json }}
+          }
+

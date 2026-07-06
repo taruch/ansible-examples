@@ -1,0 +1,11 @@
+---
+# Disk Investigation Report - OS-agnostic wrapper using incident_enrichment_disk role
+# Use case: Alert system detects high disk usage and triggers this playbook via AAP webhook
+# Works on both Windows and Linux systems by detecting OS and running appropriate tasks
+
+- name: Disk Investigation Report
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: true
+
+  roles:
+    - incident_enrichment_disk

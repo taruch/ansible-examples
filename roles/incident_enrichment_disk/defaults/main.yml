@@ -1,0 +1,10 @@
+---
+# Default variables for disk incident enrichment
+
+alert_threshold: 85
+target_drives: []
+target_filesystems: []
+report_dir: "/tmp/disk_reports"
+large_file_size_mb: 100
+top_folder_count: 10
+top_directory_count: 10

@@ -1,0 +1,11 @@
+---
+# Default variables for CPU incident enrichment
+
+# Alert threshold percentage (can be overridden via extra vars)
+cpu_threshold: 80
+
+# Number of top CPU processes to report
+top_process_count: 10
+
+# Report output directory on the controller
+report_dir: "/tmp/cpu_reports"

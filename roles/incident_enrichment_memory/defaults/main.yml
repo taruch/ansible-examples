@@ -1,0 +1,6 @@
+---
+# Default variables for memory incident enrichment
+
+memory_threshold: 85
+top_process_count: 10
+report_dir: "/tmp/memory_reports"
