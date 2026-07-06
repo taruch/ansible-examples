@@ -101,6 +101,18 @@
           }
       register: system_uptime
 
+    - name: Get processor information
+      ansible.windows.win_powershell:
+        script: |
+          $proc = Get-CimInstance Win32_Processor | Select-Object -First 1
+          [PSCustomObject]@{
+              Name = $proc.Name
+              NumberOfCores = $proc.NumberOfCores
+              NumberOfLogicalProcessors = $proc.NumberOfLogicalProcessors
+              ProcessorCount = (Get-CimInstance Win32_Processor).Count
+          }
+      register: processor_info
+
     - name: Display CPU alert summary
       ansible.builtin.debug:
         msg:
@@ -110,9 +122,10 @@
           - "Current CPU: {{ cpu_usage.output[0].CurrentCPU }}%"
           - "Threshold: {{ cpu_threshold }}%"
           - "System Uptime: {{ system_uptime.output[0].UptimeHours }} hours (Last boot: {{ system_uptime.output[0].LastBootTime }})"
-          - "Processor: {{ ansible_facts.ansible_processor[0] }}"
-          - "Processor Count: {{ ansible_facts.ansible_processor_count }}"
-          - "Processor Cores: {{ ansible_facts.ansible_processor_cores }}"
+          - "Processor: {{ processor_info.output[0].Name }}"
+          - "Physical Processors: {{ processor_info.output[0].ProcessorCount }}"
+          - "Cores per Processor: {{ processor_info.output[0].NumberOfCores }}"
+          - "Logical Processors: {{ processor_info.output[0].NumberOfLogicalProcessors }}"
           - "=== PERFORMANCE COUNTERS ==="
           - "{{ perf_counters.output[0] }}"
           - "=== TOP {{ top_process_count }} CPU PROCESSES ==="
@@ -140,9 +153,10 @@
               "current_cpu_percent": {{ cpu_usage.output[0].CurrentCPU }},
               "threshold_percent": {{ cpu_threshold }},
               "processor_info": {
-                "name": "{{ ansible_facts.ansible_processor[0] }}",
-                "count": {{ ansible_facts.ansible_processor_count }},
-                "cores": {{ ansible_facts.ansible_processor_cores }}
+                "name": "{{ processor_info.output[0].Name }}",
+                "physical_count": {{ processor_info.output[0].ProcessorCount }},
+                "cores_per_processor": {{ processor_info.output[0].NumberOfCores }},
+                "logical_processors": {{ processor_info.output[0].NumberOfLogicalProcessors }}
               },
               "performance_counters": {{ perf_counters.output[0] | to_json }}
             },
