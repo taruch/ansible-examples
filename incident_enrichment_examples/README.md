@@ -10,13 +10,9 @@ These playbooks are designed to work in AAP workflows:
 
 ## Playbooks
 
-### Investigation Playbooks (OS-Agnostic)
+### Investigation Playbook (OS-Agnostic)
 
-All investigation playbooks use roles that automatically detect the OS and run appropriate tasks:
-
-- **`incident_enrichment_cpu.yml`** - CPU investigation (Windows & Linux)
-- **`incident_enrichment_memory.yml`** - Memory investigation (Windows & Linux)
-- **`incident_enrichment_disk.yml`** - Disk investigation (Windows & Linux)
+- **`incident_enrichment.yml`** - Main playbook that routes to CPU/Memory/Disk roles based on `issue` parameter (Windows & Linux)
 
 ### ServiceNow Integration
 
@@ -43,8 +39,10 @@ The investigation playbooks use these roles from `../roles/`:
 Each role contains:
 - `tasks/linux.yml` - Linux-specific tasks
 - `tasks/windows.yml` - Windows-specific tasks
-- `tasks/main.yml` - OS detection and set_stats
+- `tasks/main.yml` - OS detection and task routing
 - `defaults/main.yml` - Default variables
+
+Note: The main playbook (`incident_enrichment.yml`) handles `set_stats` to pass data to the next workflow node. Roles focus on data gathering only.
 
 ## Usage
 
@@ -53,38 +51,47 @@ Each role contains:
 Create a workflow template with two nodes:
 
 **Node 1: Investigation**
-- Job Template: "Incident Enrichment - CPU" (or Memory/Disk)
-- Playbook: `incident_enrichment_cpu.yml`
-- Extra Vars: `_hosts: <target_host>`
+- Job Template: "Incident Enrichment"
+- Playbook: `incident_enrichment.yml`
+- Extra Vars:
+  ```yaml
+  issue: cpu  # or 'memory' or 'storage'
+  _hosts: <target_host>
+  ```
 
 **Node 2: ServiceNow Update**
 - Job Template: "ServiceNow Incident Update"
 - Playbook: `servicenow_incident_update.yml`
-- Extra Vars (from Node 1): `alert_data`
-- Additional Extra Vars: `incident_number: INC0010001`
+- Extra Vars:
+  ```yaml
+  incident_number: INC0010001
+  # alert_data is automatically passed from Node 1 via workflow artifacts
+  ```
+- Credentials: ServiceNow credential (provides SN_HOST, SN_USERNAME, SN_PASSWORD)
 
 ### Option 2: Standalone
 
 Run investigation only (no ServiceNow update):
 
 ```bash
-ansible-playbook incident_enrichment_cpu.yml -e "_hosts=server01"
+ansible-playbook incident_enrichment.yml -e "issue=cpu _hosts=server01"
 ```
 
 ### Option 3: Command Line with ServiceNow
 
 ```bash
-# Step 1: Run investigation and save stats
-ansible-playbook incident_enrichment_cpu.yml -e "_hosts=server01" > /tmp/output.txt
+# Step 1: Run investigation
+ansible-playbook incident_enrichment.yml -e "issue=cpu _hosts=server01"
 
-# Step 2: Extract alert_data and update ServiceNow
-# (Use AAP workflow for easier data passing)
+# Step 2: Use AAP workflow for automatic data passing to ServiceNow
+# (set_stats data is only available in AAP workflows via workflow_job.artifacts)
 ```
 
 ## Variables
 
-### Common Variables (Investigation Playbooks)
+### Investigation Playbook Variables
 
+- `issue`: Alert type - **Required** - must be `cpu`, `memory`, or `storage`
 - `_hosts`: Target host or group (default: 'all')
 - `cpu_threshold`: CPU alert threshold % (default: 80)
 - `memory_threshold`: Memory alert threshold % (default: 85)
@@ -92,13 +99,13 @@ ansible-playbook incident_enrichment_cpu.yml -e "_hosts=server01" > /tmp/output.
 - `top_process_count`: Number of top processes to report (default: 10)
 - `report_dir`: Output directory on controller (default: /tmp/*_reports)
 
-### ServiceNow Variables
+### ServiceNow Playbook Variables
 
 - `incident_number`: ServiceNow incident number (e.g., INC0010001) - **Required**
-- `alert_data`: JSON from previous workflow node - **Required**
-- `servicenow_host`: ServiceNow instance URL - **Required**
-- `servicenow_username`: ServiceNow username (default: admin)
-- `vault_servicenow_password`: ServiceNow password (use AAP credential) - **Required**
+- `alert_data`: JSON from previous workflow node (automatically passed via `workflow_job.artifacts`) - **Required**
+- `SN_HOST`: ServiceNow instance URL (from AAP credential) - **Required**
+- `SN_USERNAME`: ServiceNow username (from AAP credential) - **Required**
+- `SN_PASSWORD`: ServiceNow password (from AAP credential) - **Required**
 
 ## Workflow Data Flow
 
@@ -143,41 +150,39 @@ The `alert_data` JSON structure varies by alert type and is consumed by the Serv
 
 ### Example 1: CPU Alert Workflow
 
-AAP Workflow Template: "Incident Enrichment - CPU Alert"
+AAP Workflow Template: "Incident Enrichment Workflow"
 
-Node 1 Job Template Extra Vars:
+Node 1 (Incident Enrichment) Extra Vars:
 ```yaml
+issue: cpu
 _hosts: "webserver01"
 cpu_threshold: 90
 ```
 
-Node 2 Job Template Extra Vars:
+Node 2 (ServiceNow Update) Extra Vars:
 ```yaml
 incident_number: "INC0010123"
-servicenow_host: "https://dev12345.service-now.com"
-# vault_servicenow_password provided via AAP credential
+# alert_data automatically passed from Node 1
+# SN_HOST, SN_USERNAME, SN_PASSWORD provided via AAP ServiceNow credential
 ```
 
 ### Example 2: Memory Alert with Custom Threshold
 
-```yaml
-- hosts: localhost
-  tasks:
-    - name: Run memory investigation
-      ansible.builtin.import_playbook: incident_enrichment_memory.yml
-      vars:
-        _hosts: "dbserver01"
-        memory_threshold: 90
-        top_process_count: 20
+```bash
+ansible-playbook incident_enrichment.yml \
+  -e "issue=memory" \
+  -e "_hosts=dbserver01" \
+  -e "memory_threshold=90" \
+  -e "top_process_count=20"
 ```
 
 ## ServiceNow Work Notes
 
-The ServiceNow playbook generates work notes conditionally based on `alert_type`:
+The ServiceNow playbook generates OS-specific work notes based on `alert_type`:
 
-- **high_cpu**: CPU metrics, processor info, top processes, performance counters
-- **high_memory**: Memory metrics, swap usage, top processes, OOM killer history
-- **high_disk_usage**: Disk volumes, critical drives, large files/folders, log sizes
+- **high_cpu**: CPU metrics, processor info, top processes, performance counters (Windows & Linux)
+- **high_memory**: Memory metrics, swap usage, top processes, OOM killer history (separate templates for Windows & Linux)
+- **high_disk_usage**: Disk volumes, critical drives, large files/folders, log sizes (Windows & Linux)
 
 ## OS Detection
 
@@ -192,7 +197,7 @@ Roles use `ansible_os_family` to detect the operating system:
 ### Collections
 
 - `ansible.windows` (for Windows tasks)
-- `servicenow.servicenow` (for ServiceNow integration)
+- `servicenow.itsm` (for ServiceNow integration)
 
 ### Credentials
 
