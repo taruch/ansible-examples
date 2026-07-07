@@ -1,0 +1,70 @@
+---
+# Incident Enrichment Event-Driven Rulebook
+#
+# This rulebook listens for incident alert webhooks and triggers the
+# Incident Enrichment Workflow in AAP based on issue type (cpu, memory, storage)
+#
+# Webhook payload example:
+#   {
+#     "issue": "memory",
+#     "host": "wintest1",
+#     "incident_number": "INC0010001"
+#   }
+#
+# Send event with token authentication:
+#   # Single-line version:
+#   curl -H "Content-Type: application/json" -H "Authorization: Bearer YOUR_WEBHOOK_TOKEN" -d '{"issue":"cpu","host":"wintest1","incident_number":"INC0010001"}' http://eda-controller:5000/endpoint
+#
+#   # With HTTPS (skip cert verification for testing):
+#   curl -k -H "Content-Type: application/json" -H "Authorization: Bearer YOUR_WEBHOOK_TOKEN" -d '{"issue":"memory","host":"wintest1","incident_number":"INC0010001"}' https://eda-controller:5000/endpoint
+#
+#   # Multi-line version (copy entire block):
+#   curl -H "Content-Type: application/json" \
+#        -H "Authorization: Bearer YOUR_WEBHOOK_TOKEN" \
+#        -d '{"issue":"cpu","host":"wintest1","incident_number":"INC0010001"}' \
+#        http://eda-controller:5000/endpoint
+#
+- name: Incident Enrichment Event Handler
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+        token: "{{ WEBHOOK_TOKEN | default('') }}"
+
+  rules:
+    - name: Handle CPU incident alert
+      condition: event.payload.issue == "cpu"
+      action:
+        run_workflow_template:
+          name: "Incident Enrichment Workflow"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              issue: "{{ event.payload.issue }}"
+              _hosts: "{{ event.payload._hosts | default(event.payload.host) | default('all') }}"
+              incident_number: "{{ event.payload.incident_number | default('INC0000000') }}"
+
+    - name: Handle memory incident alert
+      condition: event.payload.issue == "memory"
+      action:
+        run_workflow_template:
+          name: "Incident Enrichment Workflow"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              issue: "{{ event.payload.issue }}"
+              _hosts: "{{ event.payload._hosts | default(event.payload.host) | default('all') }}"
+              incident_number: "{{ event.payload.incident_number | default('INC0000000') }}"
+
+    - name: Handle storage incident alert
+      condition: event.payload.issue == "storage"
+      action:
+        run_workflow_template:
+          name: "Incident Enrichment Workflow"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              issue: "{{ event.payload.issue }}"
+              _hosts: "{{ event.payload._hosts | default(event.payload.host) | default('all') }}"
+              incident_number: "{{ event.payload.incident_number | default('INC0000000') }}"

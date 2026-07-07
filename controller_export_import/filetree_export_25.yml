@@ -40,7 +40,7 @@
         name: infra.aap_configuration_extended.filetree_create
       vars:
         input_tag:
-          - all
+          # - all
           # - controller
           # - controller_settings
           # - controller_credentials
@@ -57,13 +57,14 @@
           # - controller_roles
           # - controller_teams
           # - controller_users
-          # - controller_workflow_job_templates
+          - controller_workflow_job_templates
           # - controller_instance_groups
           # - controller_applications
           # - controller_labels
           # - controller_schedules
           # - controller_gateway_authenticator
           # - controller_gateway_authenticator_maps
+          # - "workflow_job_templates"
           # - gateway
           # - gateway_applications
           # - gateway_authenticator_maps
@@ -96,7 +97,9 @@
           # # - hub_roles
         organization_filter: ""  # Specify the organization to filter the export, if needed
         secrets_as_variables: true
-        output_path: "./export_25_20260701_1"
+        # flatten_output: true
+        workflow_job_template_id: "207"
+        output_path: "./export_25_20260707_1"
 
     - name: "Delete the Authentication Token used"
       ansible.builtin.uri:
