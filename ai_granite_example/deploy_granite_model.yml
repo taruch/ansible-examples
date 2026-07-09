@@ -1,0 +1,326 @@
+---
+- name: Deploy IBM Granite Model for AAP Ansible Intelligent Assistant
+  hosts: all
+  become: true
+  vars:
+    # Granite model configuration
+    granite_model: "granite3.1-dense:8b"  # Options: granite3.1-dense:2b, granite3.1-dense:8b, granite3.1-moe:3b
+    ollama_host: "0.0.0.0"
+    ollama_port: 11434
+
+    # System requirements
+    min_memory_gb: 16
+    min_disk_gb: 50
+
+    # Service configuration
+    ollama_service_user: "ollama"
+    ollama_home: "/usr/share/ollama"
+    ollama_models_dir: "/usr/share/ollama/.ollama/models"
+
+  tasks:
+    - name: Check RHEL version
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "RedHat"
+          - ansible_distribution_major_version == "9"
+        fail_msg: "This playbook requires RHEL 9"
+        success_msg: "RHEL 9 detected"
+
+    - name: Check system memory
+      ansible.builtin.assert:
+        that:
+          - ansible_memtotal_mb >= (min_memory_gb * 1024)
+        fail_msg: "Insufficient memory. Minimum {{ min_memory_gb }}GB required, found {{ ansible_memtotal_mb // 1024 }}GB"
+        success_msg: "Memory requirement met: {{ ansible_memtotal_mb // 1024 }}GB available"
+
+    - name: Check available disk space
+      ansible.builtin.assert:
+        that:
+          - item.size_available > (min_disk_gb * 1024 * 1024 * 1024)
+        fail_msg: "Insufficient disk space on {{ item.mount }}. Minimum {{ min_disk_gb }}GB required"
+      loop: "{{ ansible_mounts }}"
+      when: item.mount == '/'
+
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - curl
+          - tar
+          - gzip
+          - zstd
+        state: present
+
+    - name: Check if ollama user already exists
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ ollama_service_user }}"
+      register: ollama_user_check
+      failed_when: false
+
+    - name: Create ollama system user (if not exists)
+      ansible.builtin.user:
+        name: "{{ ollama_service_user }}"
+        system: true
+        shell: /sbin/nologin
+        home: "{{ ollama_home }}"
+        create_home: true
+      when: ollama_user_check.failed
+
+    - name: Get latest Ollama release information
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/ollama/ollama/releases/latest
+        return_content: true
+      register: ollama_latest_release
+      delegate_to: localhost
+      become: false
+
+    - name: Set Ollama version
+      ansible.builtin.set_fact:
+        ollama_version: "{{ ollama_latest_release.json.tag_name }}"
+
+    - name: Find standard Linux AMD64 asset
+      ansible.builtin.set_fact:
+        ollama_asset: >-
+          {{
+            ollama_latest_release.json.assets |
+            selectattr('name', 'equalto', 'ollama-linux-amd64.tar.zst') |
+            list | first
+          }}
+
+    - name: Set download URL
+      ansible.builtin.set_fact:
+        ollama_download_url: "{{ ollama_asset.browser_download_url }}"
+        ollama_filename: "{{ ollama_asset.name }}"
+
+    - name: Display download information
+      ansible.builtin.debug:
+        msg:
+          - "Ollama version: {{ ollama_version }}"
+          - "Asset name: {{ ollama_filename }}"
+          - "Download URL: {{ ollama_download_url }}"
+
+    - name: Download Ollama archive
+      ansible.builtin.get_url:
+        url: "{{ ollama_download_url }}"
+        dest: "/tmp/{{ ollama_filename }}"
+        mode: '0644'
+
+    - name: Create temporary extraction directory
+      ansible.builtin.file:
+        path: /tmp/ollama-extract
+        state: directory
+        mode: '0755'
+
+    - name: Extract Ollama tar.zst archive
+      ansible.builtin.command:
+        cmd: "tar --zstd -xf /tmp/{{ ollama_filename }} -C /tmp/ollama-extract"
+        creates: /tmp/ollama-extract/bin/ollama
+      register: extract_result
+
+    - name: Create Ollama directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      loop:
+        - /usr/local/lib/ollama
+        - /usr/share/ollama
+
+    - name: Copy Ollama binaries to /usr/local/bin
+      ansible.builtin.copy:
+        src: /tmp/ollama-extract/bin/
+        dest: /usr/local/bin/
+        mode: '0755'
+        owner: root
+        group: root
+        remote_src: true
+
+    - name: Copy Ollama libraries to /usr/local/lib/ollama
+      ansible.builtin.copy:
+        src: /tmp/ollama-extract/lib/ollama/
+        dest: /usr/local/lib/ollama/
+        mode: preserve
+        owner: root
+        group: root
+        remote_src: true
+      when: extract_result.changed
+      failed_when: false
+
+    - name: Create symlink for llama-server in /usr/local/bin
+      ansible.builtin.file:
+        src: /usr/local/lib/ollama/llama-server
+        dest: /usr/local/bin/llama-server
+        state: link
+        force: true
+
+    - name: Create symlink for llama-quantize in /usr/local/bin
+      ansible.builtin.file:
+        src: /usr/local/lib/ollama/llama-quantize
+        dest: /usr/local/bin/llama-quantize
+        state: link
+        force: true
+
+    - name: Configure dynamic linker for Ollama libraries
+      ansible.builtin.copy:
+        dest: /etc/ld.so.conf.d/ollama.conf
+        content: |
+          /usr/local/lib/ollama
+        mode: '0644'
+
+    - name: Update dynamic linker cache
+      ansible.builtin.command:
+        cmd: ldconfig
+      changed_when: true
+
+    - name: Remove temporary extraction directory
+      ansible.builtin.file:
+        path: /tmp/ollama-extract
+        state: absent
+
+    - name: Remove downloaded archive
+      ansible.builtin.file:
+        path: "/tmp/{{ ollama_filename }}"
+        state: absent
+
+    - name: Verify Ollama binary
+      ansible.builtin.command:
+        cmd: /usr/local/bin/ollama --version
+      register: ollama_version_check
+      changed_when: false
+
+    - name: Display installed Ollama version
+      ansible.builtin.debug:
+        msg: "Installed Ollama: {{ ollama_version_check.stdout }}"
+
+    - name: Create Ollama systemd service file
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ollama.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Ollama Service
+          After=network-online.target
+
+          [Service]
+          Type=exec
+          User={{ ollama_service_user }}
+          Group={{ ollama_service_user }}
+          ExecStart=/usr/local/bin/ollama serve
+          Environment="OLLAMA_HOST={{ ollama_host }}:{{ ollama_port }}"
+          Environment="OLLAMA_MODELS={{ ollama_models_dir }}"
+          Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+          Environment="LD_LIBRARY_PATH=/usr/local/lib/ollama"
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=default.target
+      notify: Reload systemd
+
+    - name: Flush handlers to reload systemd
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and restart Ollama service
+      ansible.builtin.systemd:
+        name: ollama
+        enabled: true
+        state: restarted
+
+    - name: Wait for Ollama service to be ready
+      ansible.builtin.uri:
+        url: "http://localhost:{{ ollama_port }}/api/tags"
+        method: GET
+        return_content: true
+      register: ollama_health
+      until: ollama_health.status == 200
+      retries: 12
+      delay: 5
+
+    - name: Pull Granite model
+      ansible.builtin.command:
+        cmd: "/usr/local/bin/ollama pull {{ granite_model }}"
+      register: pull_result
+      changed_when: "'pulling' in pull_result.stdout"
+      async: 3600  # 1 hour timeout for large model download
+      poll: 10
+
+    - name: Verify Granite model is available
+      ansible.builtin.command:
+        cmd: "/usr/local/bin/ollama list"
+      register: model_list
+      changed_when: false
+
+    - name: Display available models
+      ansible.builtin.debug:
+        msg: "{{ model_list.stdout_lines }}"
+
+    - name: Configure firewall for Ollama (if firewalld is running)
+      block:
+        - name: Check if firewalld is running
+          ansible.builtin.systemd:
+            name: firewalld
+          register: firewalld_status
+
+        - name: Open Ollama port in firewall
+          ansible.posix.firewalld:
+            port: "{{ ollama_port }}/tcp"
+            permanent: true
+            state: enabled
+            immediate: true
+          when: firewalld_status.status.ActiveState == "active"
+      rescue:
+        - name: Firewall configuration skipped
+          ansible.builtin.debug:
+            msg: "Firewalld not available, skipping firewall configuration"
+
+    - name: Test Granite model with a simple prompt (optional - may take 30-60 seconds)
+      ansible.builtin.uri:
+        url: "http://localhost:{{ ollama_port }}/api/generate"
+        method: POST
+        body_format: json
+        body:
+          model: "{{ granite_model }}"
+          prompt: "Say hello in one word"
+          stream: false
+        return_content: true
+        timeout: 120
+      register: test_response
+      failed_when: false
+      tags: test_model
+
+    - name: Display test response
+      ansible.builtin.debug:
+        msg: "{{ test_response.json.response | default('Test skipped or timed out') }}"
+      when: test_response.json is defined
+      tags: test_model
+
+    - name: Display connection information
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Granite Model Deployment Complete!"
+          - "=========================================="
+          - "Model: {{ granite_model }}"
+          - "Ollama API Endpoint: http://{{ ansible_default_ipv4.address }}:{{ ollama_port }}"
+          - ""
+          - "Configure AAP 2.7 Ansible Intelligent Assistant:"
+          - "1. Navigate to Administration > Settings > AI"
+          - "2. Set Model Provider: Self-hosted"
+          - "3. Set API URL: http://{{ ansible_default_ipv4.address }}:{{ ollama_port }}"
+          - "4. Set Model Name: {{ granite_model }}"
+          - "5. Leave API Key blank (not required for Ollama)"
+          - ""
+          - "Test the model manually:"
+          - "  curl http://localhost:{{ ollama_port }}/api/generate -d '{"
+          - "    \"model\": \"{{ granite_model }}\","
+          - "    \"prompt\": \"Explain Ansible roles\","
+          - "    \"stream\": false"
+          - "  }'"
+          - "=========================================="
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
