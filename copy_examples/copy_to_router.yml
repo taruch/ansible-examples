@@ -1,0 +1,71 @@
+---
+- name: Playbook to stage/scp .bin to router bootflash
+  hosts: rtr1 
+  gather_facts: False
+  vars:
+   new_version: "{{ image_staging }}" 
+   #17.15.01a
+   new_image_ios: "c8000v-universalk9.{{ new_version }}.SPA.bin" 
+   ansible_network_cli_ssh_type: paramiko
+   sha_hash: 1627b090a42872b9b92d5fdd31f69356bf0f766cd24bcd2ccdc3c1b1bf642d965057288e49ecba96d8d683ecfc116c9a2f7381c739d60c23380ada498cea9f76
+   
+
+  tasks:
+  - name: check if image already exist in bootflash
+    cisco.ios.ios_command:
+      commands: 'dir bootflash: | include {{ new_image_ios }}'
+    register: check_image
+
+  - name: enable scp
+    cisco.ios.ios_config:
+      lines: 
+      - ip scp server enable
+      - ip ssh window-size 131072 
+      - ip tcp window-size 131072
+    when: check_image.stdout[0].find( new_image_ios )  == -1
+    
+  - name: check for old files and remove them if found
+    cisco.ios.ios_command:
+      commands:
+        - command: 'install remove inactive'
+          prompt: 
+            - 'Do you want to remove the above files\? \[y/n\]'
+          answer:
+            - 'y'
+    register: install_remove_output
+    vars:
+      ansible_command_timeout: 600
+    when: check_image.stdout[0].find( new_image_ios )  == -1   
+
+  - name: Display install_remove output and result
+    ansible.builtin.debug:
+      msg: "{{ 'No old files found. Nothing to clean.' if 'SUCCESS: No extra package or provisioning files found on media' in install_remove_output.stdout[0] else 'Old files removed successfully.' }}"
+    when: check_image.stdout[0].find( new_image_ios )  == -1  
+  
+  - name: Push new image from project to bootflash
+    vars:
+      ansible_command_timeout: 1200
+    ansible.netcommon.net_put:
+      src: '{{ new_image_ios }}'
+      dest: flash:{{new_image_ios }}
+    register: cisco_changed
+    when: 
+    - check_image.stdout[0].find( new_image_ios )  == -1
+    - inventory_hostname in groups['cisco']
+  
+  - name: Verify SHA512 Hash of Image File
+    vars:
+      ansible_command_timeout: 1200
+    ios_command:
+      commands: 'verify /sha512 bootflash:/{{ new_image_ios }} {{ sha_hash }}'
+    register: sha_hash_verification_results
+  
+  - name: Set SHA512_hash_verification to pass/fail
+    ansible.builtin.set_fact:
+      sha_hash_verification: "pass"
+    when: sha_hash_verification_results.stdout[0].find('Verified') != -1
+      
+  - name: Fail Task if SHA512 Hash Check Fails
+    fail:
+      msg: "SHA512 Hash Check Fails. Please check the uploaded image!"
+    when: sha_hash_verification_results.stdout[0].find('Verified') == -1
