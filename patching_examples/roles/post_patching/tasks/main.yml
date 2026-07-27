@@ -1,0 +1,7 @@
+---
+- name: Run platform-specific post-patching checks
+  ansible.builtin.include_tasks:
+    file: "{{ 'linux' if ansible_facts.os_family != 'Windows' else 'windows' }}.yml"
+
+- name: Run shared post-patching tasks (reboot, health checks, reporting)
+  ansible.builtin.include_tasks: shared.yml

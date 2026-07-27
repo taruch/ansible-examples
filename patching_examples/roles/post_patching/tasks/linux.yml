@@ -1,0 +1,96 @@
+---
+# Linux post-patching verification — all tasks run with become: true.
+- name: Linux post-patching verification
+  become: true
+  block:
+
+    # =========================================================================
+    # REBOOT DETECTION
+    # =========================================================================
+    # needs-restarting: rc=0 no reboot needed, rc=1 reboot needed
+    - name: Check whether patching requires a reboot (needs-restarting)
+      ansible.builtin.command: needs-restarting -r
+      register: reboot_check
+      failed_when: reboot_check.rc not in [0, 1]
+      changed_when: false
+      tags: [verify, post_patch]
+
+    - name: Set reboot_required fact for shared tasks
+      ansible.builtin.set_fact:
+        reboot_required: "{{ reboot_check.rc == 1 }}"
+      tags: [verify, post_patch]
+
+    # =========================================================================
+    # POST-PATCH PACKAGE BASELINE
+    # =========================================================================
+    - name: Gather installed RPM package facts after patching
+      ansible.builtin.package_facts:
+        manager: rpm
+      tags: [baseline, post_patch]
+
+    - name: Save post-patch package list
+      ansible.builtin.copy:
+        content: "{{ ansible_facts.packages | to_nice_json }}"
+        dest: "{{ patch_report_dir }}/packages_after.json"
+        mode: '0640'
+      tags: [baseline, post_patch]
+
+    # =========================================================================
+    # DNF HISTORY / KERNEL CHECKS
+    # =========================================================================
+    - name: Get dnf history for the last transaction
+      ansible.builtin.command: dnf history info last -q
+      register: dnf_history
+      changed_when: false
+      failed_when: false
+      tags: [verify, post_patch]
+
+    - name: Get installed kernel versions (newest first)
+      ansible.builtin.command: rpm -q kernel --last
+      register: kernel_versions
+      changed_when: false
+      tags: [verify, post_patch]
+
+    - name: Log dnf history and kernel info
+      ansible.builtin.debug:
+        msg:
+          - "=== DNF Last Transaction ==="
+          - "{{ dnf_history.stdout_lines | default(['(no dnf history available)']) }}"
+          - "=== Installed Kernels ==="
+          - "{{ kernel_versions.stdout_lines | default(['(no kernel info)']) }}"
+      tags: [verify, post_patch]
+
+    # =========================================================================
+    # JOURNAL ERROR SCAN
+    # =========================================================================
+    - name: Scan journal for errors since boot (post-patch check)
+      ansible.builtin.command: >
+        journalctl -p err -b --no-pager --since "10 minutes ago"
+      register: journal_errors
+      changed_when: false
+      failed_when: false
+      tags: [verify, post_patch]
+
+    - name: Warn if recent journal errors found
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Journal errors detected on {{ inventory_hostname }}
+          within the last 10 minutes. Review: {{ journal_errors.stdout_lines[:20] }}
+      when:
+        - journal_errors.stdout | length > 0
+      tags: [verify, post_patch]
+
+    # =========================================================================
+    # DNF CLEANUP
+    # =========================================================================
+    - name: Clean dnf package cache
+      ansible.builtin.command: dnf clean packages -q
+      changed_when: true
+      tags: [cleanup, post_patch]
+
+    - name: Remove old kernel packages (keep 2 most recent)
+      ansible.builtin.command: dnf remove --oldinstallonly --setopt installonly_limit=2 -y -q
+      register: old_kernel_removal
+      changed_when: "'Removed' in old_kernel_removal.stdout"
+      failed_when: false
+      tags: [cleanup, post_patch]

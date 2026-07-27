@@ -1,0 +1,100 @@
+---
+# Shared pre-patching tasks — cross-platform (VMware, monitoring, summary).
+# All delegate_to: localhost tasks run on the AAP control node, not the target host.
+
+# =========================================================================
+# VM SNAPSHOT
+# =========================================================================
+- name: Create VM snapshot before patching
+  community.vmware.vmware_guest_snapshot:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    validate_certs: "{{ vcenter_validate_certs }}"
+    datacenter: "{{ vcenter_datacenter }}"
+    name: "{{ inventory_hostname }}"
+    state: present
+    snapshot_name: "pre-patch-{{ ansible_date_time.date }}"
+    description: "Automated pre-patch snapshot - {{ ansible_date_time.iso8601 }}"
+  delegate_to: localhost
+  when:
+    - create_vm_snapshot | bool
+    - ansible_facts.virtualization_type | default('') == 'VMware'
+  register: snapshot_result
+  ignore_errors: true
+  tags: [protection, pre_patch]
+
+- name: Warn if VM snapshot creation failed
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: VM snapshot creation failed for {{ inventory_hostname }}.
+      rollback_playbook.yml will not be able to revert via snapshot. Proceed with caution.
+  when:
+    - create_vm_snapshot | bool
+    - snapshot_result is defined
+    - snapshot_result.failed | default(false)
+  tags: [protection, pre_patch]
+
+# =========================================================================
+# MONITORING MAINTENANCE MODE
+# =========================================================================
+- name: Create Datadog scheduled downtime
+  ansible.builtin.uri:
+    url: "{{ monitoring_url }}/api/v1/downtime"
+    method: POST
+    headers:
+      DD-API-KEY: "{{ monitoring_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      scope: "host:{{ inventory_hostname }}"
+      start: "{{ ansible_date_time.epoch | int }}"
+      end: "{{ ansible_date_time.epoch | int + downtime_duration_seconds | int }}"
+      message: "Scheduled patching maintenance - managed by Ansible"
+    status_code: [200, 201]
+  delegate_to: localhost
+  register: dd_downtime
+  when: monitoring_provider == 'datadog'
+  ignore_errors: true
+  tags: [monitoring, pre_patch]
+
+- name: Persist downtime ID for post-patching removal via workflow artifact
+  ansible.builtin.set_stats:
+    data:
+      datadog_downtime_id: "{{ dd_downtime.json.id }}"
+    per_host: false
+  when:
+    - monitoring_provider == 'datadog'
+    - dd_downtime is defined
+    - not (dd_downtime.failed | default(false))
+  tags: [monitoring, pre_patch]
+
+- name: Place host in Zabbix maintenance mode
+  community.zabbix.zabbix_maintenance:
+    name: "Patching - {{ inventory_hostname }}"
+    host_name: "{{ inventory_hostname }}"
+    state: present
+    collect_data: false
+    minutes: "{{ (downtime_duration_seconds | int / 60) | int }}"
+  delegate_to: localhost
+  when: monitoring_provider == 'zabbix'
+  ignore_errors: true
+  tags: [monitoring, pre_patch]
+
+# =========================================================================
+# READINESS SUMMARY
+# =========================================================================
+- name: Pre-patch readiness summary
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - " Pre-Patch Readiness: {{ inventory_hostname }}"
+      - "=============================================="
+      - "OS family:        {{ ansible_facts.os_family }}"
+      - "Services stopped: {{ services_to_stop | join(', ') or 'None' }}"
+      - "Config backup:    {{ 'Yes (' + (backup_configs | length | string) + ' paths)' if backup_configs | length > 0 else 'Skipped' }}"
+      - "VM snapshot:      {{ 'Yes' if (create_vm_snapshot | bool and not (snapshot_result.failed | default(true))) else 'Skipped or failed' }}"
+      - "Maintenance mode: {{ monitoring_provider or 'Skipped' }}"
+      - "Status:           READY FOR PATCHING"
+      - "=============================================="
+  tags: always

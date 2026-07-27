@@ -1,0 +1,150 @@
+---
+# Windows pre-patching tasks — no become required; WinRM admin credential is used.
+
+# =========================================================================
+# SYSTEM READINESS CHECKS
+# =========================================================================
+- name: Get free disk space on C drive
+  ansible.windows.win_shell: |
+    $drive = Get-PSDrive C
+    [math]::Round($drive.Free / 1GB, 2)
+  register: c_drive_free_gb
+  changed_when: false
+  tags: [checks, pre_patch]
+
+- name: Assert sufficient disk space on C drive
+  ansible.builtin.assert:
+    that:
+      - (c_drive_free_gb.stdout | trim | float) >= (min_disk_space_gb | int)
+    fail_msg: >-
+      ABORT: C:\ has only {{ c_drive_free_gb.stdout | trim }}GB free;
+      {{ min_disk_space_gb }}GB required. Clear space before patching.
+  tags: [checks, pre_patch]
+
+- name: Check for pending reboot (Windows Update)
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired
+  register: wu_reboot_required
+  tags: [checks, pre_patch]
+
+- name: Check for pending reboot (Component-Based Servicing)
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending
+  register: cbs_reboot_required
+  tags: [checks, pre_patch]
+
+- name: Set windows_reboot_pending fact
+  ansible.builtin.set_fact:
+    windows_reboot_pending: "{{ wu_reboot_required.exists or cbs_reboot_required.exists }}"
+  tags: [checks, pre_patch]
+
+- name: Abort if pending reboot detected and strict mode is enabled
+  ansible.builtin.fail:
+    msg: >-
+      ABORT: {{ inventory_hostname }} has a pending reboot from a prior operation.
+      Reboot the host first, or set abort_on_pending_reboot=false to override.
+  when:
+    - windows_reboot_pending | bool
+    - abort_on_pending_reboot | bool
+  tags: [checks, pre_patch]
+
+- name: Warn if pending reboot detected (non-strict mode)
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} has a pending Windows reboot. Patching will
+      continue, but rebooting first is strongly recommended.
+  when:
+    - windows_reboot_pending | bool
+    - not (abort_on_pending_reboot | bool)
+  tags: [checks, pre_patch]
+
+# =========================================================================
+# RECORD PRE-PATCH BASELINE
+# =========================================================================
+- name: Create patch report directory
+  ansible.windows.win_file:
+    path: "{{ patch_report_dir }}"
+    state: directory
+  tags: [baseline, pre_patch]
+
+- name: Gather installed Windows software
+  ansible.windows.win_shell: |
+    $apps = Get-ItemProperty `
+      HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*,
+      HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* |
+      Where-Object { $_.DisplayName } |
+      Select-Object DisplayName, DisplayVersion, Publisher
+    $apps | ConvertTo-Json -Depth 2
+  register: win_packages_before
+  changed_when: false
+  failed_when: false
+  tags: [baseline, pre_patch]
+
+- name: Save pre-patch Windows package list
+  ansible.windows.win_copy:
+    content: "{{ win_packages_before.stdout | default('[]') }}"
+    dest: "{{ patch_report_dir }}\\packages_before.json"
+  tags: [baseline, pre_patch]
+
+- name: Get Windows OS version info
+  ansible.windows.win_shell: |
+    $os = Get-WmiObject Win32_OperatingSystem
+    "$($os.Caption) Build $($os.BuildNumber) ($($os.Version))"
+  register: win_os_version
+  changed_when: false
+  tags: [baseline, pre_patch]
+
+- name: Save pre-patch Windows system state summary
+  ansible.windows.win_copy:
+    content: |
+      Pre-Patch System State (Windows)
+      =================================
+      Timestamp:      {{ ansible_date_time.iso8601 }}
+      Hostname:       {{ inventory_hostname }}
+      OS:             {{ win_os_version.stdout | trim }}
+      C:\ Free (GB):  {{ c_drive_free_gb.stdout | trim }}
+      Pending Reboot: {{ 'YES - caution' if windows_reboot_pending | bool else 'No' }}
+    dest: "{{ patch_report_dir }}\\pre_patch_state.txt"
+  tags: [baseline, pre_patch]
+
+# =========================================================================
+# ARCHIVE CONFIGURATION FILES
+# =========================================================================
+- name: Archive critical configuration files (Windows)
+  ansible.windows.win_shell: |
+    $dest = "{{ patch_report_dir }}\config_backup_{{ ansible_date_time.epoch }}.zip"
+    $paths = @({{ backup_configs | map('regex_replace', '(.*)', '"\\1"') | join(', ') }})
+    Compress-Archive -Path $paths -DestinationPath $dest -Force
+  when: backup_configs | length > 0
+  tags: [protection, pre_patch]
+
+# =========================================================================
+# SERVICE SUSPENSION
+# =========================================================================
+- name: Gracefully stop dependent application services
+  ansible.windows.win_service:
+    name: "{{ item }}"
+    state: stopped
+  loop: "{{ services_to_stop }}"
+  when: services_to_stop | length > 0
+  tags: [services, pre_patch]
+
+# =========================================================================
+# USER NOTIFICATION
+# =========================================================================
+- name: Check for active Windows login sessions
+  ansible.windows.win_shell: query session
+  register: active_sessions_win
+  changed_when: false
+  failed_when: false
+  tags: [notify, pre_patch]
+
+- name: Broadcast maintenance notice to Windows users
+  ansible.windows.win_shell: >
+    msg * /time:60
+    "MAINTENANCE NOTICE: {{ inventory_hostname }} is entering a scheduled patching window.
+    Services will be interrupted. Please save your work now."
+  changed_when: false
+  failed_when: false
+  when: active_sessions_win.stdout | length > 0
+  tags: [notify, pre_patch]

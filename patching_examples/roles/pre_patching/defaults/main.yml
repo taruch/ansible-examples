@@ -1,0 +1,30 @@
+---
+# Disk space thresholds
+min_disk_space_gb: 5
+min_boot_space_mb: 200
+
+# Abort the playbook if a prior reboot is still pending (recommended: true for prod)
+abort_on_pending_reboot: false
+
+# Services to stop gracefully before patching
+services_to_stop: []
+
+# File/directory paths to archive as a configuration backup
+backup_configs: []
+
+# VMware snapshot before patching (requires community.vmware collection)
+create_vm_snapshot: false
+vcenter_hostname: ""
+vcenter_username: ""
+vcenter_password: ""
+vcenter_datacenter: ""
+vcenter_validate_certs: false
+
+# Monitoring maintenance mode provider: "datadog", "zabbix", or "" to skip
+monitoring_provider: ""
+monitoring_url: ""
+monitoring_api_key: ""
+downtime_duration_seconds: 7200
+
+# Platform-conditional report directory; override in host/group vars if needed
+patch_report_dir: "{{ 'C:\\ProgramData\\patch_reports' if ansible_facts.os_family == 'Windows' else '/var/log/patch_reports' }}"

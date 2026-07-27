@@ -1,0 +1,80 @@
+---
+# Windows post-patching verification — no become required.
+
+# =========================================================================
+# REBOOT DETECTION
+# =========================================================================
+- name: Check for pending reboot after Windows Update (Windows Update key)
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired
+  register: wu_reboot_after
+  tags: [verify, post_patch]
+
+- name: Check for pending reboot after Windows Update (CBS key)
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending
+  register: cbs_reboot_after
+  tags: [verify, post_patch]
+
+- name: Set reboot_required fact for shared tasks
+  ansible.builtin.set_fact:
+    reboot_required: "{{ wu_reboot_after.exists or cbs_reboot_after.exists }}"
+  tags: [verify, post_patch]
+
+# =========================================================================
+# POST-PATCH PACKAGE BASELINE
+# =========================================================================
+- name: Gather installed Windows software after patching
+  ansible.windows.win_shell: |
+    $apps = Get-ItemProperty `
+      HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*,
+      HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* |
+      Where-Object { $_.DisplayName } |
+      Select-Object DisplayName, DisplayVersion, Publisher
+    $apps | ConvertTo-Json -Depth 2
+  register: win_packages_after
+  changed_when: false
+  failed_when: false
+  tags: [baseline, post_patch]
+
+- name: Save post-patch Windows package list
+  ansible.windows.win_copy:
+    content: "{{ win_packages_after.stdout | default('[]') }}"
+    dest: "{{ patch_report_dir }}\\packages_after.json"
+  tags: [baseline, post_patch]
+
+# =========================================================================
+# WINDOWS EVENT LOG SCAN
+# =========================================================================
+- name: Scan Windows System event log for recent errors
+  ansible.windows.win_shell: |
+    try {
+      Get-EventLog -LogName System -EntryType Error -Newest 20 |
+        Select-Object TimeGenerated, Source, EventID, Message |
+        Format-List | Out-String
+    } catch { "No events found or EventLog unavailable" }
+  register: win_event_errors
+  changed_when: false
+  failed_when: false
+  tags: [verify, post_patch]
+
+- name: Log recent Windows System errors (informational)
+  ansible.builtin.debug:
+    msg: "{{ win_event_errors.stdout_lines | default(['No recent errors found']) }}"
+  tags: [verify, post_patch]
+
+# =========================================================================
+# WINDOWS OS BUILD VERIFICATION
+# =========================================================================
+- name: Get post-patch Windows OS build info
+  ansible.windows.win_shell: |
+    $os = Get-WmiObject Win32_OperatingSystem
+    "$($os.Caption) Build $($os.BuildNumber) ($($os.Version))"
+  register: win_os_post
+  changed_when: false
+  tags: [verify, post_patch]
+
+- name: Log post-patch Windows OS build
+  ansible.builtin.debug:
+    msg: "Post-patch OS: {{ win_os_post.stdout | trim }}"
+  tags: [verify, post_patch]

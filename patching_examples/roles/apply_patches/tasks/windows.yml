@@ -1,0 +1,34 @@
+---
+# Windows patch application via win_updates.
+# The rescue block re-raises any failure so AAP routes to the workflow failure branch.
+- name: Apply patches (Windows/win_updates)
+  block:
+
+    - name: "Apply Windows updates (dry_run={{ dry_run }})"
+      ansible.windows.win_updates:
+        category_names: >-
+          {{ win_update_categories if patch_type == 'all'
+             else (['SecurityUpdates'] if patch_type == 'security'
+                   else ['Updates', 'CriticalUpdates']) }}
+        blacklist: "{{ exclude_packages if exclude_packages | length > 0 else omit }}"
+        state: installed
+        reboot: false
+      check_mode: "{{ dry_run | bool }}"
+      register: win_update_result
+      tags: [patch, apply_patches]
+
+    - name: Show Windows update summary
+      ansible.builtin.debug:
+        msg:
+          - "Updates installed: {{ win_update_result.installed_update_count | default(0) }}"
+          - "Reboot required:   {{ win_update_result.reboot_required | default(false) }}"
+          - "Found updates:     {{ win_update_result.found_update_count | default(0) }}"
+      tags: [patch, apply_patches]
+
+  rescue:
+    - name: Re-raise the error so AAP workflow routes to failure/rollback branch
+      ansible.builtin.fail:
+        msg: >-
+          Windows Update FAILED on {{ inventory_hostname }}.
+          Triggering AAP workflow failure branch for rollback.
+          Original error: {{ ansible_failed_result.msg | default('See task output above') }}

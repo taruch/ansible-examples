@@ -1,0 +1,267 @@
+---
+# Patch Rollback
+#
+# AAP Workflow position: FAILURE BRANCH
+# Triggered when: patching_playbook.yml OR post_patching_playbook.yml fails
+# On completion: always — report result regardless of rollback success
+#
+# This playbook is designed to be used as the failure-branch node in an AAP
+# Workflow Job Template. It attempts a best-effort rollback in this order:
+#   1. Revert the pre-patch VM snapshot (if one was created)
+#   2. Restart services that were stopped during pre-patching
+#   3. Remove monitoring maintenance mode (Datadog / Zabbix)
+#   4. Write a rollback report
+#
+# Because this runs on a failed system, many steps use ignore_errors/failed_when=false
+# to ensure the playbook completes and produces a full report even if some
+# rollback steps cannot succeed.
+#
+# Survey variables to expose in AAP:
+#   target_hosts, services_to_start (same list as services_to_stop in pre-patching),
+#   create_vm_snapshot, monitoring_provider, datadog_downtime_id
+
+- name: Patch Rollback
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  vars:
+    # Services to restart — should mirror services_to_stop from pre_patching_playbook.yml
+    services_to_start: []
+
+    # VMware snapshot settings — must match pre_patching_playbook.yml
+    create_vm_snapshot: false
+    vcenter_hostname: ""
+    vcenter_username: ""
+    vcenter_password: ""
+    vcenter_datacenter: ""
+    vcenter_validate_certs: false
+
+    # Monitoring — must match pre_patching_playbook.yml
+    monitoring_provider: ""
+    monitoring_url: ""
+    monitoring_api_key: ""
+
+    # Passed automatically via set_stats from pre_patching_playbook.yml when run in a workflow.
+    # Set as a survey variable if running this playbook standalone.
+    datadog_downtime_id: ""
+
+    patch_report_dir: /var/log/patch_reports
+
+  tasks:
+
+    # =========================================================================
+    # 1. ANNOUNCE ROLLBACK
+    # =========================================================================
+    - name: Announce rollback to logged-in users
+      tags: [notify, rollback]
+      block:
+        - name: Check for active login sessions
+          ansible.builtin.command: who
+          register: active_sessions
+          changed_when: false
+          failed_when: false
+
+        - name: Broadcast rollback notice to logged-in users
+          ansible.builtin.command: >
+            wall "ROLLBACK IN PROGRESS: Patching on {{ inventory_hostname }} failed.
+            Rolling back to pre-patch state. Expect brief service interruptions."
+          changed_when: false
+          when: active_sessions.stdout | length > 0
+
+    # =========================================================================
+    # 2. REVERT VM SNAPSHOT
+    # =========================================================================
+    - name: Revert to pre-patch VM snapshot
+      tags: [snapshot, rollback]
+      block:
+        - name: Revert guest to the pre-patch snapshot
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ vcenter_hostname }}"
+            username: "{{ vcenter_username }}"
+            password: "{{ vcenter_password }}"
+            validate_certs: "{{ vcenter_validate_certs }}"
+            datacenter: "{{ vcenter_datacenter }}"
+            name: "{{ inventory_hostname }}"
+            state: revert
+            snapshot_name: "pre-patch-{{ ansible_date_time.date }}"
+          delegate_to: localhost
+          register: snapshot_revert
+          ignore_errors: true  # Record failure but continue with rest of rollback
+
+        - name: Report snapshot revert outcome
+          ansible.builtin.debug:
+            msg: >-
+              {{ 'Snapshot revert SUCCEEDED for ' + inventory_hostname
+                 if not (snapshot_revert.failed | default(true))
+                 else 'Snapshot revert FAILED for ' + inventory_hostname +
+                      '. Manual intervention required to restore pre-patch state.' }}
+
+        # Give the VM time to settle after a snapshot revert before attempting
+        # further tasks over SSH. Only wait if the revert actually ran.
+        - name: Wait for host to become reachable after snapshot revert
+          ansible.builtin.wait_for_connection:
+            delay: 30
+            timeout: 300
+          when:
+            - not (snapshot_revert.failed | default(true))
+            - create_vm_snapshot | bool
+
+      when:
+        - create_vm_snapshot | bool
+        - ansible_facts.virtualization_type | default('') == 'VMware'
+
+    # =========================================================================
+    # 3. RESTART STOPPED SERVICES
+    # =========================================================================
+    - name: Restart services that were stopped before patching
+      tags: [services, rollback]
+      block:
+        - name: Start services
+          ansible.builtin.service:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop: "{{ services_to_start }}"
+          register: service_restart_results
+          ignore_errors: true
+
+        - name: Collect failed service restarts
+          ansible.builtin.set_fact:
+            failed_services: >-
+              {{ service_restart_results.results
+                 | selectattr('failed', 'defined')
+                 | selectattr('failed')
+                 | map(attribute='item')
+                 | list }}
+
+        - name: Warn about services that could not be restarted
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: The following services failed to restart during rollback and
+              require manual intervention: {{ failed_services | join(', ') }}
+          when: failed_services | length > 0
+
+      when: services_to_start | length > 0
+
+    # =========================================================================
+    # 4. EXIT MONITORING MAINTENANCE MODE
+    # =========================================================================
+    - name: Exit monitoring maintenance mode
+      tags: [monitoring, rollback]
+      block:
+        - name: Remove Datadog scheduled downtime
+          ansible.builtin.uri:
+            url: "{{ monitoring_url }}/api/v1/downtime/{{ datadog_downtime_id }}"
+            method: DELETE
+            headers:
+              DD-API-KEY: "{{ monitoring_api_key }}"
+            status_code: [200, 204]
+          delegate_to: localhost
+          when:
+            - monitoring_provider == 'datadog'
+            - datadog_downtime_id | length > 0
+          register: dd_delete
+          ignore_errors: true
+
+        - name: Warn if Datadog downtime could not be removed
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: Could not remove Datadog downtime {{ datadog_downtime_id }}.
+              Remove it manually in the Datadog UI to re-enable alerting.
+          when:
+            - monitoring_provider == 'datadog'
+            - datadog_downtime_id | length > 0
+            - dd_delete.failed | default(false)
+
+        - name: Remove Zabbix maintenance window
+          community.zabbix.zabbix_maintenance:
+            name: "Patching - {{ inventory_hostname }}"
+            state: absent
+          delegate_to: localhost
+          when: monitoring_provider == 'zabbix'
+          ignore_errors: true
+
+    # =========================================================================
+    # 5. GATHER POST-ROLLBACK STATE
+    # =========================================================================
+    - name: Gather post-rollback facts and package state
+      tags: [verify, rollback]
+      block:
+        - name: Refresh facts after rollback
+          ansible.builtin.setup:
+
+        - name: Gather RPM package facts
+          ansible.builtin.package_facts:
+            manager: rpm
+
+        - name: Save post-rollback package list
+          ansible.builtin.copy:
+            content: "{{ ansible_facts.packages | to_nice_json }}"
+            dest: "{{ patch_report_dir }}/packages_rollback.json"
+            mode: '0640'
+
+        - name: Check running kernel post-rollback
+          ansible.builtin.command: uname -r
+          register: running_kernel
+          changed_when: false
+
+        - name: Check service states after rollback
+          ansible.builtin.service_facts:
+          when: services_to_start | length > 0
+
+    # =========================================================================
+    # 6. ROLLBACK REPORT
+    # =========================================================================
+    - name: Ensure patch report directory exists
+      ansible.builtin.file:
+        path: "{{ patch_report_dir }}"
+        state: directory
+        mode: '0750'
+      tags: [report, rollback]
+
+    - name: Generate rollback report
+      ansible.builtin.copy:
+        content: |
+          Patch Rollback Report
+          =====================
+          Timestamp:          {{ ansible_date_time.iso8601 }}
+          Hostname:           {{ inventory_hostname }}
+          OS:                 {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+          Kernel (now):       {{ running_kernel.stdout | default(ansible_facts.kernel) }}
+
+          Snapshot Revert:    {{ 'Attempted - ' + ('SUCCEEDED' if not (snapshot_revert.failed | default(true)) else 'FAILED - manual restore required')
+                                 if (create_vm_snapshot | bool and ansible_facts.virtualization_type | default('') == 'VMware')
+                                 else 'Skipped (snapshot not configured)' }}
+
+          Services Restarted: {{ services_to_start | join(', ') or 'None' }}
+          Services Failed:    {{ failed_services | default([]) | join(', ') or 'None' }}
+
+          Monitoring:
+            Provider:         {{ monitoring_provider or 'Not configured' }}
+            Downtime removed: {{ 'Yes' if (monitoring_provider == 'datadog' and not (dd_delete.failed | default(true))) else 'N/A or failed' }}
+
+          Package list:       {{ patch_report_dir }}/packages_rollback.json
+          (Compare against {{ patch_report_dir }}/packages_before.json to verify rollback.)
+
+          Status:             ROLLBACK COMPLETE — REVIEW REQUIRED
+          Action required:    Investigate patching failure before re-attempting.
+                              See job output in AAP for the root cause.
+        dest: "{{ patch_report_dir }}/rollback_report_{{ ansible_date_time.date }}.txt"
+        mode: '0640'
+      tags: [report, rollback]
+
+    - name: Rollback completion summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - " Rollback Complete: {{ inventory_hostname }}"
+          - "=============================================="
+          - "Kernel:        {{ running_kernel.stdout | default(ansible_facts.kernel) }}"
+          - "Snapshot:      {{ 'Reverted' if not (snapshot_revert.failed | default(true)) else 'Failed/Skipped' }}"
+          - "Services up:   {{ (services_to_start | difference(failed_services | default([]))) | join(', ') or 'None' }}"
+          - "Services fail: {{ failed_services | default([]) | join(', ') or 'None' }}"
+          - "Monitoring:    {{ monitoring_provider + ' maintenance removed' if monitoring_provider else 'Not configured' }}"
+          - "Report:        {{ patch_report_dir }}/rollback_report_{{ ansible_date_time.date }}.txt"
+          - "NEXT STEP:     Investigate the failure in AAP before re-patching."
+          - "=============================================="
+      tags: always

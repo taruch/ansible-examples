@@ -1,0 +1,273 @@
+---
+# Post-Patching Validation and Cleanup
+#
+# AAP Workflow position: THIRD (after patching_playbook.yml succeeds)
+# On success: workflow complete
+# On failure: optionally trigger rollback_playbook.yml (failure branch)
+#
+# Survey variables to expose in AAP:
+#   target_hosts, services_to_start, health_check_urls, monitoring_provider,
+#   datadog_downtime_id (passed from pre_patching via set_stats)
+
+- name: Post-Patching Validation and Cleanup
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  vars:
+    # Services to start after patching — should match services_to_stop in pre_patching
+    services_to_start: []
+
+    # HTTP health check endpoints to verify after service restart
+    # e.g. ["http://localhost:80/health", "http://localhost:8080/api/ping"]
+    health_check_urls: []
+
+    # TCP ports to verify are listening (e.g. [80, 443, 8080])
+    health_check_ports: []
+
+    # Retries and delay between retries for health checks
+    health_check_retries: 6
+    health_check_delay: 10
+
+    # Monitoring — must match settings used in pre_patching_playbook.yml
+    monitoring_provider: ""
+    monitoring_url: ""
+    monitoring_api_key: ""
+
+    # Datadog downtime ID — ideally passed via AAP Workflow set_stats from pre-patching.
+    # Set this as a survey variable or it comes in automatically from the workflow artifact.
+    datadog_downtime_id: ""
+
+    patch_report_dir: /var/log/patch_reports
+
+  tasks:
+
+    # =========================================================================
+    # 1. REBOOT IF REQUIRED
+    # =========================================================================
+    - name: Reboot handling
+      tags: [reboot, post_patch]
+      block:
+        - name: Check whether patching requires a reboot
+          ansible.builtin.command: needs-restarting -r
+          register: reboot_check
+          failed_when: reboot_check.rc not in [0, 1]
+          changed_when: false
+
+        - name: Reboot to complete kernel/glibc updates
+          ansible.builtin.reboot:
+            reboot_timeout: 600      # Wait up to 10 min for host to return
+            connect_timeout: 20      # Connection probe timeout per attempt
+            pre_reboot_delay: 5      # Give processes a moment to stop cleanly
+            post_reboot_delay: 30    # Brief settle time before first check
+            test_command: uptime     # Confirm SSH and sudo work post-boot
+          when: reboot_check.rc == 1
+
+    # =========================================================================
+    # 2. VERIFY PATCH INSTALLATION
+    # =========================================================================
+    - name: Verify patch installation
+      tags: [verify, post_patch]
+      block:
+        - name: Refresh facts after reboot
+          ansible.builtin.setup:
+
+        - name: Gather installed RPM package facts (post-reboot)
+          ansible.builtin.package_facts:
+            manager: rpm
+
+        - name: Save post-reboot package list for final diff
+          ansible.builtin.copy:
+            content: "{{ ansible_facts.packages | to_nice_json }}"
+            dest: "{{ patch_report_dir }}/packages_final.json"
+            mode: '0640'
+
+        - name: Check DNF transaction history for most recent transaction
+          ansible.builtin.command: dnf history info last -q
+          register: dnf_history_final
+          changed_when: false
+
+        - name: Confirm kernel is running the latest installed kernel
+          ansible.builtin.command: rpm -q kernel --last
+          register: kernel_list
+          changed_when: false
+
+        - name: Show running kernel vs newest installed
+          ansible.builtin.debug:
+            msg:
+              - "Running kernel:   {{ ansible_facts.kernel }}"
+              - "Installed kernels (newest first):"
+              - "{{ kernel_list.stdout_lines }}"
+
+    # =========================================================================
+    # 3. SERVICE RESTORATION
+    # =========================================================================
+    - name: Restore application services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop: "{{ services_to_start }}"
+      when: services_to_start | length > 0
+      register: service_start_results
+      tags: [services, post_patch]
+
+    - name: Verify services are running
+      ansible.builtin.service_facts:
+      tags: [services, post_patch]
+
+    - name: Confirm each expected service is active
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services[item + '.service'] is defined
+          - ansible_facts.services[item + '.service'].state == 'running'
+        fail_msg: "Service {{ item }} failed to start after patching."
+      loop: "{{ services_to_start }}"
+      when: services_to_start | length > 0
+      tags: [services, post_patch]
+
+    # =========================================================================
+    # 4. HEALTH CHECKS — HTTP ENDPOINTS
+    # =========================================================================
+    - name: HTTP health checks
+      ansible.builtin.uri:
+        url: "{{ item }}"
+        method: GET
+        status_code: 200
+        timeout: 15
+      loop: "{{ health_check_urls }}"
+      register: http_checks
+      until: http_checks is success
+      retries: "{{ health_check_retries }}"
+      delay: "{{ health_check_delay }}"
+      when: health_check_urls | length > 0
+      ignore_errors: true
+      tags: [health, post_patch]
+
+    - name: Assert all HTTP health checks passed
+      ansible.builtin.assert:
+        that: >-
+          http_checks.results | selectattr('status', 'ne', 200) | list | length == 0
+        fail_msg: >-
+          Health check failures detected. Review http_checks.results for failed endpoints.
+      when:
+        - health_check_urls | length > 0
+        - http_checks is defined
+      tags: [health, post_patch]
+
+    # =========================================================================
+    # 5. HEALTH CHECKS — TCP PORT AVAILABILITY
+    # =========================================================================
+    - name: TCP port availability checks
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ item }}"
+        timeout: 30
+        state: started
+      loop: "{{ health_check_ports }}"
+      when: health_check_ports | length > 0
+      tags: [health, post_patch]
+
+    # =========================================================================
+    # 6. SYSTEM JOURNAL ERROR SCAN
+    # =========================================================================
+    - name: Scan system journal for critical post-reboot errors
+      ansible.builtin.command: >
+        journalctl -p err --since "10 minutes ago" --no-pager -q
+      register: journal_errors
+      changed_when: false
+      failed_when: false
+      tags: [health, post_patch]
+
+    - name: Warn if journal errors found (review manually)
+      ansible.builtin.debug:
+        msg:
+          - "WARNING: Critical errors found in system journal since reboot:"
+          - "{{ journal_errors.stdout_lines }}"
+          - "Review these manually — they may or may not be patch-related."
+      when:
+        - journal_errors.stdout | length > 0
+      tags: [health, post_patch]
+
+    # =========================================================================
+    # 7. CLEANUP
+    # =========================================================================
+    - name: Cleanup
+      tags: [cleanup, post_patch]
+      block:
+        - name: Remove stale DNF package cache
+          ansible.builtin.command: dnf clean packages
+          changed_when: false
+
+        - name: Remove orphaned old kernels (keep 2 most recent)
+          ansible.builtin.command: dnf remove --oldinstallonly --setopt installonly_limit=2 -y
+          register: kernel_cleanup
+          changed_when: "'Removed' in kernel_cleanup.stdout"
+          failed_when: false
+
+    # =========================================================================
+    # 8. EXIT MONITORING MAINTENANCE MODE
+    # =========================================================================
+    - name: Exit monitoring maintenance mode
+      tags: [monitoring, post_patch]
+      block:
+        - name: Remove Datadog scheduled downtime
+          ansible.builtin.uri:
+            url: "{{ monitoring_url }}/api/v1/downtime/{{ datadog_downtime_id }}"
+            method: DELETE
+            headers:
+              DD-API-KEY: "{{ monitoring_api_key }}"
+            status_code: [200, 204]
+          delegate_to: localhost
+          when:
+            - monitoring_provider == 'datadog'
+            - datadog_downtime_id | length > 0
+          ignore_errors: true
+
+        - name: Remove Zabbix maintenance window
+          community.zabbix.zabbix_maintenance:
+            name: "Patching - {{ inventory_hostname }}"
+            state: absent
+          delegate_to: localhost
+          when: monitoring_provider == 'zabbix'
+          ignore_errors: true
+
+    # =========================================================================
+    # 9. FINAL PATCH REPORT
+    # =========================================================================
+    - name: Generate final patch report
+      tags: [report, post_patch]
+      block:
+        - name: Build patch report content
+          ansible.builtin.copy:
+            content: |
+              Post-Patch Report
+              =================
+              Timestamp:    {{ ansible_date_time.iso8601 }}
+              Hostname:     {{ inventory_hostname }}
+              OS:           {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+              Kernel:       {{ ansible_facts.kernel }}
+              Reboot:       {{ 'Yes' if reboot_check.rc == 1 else 'Not required' }}
+              Services:     {{ services_to_start | join(', ') or 'None managed' }}
+              HTTP Checks:  {{ health_check_urls | length }} endpoint(s) verified
+              Port Checks:  {{ health_check_ports | length }} port(s) verified
+              Journal Errors: {{ journal_errors.stdout_lines | length if journal_errors.stdout | length > 0 else 'None' }}
+              Status:       SUCCESS
+            dest: "{{ patch_report_dir }}/post_patch_report_{{ ansible_date_time.date }}.txt"
+            mode: '0640'
+
+    - name: Final status summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - " Post-Patch Complete: {{ inventory_hostname }}"
+          - "=============================================="
+          - "Kernel:    {{ ansible_facts.kernel }}"
+          - "Rebooted:  {{ 'Yes' if reboot_check.rc == 1 else 'No' }}"
+          - "Services:  {{ services_to_start | join(', ') or 'None managed' }}"
+          - "HTTP OK:   {{ health_check_urls | length }} endpoint(s)"
+          - "Ports OK:  {{ health_check_ports | length }} port(s)"
+          - "Journal:   {{ 'Errors detected - review ' + patch_report_dir if journal_errors.stdout | length > 0 else 'Clean' }}"
+          - "Report:    {{ patch_report_dir }}/post_patch_report_{{ ansible_date_time.date }}.txt"
+          - "Status:    COMPLETE"
+          - "=============================================="
+      tags: always

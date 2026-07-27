@@ -1,0 +1,16 @@
+---
+# Shared patch-application summary — cross-platform.
+- name: Patching complete summary
+  ansible.builtin.debug:
+    msg:
+      - "================================================"
+      - " Patch Application Complete: {{ inventory_hostname }}"
+      - "================================================"
+      - "Platform:    {{ ansible_facts.os_family }}"
+      - "Patch type:  {{ patch_type }}"
+      - "Dry run:     {{ dry_run }}"
+      - "Changed:     {{ (dnf_result is defined and dnf_result.changed) or
+                         (win_update_result is defined and win_update_result.installed_update_count | default(0) > 0) }}"
+      - "Next step:   Post-patching verification and reboot"
+      - "================================================"
+  tags: always

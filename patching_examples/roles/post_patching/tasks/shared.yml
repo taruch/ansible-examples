@@ -1,0 +1,145 @@
+---
+# Shared post-patching tasks — cross-platform.
+# Reboot, service restore, health checks, monitoring exit, final report.
+
+# =========================================================================
+# REBOOT
+# =========================================================================
+- name: Reboot to complete updates
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ reboot_timeout }}"
+    connect_timeout: "{{ reboot_connect_timeout }}"
+    pre_reboot_delay: "{{ reboot_pre_reboot_delay }}"
+    post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+    test_command: uptime
+  when: reboot_required | default(false) | bool
+  become: "{{ ansible_facts.os_family != 'Windows' }}"
+  tags: [reboot, post_patch]
+
+# =========================================================================
+# SERVICE RESTORATION
+# =========================================================================
+- name: Restore application services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: "{{ services_to_start }}"
+  when: services_to_start | length > 0
+  become: "{{ ansible_facts.os_family != 'Windows' }}"
+  tags: [services, post_patch]
+
+- name: Gather service facts to confirm restoration (Linux only)
+  ansible.builtin.service_facts:
+  when:
+    - services_to_start | length > 0
+    - ansible_facts.os_family != 'Windows'
+  become: true
+  tags: [services, post_patch]
+
+- name: Assert expected services are active (Linux only)
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services[item + '.service'] is defined
+      - ansible_facts.services[item + '.service'].state == 'running'
+    fail_msg: >-
+      Service {{ item }} is NOT running after patching.
+      Check logs: journalctl -u {{ item }} -n 50
+  loop: "{{ services_to_start }}"
+  when:
+    - services_to_start | length > 0
+    - ansible_facts.os_family != 'Windows'
+  tags: [services, post_patch]
+
+# =========================================================================
+# APPLICATION HEALTH CHECKS
+# =========================================================================
+- name: HTTP application health check
+  ansible.builtin.uri:
+    url: "{{ item }}"
+    method: GET
+    status_code: [200, 201, 301, 302]
+    timeout: 30
+    validate_certs: false
+  loop: "{{ health_check_urls }}"
+  when: health_check_urls | length > 0
+  register: http_health
+  retries: 3
+  delay: 10
+  until: http_health is not failed
+  tags: [health, post_patch]
+
+- name: TCP port health check
+  ansible.builtin.wait_for:
+    host: "{{ item.host | default(inventory_hostname) }}"
+    port: "{{ item.port }}"
+    timeout: "{{ item.timeout | default(30) }}"
+    state: started
+  loop: "{{ tcp_health_checks }}"
+  when: tcp_health_checks | length > 0
+  tags: [health, post_patch]
+
+# =========================================================================
+# MONITORING: EXIT MAINTENANCE MODE
+# =========================================================================
+- name: Cancel Datadog scheduled downtime
+  ansible.builtin.uri:
+    url: "{{ monitoring_url }}/api/v1/downtime/{{ datadog_downtime_id }}"
+    method: DELETE
+    headers:
+      DD-API-KEY: "{{ monitoring_api_key }}"
+    status_code: [200, 204]
+  delegate_to: localhost
+  when:
+    - monitoring_provider == 'datadog'
+    - datadog_downtime_id is defined
+    - datadog_downtime_id | string | length > 0
+  ignore_errors: true
+  tags: [monitoring, post_patch]
+
+- name: Remove Zabbix maintenance window
+  community.zabbix.zabbix_maintenance:
+    name: "Patching - {{ inventory_hostname }}"
+    host_name: "{{ inventory_hostname }}"
+    state: absent
+  delegate_to: localhost
+  when: monitoring_provider == 'zabbix'
+  ignore_errors: true
+  tags: [monitoring, post_patch]
+
+# =========================================================================
+# FINAL REPORT
+# =========================================================================
+- name: Write post-patch report
+  ansible.builtin.copy:
+    content: |
+      Post-Patch Report
+      =================
+      Timestamp:       {{ ansible_date_time.iso8601 }}
+      Hostname:        {{ inventory_hostname }}
+      OS Family:       {{ ansible_facts.os_family }}
+      Reboot Required: {{ reboot_required | default(false) }}
+      Services OK:     {{ services_to_start | join(', ') or 'None configured' }}
+      HTTP Checks:     {{ health_check_urls | length }} URL(s) verified
+      TCP Checks:      {{ tcp_health_checks | length }} port(s) verified
+      Status:          PATCHING COMPLETE
+    dest: "{{ patch_report_dir }}/post_patch_report_{{ ansible_date_time.date }}.txt"
+    mode: '0640'
+  become: "{{ ansible_facts.os_family != 'Windows' }}"
+  tags: always
+
+- name: Post-patching complete summary
+  ansible.builtin.debug:
+    msg:
+      - "================================================"
+      - " Post-Patching Complete: {{ inventory_hostname }}"
+      - "================================================"
+      - "OS family:    {{ ansible_facts.os_family }}"
+      - "Rebooted:     {{ reboot_required | default(false) }}"
+      - "Services:     {{ services_to_start | join(', ') or 'None' }}"
+      - "HTTP checks:  {{ health_check_urls | length }}"
+      - "TCP checks:   {{ tcp_health_checks | length }}"
+      - "Monitoring:   {{ 'Exited maintenance' if monitoring_provider else 'N/A' }}"
+      - "Status:       SUCCESS"
+      - "================================================"
+  tags: always

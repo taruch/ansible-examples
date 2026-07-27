@@ -1,0 +1,23 @@
+---
+# Services to restart after patching (those stopped in pre_patching)
+services_to_start: []
+
+# HTTP application health check endpoints to verify after reboot
+health_check_urls: []
+
+# TCP port health checks: list of {host: ..., port: ..., timeout: ...}
+tcp_health_checks: []
+
+# Reboot timeout settings
+reboot_timeout: 600
+reboot_connect_timeout: 20
+reboot_pre_reboot_delay: 5
+reboot_post_reboot_delay: 30
+
+# Monitoring maintenance mode provider (must match pre_patching value)
+monitoring_provider: ""
+monitoring_url: ""
+monitoring_api_key: ""
+
+# Platform-conditional report directory (must match pre_patching value)
+patch_report_dir: "{{ 'C:\\ProgramData\\patch_reports' if ansible_facts.os_family == 'Windows' else '/var/log/patch_reports' }}"

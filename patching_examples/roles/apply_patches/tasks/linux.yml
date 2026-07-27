@@ -1,0 +1,37 @@
+---
+# Linux patch application via dnf.
+# The rescue block re-raises any dnf failure so AAP routes this node to the workflow's
+# failure branch (which runs rollback_playbook.yml).
+- name: Apply patches (Linux/dnf)
+  become: true
+  block:
+
+    - name: "Apply {{ patch_type }} updates via dnf (dry_run={{ dry_run }})"
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_only: true
+        security: "{{ patch_type == 'security' }}"
+        bugfix: "{{ patch_type == 'bugfix' }}"
+        exclude: "{{ exclude_packages | join(',') if exclude_packages | length > 0 else omit }}"
+      async: "{{ dnf_update_timeout }}"
+      poll: 15
+      check_mode: "{{ dry_run | bool }}"
+      register: dnf_result
+      tags: [patch, apply_patches]
+
+    - name: Show dnf update summary
+      ansible.builtin.debug:
+        msg:
+          - "dnf result: {{ dnf_result.msg | default('No message') }}"
+          - "Changed: {{ dnf_result.changed }}"
+          - "Results count: {{ dnf_result.results | default([]) | length }}"
+      tags: [patch, apply_patches]
+
+  rescue:
+    - name: Re-raise the error so AAP workflow routes to failure/rollback branch
+      ansible.builtin.fail:
+        msg: >-
+          dnf update FAILED on {{ inventory_hostname }}.
+          Triggering AAP workflow failure branch for rollback.
+          Original error: {{ ansible_failed_result.msg | default('See task output above') }}

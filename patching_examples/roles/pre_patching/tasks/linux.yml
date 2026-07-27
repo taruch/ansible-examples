@@ -1,0 +1,158 @@
+---
+# All Linux pre-patching tasks run with become: true (sudo).
+- name: Linux pre-patching checks and preparation
+  become: true
+  block:
+
+    # =========================================================================
+    # SYSTEM READINESS CHECKS
+    # =========================================================================
+    - name: Check free disk space on root filesystem
+      ansible.builtin.assert:
+        that:
+          - (item.size_available | int) > (min_disk_space_gb | int * 1024 ** 3)
+        fail_msg: >-
+          ABORT: {{ item.mount }} has only
+          {{ (item.size_available | int / 1024 ** 3) | round(1) }}GB free;
+          {{ min_disk_space_gb }}GB required. Clear space before patching.
+      loop: "{{ ansible_facts.mounts }}"
+      when: item.mount == '/'
+      tags: [checks, pre_patch]
+
+    - name: Check free disk space on /boot
+      ansible.builtin.assert:
+        that:
+          - (item.size_available | int) > (min_boot_space_mb | int * 1024 ** 2)
+        fail_msg: >-
+          ABORT: /boot has only
+          {{ (item.size_available | int / 1024 ** 2) | round(0) | int }}MB free;
+          {{ min_boot_space_mb }}MB required. Run 'dnf remove --oldinstallonly' to free space.
+      loop: "{{ ansible_facts.mounts }}"
+      when: item.mount == '/boot'
+      tags: [checks, pre_patch]
+
+    # needs-restarting: rc=0 no reboot needed, rc=1 reboot needed
+    - name: Check for pending reboot from a prior operation
+      ansible.builtin.command: needs-restarting -r
+      register: pending_reboot_check
+      failed_when: pending_reboot_check.rc not in [0, 1]
+      changed_when: false
+      tags: [checks, pre_patch]
+
+    - name: Abort if pending reboot detected and strict mode is enabled
+      ansible.builtin.fail:
+        msg: >-
+          ABORT: {{ inventory_hostname }} has a pending reboot from a prior operation.
+          Patching over a pending reboot risks boot failures.
+          Reboot the host first, or set abort_on_pending_reboot=false to override.
+      when:
+        - pending_reboot_check.rc == 1
+        - abort_on_pending_reboot | bool
+      tags: [checks, pre_patch]
+
+    - name: Warn if pending reboot detected (non-strict mode)
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} has a pending reboot. Patching will continue,
+          but rebooting first is strongly recommended.
+      when:
+        - pending_reboot_check.rc == 1
+        - not (abort_on_pending_reboot | bool)
+      tags: [checks, pre_patch]
+
+    - name: Check for active package manager lock files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: lock_check
+      loop:
+        - /run/dnf/dnf.lock
+        - /var/run/yum.pid
+      tags: [checks, pre_patch]
+
+    - name: Abort if package manager is already locked
+      ansible.builtin.fail:
+        msg: >-
+          Package manager lock exists at {{ item.item }}.
+          Another dnf/yum process may be running. Wait for it to finish.
+      loop: "{{ lock_check.results }}"
+      when: item.stat.exists
+      tags: [checks, pre_patch]
+
+    # =========================================================================
+    # RECORD PRE-PATCH BASELINE
+    # =========================================================================
+    - name: Create patch report directory
+      ansible.builtin.file:
+        path: "{{ patch_report_dir }}"
+        state: directory
+        mode: '0750'
+      tags: [baseline, pre_patch]
+
+    - name: Gather installed RPM package facts
+      ansible.builtin.package_facts:
+        manager: rpm
+      tags: [baseline, pre_patch]
+
+    - name: Save pre-patch package list
+      ansible.builtin.copy:
+        content: "{{ ansible_facts.packages | to_nice_json }}"
+        dest: "{{ patch_report_dir }}/packages_before.json"
+        mode: '0640'
+      tags: [baseline, pre_patch]
+
+    - name: Save pre-patch system state summary
+      ansible.builtin.copy:
+        content: |
+          Pre-Patch System State
+          ======================
+          Timestamp:      {{ ansible_date_time.iso8601 }}
+          Hostname:       {{ inventory_hostname }}
+          OS:             {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+          Kernel:         {{ ansible_facts.kernel }}
+          Architecture:   {{ ansible_facts.architecture }}
+          Uptime:         {{ (ansible_facts.uptime_seconds / 3600) | round(1) }} hours
+          Pending Reboot: {{ 'YES - caution' if pending_reboot_check.rc == 1 else 'No' }}
+          Root Free:      {{ (ansible_facts.mounts | selectattr('mount', 'eq', '/') | first).size_available | int / 1024 ** 3 | round(1) }}GB
+        dest: "{{ patch_report_dir }}/pre_patch_state.txt"
+        mode: '0640'
+      tags: [baseline, pre_patch]
+
+    # =========================================================================
+    # ARCHIVE CONFIGURATION FILES
+    # =========================================================================
+    - name: Archive critical configuration files
+      ansible.builtin.archive:
+        path: "{{ backup_configs }}"
+        dest: "{{ patch_report_dir }}/config_backup_{{ ansible_date_time.epoch }}.tar.gz"
+        mode: '0600'
+      when: backup_configs | length > 0
+      tags: [protection, pre_patch]
+
+    # =========================================================================
+    # SERVICE SUSPENSION
+    # =========================================================================
+    - name: Gracefully stop dependent application services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ services_to_stop }}"
+      when: services_to_stop | length > 0
+      tags: [services, pre_patch]
+
+    # =========================================================================
+    # USER NOTIFICATION
+    # =========================================================================
+    - name: Check for active login sessions
+      ansible.builtin.command: who
+      register: active_sessions
+      changed_when: false
+      tags: [notify, pre_patch]
+
+    - name: Broadcast maintenance notice to all logged-in users
+      ansible.builtin.command: >
+        wall "MAINTENANCE NOTICE: {{ inventory_hostname }} is entering a scheduled
+        patching window. Services will be interrupted and a reboot will likely occur.
+        Please save your work now. Estimated duration: 30-60 minutes."
+      changed_when: false
+      when: active_sessions.stdout | length > 0
+      tags: [notify, pre_patch]

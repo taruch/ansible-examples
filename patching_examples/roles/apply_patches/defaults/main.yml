@@ -1,0 +1,23 @@
+---
+# Patch scope: "security", "bugfix", or "all"
+patch_type: security
+
+# Run in check mode only — no changes made
+dry_run: false
+
+# RPM packages to exclude from updates (Linux only)
+exclude_packages: []
+
+# Windows Update categories to install when patch_type=all
+win_update_categories:
+  - SecurityUpdates
+  - CriticalUpdates
+  - UpdateRollups
+  - Updates
+  - DefinitionUpdates
+
+# Timeout (seconds) for async dnf operation (Linux only)
+dnf_update_timeout: 3600
+
+# Platform-conditional report directory
+patch_report_dir: "{{ 'C:\\ProgramData\\patch_reports' if ansible_facts.os_family == 'Windows' else '/var/log/patch_reports' }}"

@@ -1,0 +1,7 @@
+---
+- name: Run platform-specific pre-patching tasks
+  ansible.builtin.include_tasks:
+    file: "{{ 'linux' if ansible_facts.os_family != 'Windows' else 'windows' }}.yml"
+
+- name: Run shared pre-patching tasks
+  ansible.builtin.include_tasks: shared.yml

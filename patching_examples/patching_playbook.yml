@@ -1,0 +1,157 @@
+---
+# Apply System Patches (DNF/YUM)
+#
+# AAP Workflow position: SECOND (after pre_patching_playbook.yml succeeds)
+# On success: proceed to post_patching_playbook.yml
+# On failure: proceed to rollback_playbook.yml (failure branch)
+#
+# Survey variables to expose in AAP:
+#   target_hosts, patch_type (all|security|bugfix), exclude_packages,
+#   dnf_update_timeout, dry_run
+
+- name: Apply System Patches
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  vars:
+    # "all"      - apply all available updates (default)
+    # "security" - apply only security advisories
+    # "bugfix"   - apply only bugfix advisories
+    patch_type: all
+
+    # Comma-separated package globs to hold back (e.g. "kernel*,my-custom-pkg")
+    exclude_packages: []
+
+    # Maximum seconds to wait for dnf to finish (large patch sets can be slow)
+    dnf_update_timeout: 3600
+
+    # Set to true to run dnf in --check mode (preview only, no changes applied)
+    dry_run: false
+
+    patch_report_dir: /var/log/patch_reports
+
+  tasks:
+
+    # =========================================================================
+    # 1. LIST AVAILABLE UPDATES (informational only)
+    # =========================================================================
+    - name: List available updates before applying
+      ansible.builtin.command: >
+        dnf check-update {{ '--security' if patch_type == 'security' else '' }}
+        {{ '--bugfix' if patch_type == 'bugfix' else '' }}
+        {{ '--exclude=' + exclude_packages | join(',') if exclude_packages | length > 0 else '' }}
+        -q
+      register: available_updates
+      failed_when: available_updates.rc not in [0, 100]
+      changed_when: false
+      tags: [check, patch]
+
+    - name: Show available update count
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Updates available (rc=100 means packages to update):' if available_updates.rc == 100
+             else 'System is already up to date. No updates to apply.' }}
+          {{ available_updates.stdout_lines | length }} output lines.
+      tags: [check, patch]
+
+    - name: Skip patching if system is already up to date
+      ansible.builtin.meta: end_play
+      when: available_updates.rc == 0
+
+    # =========================================================================
+    # 2. RECORD PRE-PATCH DNF TRANSACTION HISTORY BASELINE
+    # =========================================================================
+    - name: Record current DNF transaction history ID before patching
+      ansible.builtin.command: dnf history list --last=1 -q
+      register: dnf_history_before
+      changed_when: false
+      tags: patch
+
+    # =========================================================================
+    # 3. APPLY PATCHES
+    # =========================================================================
+    - name: Apply patches
+      tags: [patch, apply]
+      block:
+        - name: "Apply {{ patch_type }} updates (dry_run={{ dry_run }})"
+          ansible.builtin.dnf:
+            name: "*"
+            state: latest
+            update_only: true
+            security: "{{ patch_type == 'security' }}"
+            bugfix: "{{ patch_type == 'bugfix' }}"
+            exclude: "{{ exclude_packages | join(',') if exclude_packages | length > 0 else omit }}"
+          async: "{{ dnf_update_timeout }}"
+          poll: 15
+          check_mode: "{{ dry_run | bool }}"
+          register: dnf_result
+
+        - name: Show packages that were updated
+          ansible.builtin.debug:
+            msg: "Updated {{ dnf_result.results | length }} package(s)"
+          when:
+            - dnf_result.results is defined
+            - dnf_result.results | length > 0
+
+      rescue:
+        - name: Capture dnf failure details
+          ansible.builtin.debug:
+            msg:
+              - "PATCH FAILED on {{ inventory_hostname }}"
+              - "Error: {{ ansible_failed_result.msg | default('Unknown error') }}"
+              - "The post-patching health checks are bypassed; rollback may be triggered."
+
+        - name: Re-raise the error to mark this node as failed in the AAP workflow
+          ansible.builtin.fail:
+            msg: "dnf update failed. See above for details."
+
+    # =========================================================================
+    # 4. RECORD WHAT CHANGED
+    # =========================================================================
+    - name: Gather updated RPM package facts
+      ansible.builtin.package_facts:
+        manager: rpm
+      when: not (dry_run | bool)
+      tags: patch
+
+    - name: Save post-patch package list for diff
+      ansible.builtin.copy:
+        content: "{{ ansible_facts.packages | to_nice_json }}"
+        dest: "{{ patch_report_dir }}/packages_after.json"
+        mode: '0640'
+      when: not (dry_run | bool)
+      tags: patch
+
+    - name: Get DNF transaction history after patching
+      ansible.builtin.command: dnf history info last -q
+      register: dnf_history_after
+      changed_when: false
+      when: not (dry_run | bool)
+      tags: patch
+
+    - name: Save DNF transaction history
+      ansible.builtin.copy:
+        content: "{{ dnf_history_after.stdout }}"
+        dest: "{{ patch_report_dir }}/dnf_transaction_{{ ansible_date_time.epoch }}.txt"
+        mode: '0640'
+      when:
+        - not (dry_run | bool)
+        - dnf_history_after is defined
+      tags: patch
+
+    # =========================================================================
+    # 5. PATCH SUMMARY
+    # =========================================================================
+    - name: Patching summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - " Patch Results: {{ inventory_hostname }}"
+          - "=========================================="
+          - "Patch type:     {{ patch_type }}"
+          - "Dry run:        {{ dry_run }}"
+          - "Changed:        {{ dnf_result.changed }}"
+          - "Packages updated: {{ dnf_result.results | length if dnf_result.results is defined else 'N/A' }}"
+          - "Status:         {{ 'COMPLETE — proceed to post-patching' if dnf_result.changed else 'ALREADY UP TO DATE' }}"
+          - "=========================================="
+      tags: always
