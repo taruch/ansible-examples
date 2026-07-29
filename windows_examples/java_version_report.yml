@@ -37,10 +37,49 @@
       register: java_query
       failed_when: false
 
+    - name: Check JAVA_HOME and PATH for unregistered Java
+      ansible.windows.win_powershell:
+        script: |
+          $found = @()
+          $seen = @{}
+
+          # Check JAVA_HOME
+          $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
+          if ($javaHome -and (Test-Path "$javaHome\bin\java.exe")) {
+              $ver = & "$javaHome\bin\java.exe" -version 2>&1 | Select-String -Pattern '"(.+?)"'
+              $version = if ($ver) { $ver.Matches[0].Groups[1].Value } else { 'unknown' }
+              $key = "$javaHome\bin\java.exe"
+              $seen[$key] = $true
+              $found += [PSCustomObject]@{
+                  name    = "Java (JAVA_HOME)"
+                  version = $version
+                  vendor  = "JAVA_HOME: $javaHome"
+              }
+          }
+
+          # Check PATH for java.exe not already found via JAVA_HOME
+          $pathDirs = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';'
+          foreach ($dir in $pathDirs) {
+              $javaExe = Join-Path $dir 'java.exe'
+              if ((Test-Path $javaExe) -and -not $seen.ContainsKey($javaExe)) {
+                  $seen[$javaExe] = $true
+                  $ver = & $javaExe -version 2>&1 | Select-String -Pattern '"(.+?)"'
+                  $version = if ($ver) { $ver.Matches[0].Groups[1].Value } else { 'unknown' }
+                  $found += [PSCustomObject]@{
+                      name    = "Java (PATH)"
+                      version = $version
+                      vendor  = "PATH: $dir"
+                  }
+              }
+          }
+          $found
+      register: java_path_query
+      failed_when: false
+
     - name: Set Java facts per host
       ansible.builtin.set_fact:
-        java_installed: "{{ java_query.output | default([]) | length > 0 }}"
-        java_versions: "{{ java_query.output | default([]) }}"
+        java_installed: "{{ (java_query.output | default([]) | length + java_path_query.output | default([]) | length) > 0 }}"
+        java_versions: "{{ (java_query.output | default([])) + (java_path_query.output | default([])) }}"
 
     - name: Flag outdated Java installations
       ansible.builtin.set_fact:
@@ -57,38 +96,10 @@
     - name: Print per-host Java status
       ansible.builtin.debug:
         msg: |
-          === {{ inventory_hostname }} ===
           {% if not java_installed %}
-          Java: NOT INSTALLED
+          NOT INSTALLED        | N/A
           {% else %}
           {% for j in java_versions %}
-          - {{ j.name }} ({{ j.version }})  {{ '** OUTDATED **' if j.version is version(required_java_version, '<') else 'OK' }}
+          {{ "%-20s" | format(j.version | default("unknown")) }} | {{ "OUT OF COMPLIANCE" if j.version is version(required_java_version, "<") else "COMPLIANT" }}
           {% endfor %}
           {% endif %}
-
-    - name: Build summary stats
-      ansible.builtin.set_stats:
-        data:
-          java_not_installed: "{{ not java_installed }}"
-          java_outdated_count: "{{ outdated_java | default([]) | length }}"
-          java_current_count: "{{ current_java | default([]) | length }}"
-        per_host: true
-
-- name: Print consolidated report
-  hosts: localhost
-  gather_facts: false
-
-  tasks:
-    - name: Consolidated Java Compliance Report
-      ansible.builtin.debug:
-        msg: |
-          ============================================
-           JAVA VERSION COMPLIANCE REPORT
-           Required minimum version: {{ required_java_version | default('17.0.13') }}
-          ============================================
-
-          Check the per-host output above for details.
-          Hosts with '** OUTDATED **' entries need Java updates.
-
-          To export results, re-run with:
-            ANSIBLE_STDOUT_CALLBACK=yaml ansible-playbook java_version_report.yml
