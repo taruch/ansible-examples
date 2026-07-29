@@ -1,0 +1,53 @@
+---
+# Install Microsoft OpenJDK 17 on Windows by downloading the MSI from Microsoft
+#
+# Usage:
+#   ansible-playbook java_install.yml
+#   ansible-playbook java_install.yml -e "java_msi_url=https://aka.ms/download-jdk/microsoft-jdk-21.0.6-windows-x64.msi"
+#   ansible-playbook java_install.yml -e "_hosts=webservers"
+
+- name: Install Java from Microsoft download
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: false
+
+  vars:
+    java_msi_url: "https://aka.ms/download-jdk/microsoft-jdk-17.0.20-windows-x64.msi"
+    java_install_dir: 'C:\Temp'
+    java_msi: "{{ java_msi_url | urlsplit('path') | win_basename }}"
+
+  tasks:
+    - name: Ensure staging directory exists
+      ansible.windows.win_file:
+        path: "{{ java_install_dir }}"
+        state: directory
+
+    - name: Download Java MSI from Microsoft
+      ansible.windows.win_get_url:
+        url: "{{ java_msi_url }}"
+        dest: "{{ java_install_dir }}\\{{ java_msi }}"
+        follow_redirects: all
+
+    - name: Install Java MSI
+      ansible.windows.win_package:
+        path: "{{ java_install_dir }}\\{{ java_msi }}"
+        state: present
+      register: java_install
+
+    - name: Reboot if required
+      ansible.windows.win_reboot:
+      when: java_install.reboot_required | default(false)
+
+    - name: Verify Java installation
+      ansible.windows.win_command: java -version
+      register: java_ver
+      changed_when: false
+      failed_when: java_ver.rc != 0
+
+    - name: Display installed Java version
+      ansible.builtin.debug:
+        msg: "{{ java_ver.stderr_lines | default(java_ver.stdout_lines) }}"
+
+    - name: Clean up staged MSI
+      ansible.windows.win_file:
+        path: "{{ java_install_dir }}\\{{ java_msi }}"
+        state: absent

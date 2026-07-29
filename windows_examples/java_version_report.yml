@@ -1,0 +1,94 @@
+---
+# Report on Java installations across Windows hosts and flag outdated versions
+#
+# Usage:
+#   ansible-playbook java_version_report.yml
+#   ansible-playbook java_version_report.yml -e "required_java_version=17.0.13"
+#   ansible-playbook java_version_report.yml -e "_hosts=webservers"
+
+- name: Java Version Compliance Report
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: false
+
+  vars:
+    required_java_version: "17.0.13"
+
+  tasks:
+    - name: Query installed Java versions from the registry
+      ansible.windows.win_powershell:
+        script: |
+          $javaInstalls = @()
+          $uninstallPaths = @(
+              'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+              'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          )
+          foreach ($path in $uninstallPaths) {
+              Get-ItemProperty $path -ErrorAction SilentlyContinue |
+                  Where-Object { $_.DisplayName -match 'Java|JDK|JRE|OpenJDK|Temurin|Corretto|Zulu' } |
+                  ForEach-Object {
+                      $javaInstalls += [PSCustomObject]@{
+                          name    = $_.DisplayName
+                          version = $_.DisplayVersion
+                          vendor  = $_.Publisher
+                      }
+                  }
+          }
+          $javaInstalls
+      register: java_query
+      failed_when: false
+
+    - name: Set Java facts per host
+      ansible.builtin.set_fact:
+        java_installed: "{{ java_query.output | default([]) | length > 0 }}"
+        java_versions: "{{ java_query.output | default([]) }}"
+
+    - name: Flag outdated Java installations
+      ansible.builtin.set_fact:
+        outdated_java: >-
+          {{ java_versions | selectattr('version', 'defined')
+             | selectattr('version', 'version', required_java_version, '<')
+             | list }}
+        current_java: >-
+          {{ java_versions | selectattr('version', 'defined')
+             | selectattr('version', 'version', required_java_version, '>=')
+             | list }}
+      when: java_installed
+
+    - name: Print per-host Java status
+      ansible.builtin.debug:
+        msg: |
+          === {{ inventory_hostname }} ===
+          {% if not java_installed %}
+          Java: NOT INSTALLED
+          {% else %}
+          {% for j in java_versions %}
+          - {{ j.name }} ({{ j.version }})  {{ '** OUTDATED **' if j.version is version(required_java_version, '<') else 'OK' }}
+          {% endfor %}
+          {% endif %}
+
+    - name: Build summary stats
+      ansible.builtin.set_stats:
+        data:
+          java_not_installed: "{{ not java_installed }}"
+          java_outdated_count: "{{ outdated_java | default([]) | length }}"
+          java_current_count: "{{ current_java | default([]) | length }}"
+        per_host: true
+
+- name: Print consolidated report
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Consolidated Java Compliance Report
+      ansible.builtin.debug:
+        msg: |
+          ============================================
+           JAVA VERSION COMPLIANCE REPORT
+           Required minimum version: {{ required_java_version | default('17.0.13') }}
+          ============================================
+
+          Check the per-host output above for details.
+          Hosts with '** OUTDATED **' entries need Java updates.
+
+          To export results, re-run with:
+            ANSIBLE_STDOUT_CALLBACK=yaml ansible-playbook java_version_report.yml
