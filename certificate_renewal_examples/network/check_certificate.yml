@@ -1,0 +1,272 @@
+---
+- name: Check Certificates
+  hosts: 
+    - juniper
+    - cisco
+  gather_facts: false
+
+  vars:
+    min_days: "{{ (minimum_days | default(10)) | int }}"
+    ansible_connection: ansible.netcommon.network_cli
+  tasks:
+    - name: Check for CA Profile on Host
+      when: ansible_network_os == "junos"
+      tags:
+        - check_for_certificate
+        - never
+      block:
+        - name: Get certificates from host
+          ansible.netcommon.cli_command:
+            command: 'show security pki local-certificate certificate-id {{ inventory_hostname }}_local detail | match "Not after"'
+          register: certificate_enddate
+
+        - name: Fail when hostname not in certificates
+          ansible.builtin.fail:
+            msg: The system may not be provisioned with a certificate
+          when: certificate_enddate.stdout == ""
+
+
+    - name: Check for TrustPoint on Host
+      when: ansible_network_os == "ios"
+      tags:
+        - check_for_certificate
+        - never
+      block:
+        - name: Get certificates from host
+          ansible.netcommon.cli_command:
+            command: "sho crypto pki certificates {{ trustpoint }}"
+          register: certificates
+
+        - name: Fail when hostname not in certificates
+          ansible.builtin.fail:
+            msg: The system may not be provisioned with the certificate
+          when: inventory_hostname not in certificates.stdout
+
+
+    - name: Check Certificate Date on Host
+      when: ansible_network_os == "junos"
+      tags:
+        - check_host_certificate_date
+        - never
+      block:
+        - name: Get certificate date for Host Certificate in Profile
+          ansible.netcommon.cli_command:
+            command: 'show security pki local-certificate certificate-id {{ inventory_hostname }}_local detail | match "Not after"'
+          register: certificate_enddate
+
+        - name: Fail when hostname not in certificates
+          ansible.builtin.fail:
+            msg: The system may not be provisioned with a certificate
+          when: certificate_enddate.stdout == ""
+
+        - name: Set end_date Fact
+          ansible.builtin.set_fact:
+            end_date: "{{ (certificate_enddate.stdout | from_yaml)['Not after'] }}"
+
+        - name: Get System Time
+          vars:
+            ansible_connection: local
+          ansible.builtin.command:
+            cmd: 'date -u +"%H:%M:%S UTC %b %d %Y"'
+          changed_when: false
+          register: current_date
+          delegate_to: localhost
+
+        - name: Debug Days left on certificate
+          ansible.builtin.debug:
+            msg: "Days left on certificate: {{ (((end_date | to_datetime('%m-%d-%Y %H:%M UTC')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) }}"
+
+        - name: Debug min_days
+          ansible.builtin.debug:
+            msg: "Minumum days: {{ min_days | int }}"
+          when:
+            - min_days is defined
+
+        - name: Set Current Days
+          ansible.builtin.set_fact:
+            current_days: "{{ (((end_date | to_datetime('%m-%d-%Y %H:%M UTC')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) | int }}"
+
+        - name: Fail when certificate needs to be updated
+          ansible.builtin.fail:
+            msg: The certificate needs to be updated
+          when:
+            - (current_days | int) < (min_days | int)
+
+
+    - name: Check Certificate Date on Host
+      when: ansible_network_os == "ios"
+      tags:
+        - check_certificate_date
+        - never
+      block:
+        - name: Get certificates from host
+          ansible.netcommon.cli_command:
+            command: "sho crypto pki certificates {{ trustpoint }}"
+          register: certificates
+
+        - name: Fail when hostname not in certificates
+          ansible.builtin.fail:
+            msg: The system may not be provisioned with a certificate
+          when: inventory_hostname not in certificates.stdout
+
+        - name: Debug Fact
+          ansible.builtin.debug:
+            msg: "{{ certificates }}"
+            verbosity: 3
+
+        - name: "Parse CLI Output from show crypto pki certificates"
+          vars:
+            template: "/usr/local/lib/python3.9/site-packages/ntc_templates/templates/cisco_ios_show_crypto_pki_certificates.textfsm"
+          ansible.builtin.set_fact:
+            certs_parsed: "{{ certificates.stdout | ansible.netcommon.parse_cli_textfsm(template) }}"
+
+        - name: Get System Time
+          ansible.builtin.command:
+            cmd: 'date -u +"%H:%M:%S UTC %b %d %Y"'
+          changed_when: false
+          register: current_date
+          delegate_to: ansible-1
+
+        - name: Debug Days left on certificate
+          ansible.builtin.debug:
+            msg: "{{ (((item.END_DATE | to_datetime('%X UTC %b %d %Y')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) }}"
+          when:
+            - item.CERTIFICATE_TYPE == "Certificate"
+          loop: "{{ certs_parsed }}"
+
+        - name: Debug min_days
+          ansible.builtin.debug:
+            msg: "{{ min_days | int }}"
+          when:
+            - min_days is defined
+
+        - name: Set Current Days
+          ansible.builtin.set_fact:
+            current_days: "{{ (((item.END_DATE | to_datetime('%X UTC %b %d %Y')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) | int }}"
+          when:
+            - item.CERTIFICATE_TYPE == "Certificate"
+          loop: "{{ certs_parsed }}"
+
+        - name: Fail when certificate needs to be updated
+          ansible.builtin.fail:
+            msg: The certificate needs to be updated
+          when:
+            - item.CERTIFICATE_TYPE == "Certificate"
+            - current_days < min_days
+          loop: "{{ certs_parsed }}"
+
+
+    - name: Check Certificate Date on CA Certificate
+      when: ansible_network_os == "junos"
+      tags:
+        - check_ca_certificate_date
+        - never
+      block:
+        - name: Get certificates from host
+          ansible.netcommon.cli_command:
+            command: show security pki ca-certificate ca-profile CACERT brief | match "Not after"
+          register: certificate_enddate
+
+        - name: Fail when hostname not in certificates
+          ansible.builtin.fail:
+            msg: The system may not be provisioned with a certificate
+          when: certificate_enddate.stdout is undefined
+
+        - name: Set end_date Fact
+          ansible.builtin.set_fact:
+            end_date: "{{ (certificate_enddate.stdout | from_yaml)['Not after'] }}"
+
+        - name: Debug end_date
+          ansible.builtin.debug:
+            msg: "{{ end_date }}"
+
+        - name: Get System Time
+          ansible.builtin.command:
+            cmd: 'date -u +"%H:%M:%S UTC %b %d %Y"'
+          changed_when: false
+          register: current_date
+          delegate_to: ansible-1
+
+        - name: Debug Days left on certificate
+          ansible.builtin.debug:
+            msg: "{{ (((end_date | to_datetime('%m-%d-%Y %H:%M UTC')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) }}"
+
+        - name: Fail when certificate needs to be updated
+          ansible.builtin.fail:
+            msg: The certificate needs to be updated
+          when:
+            - ((( end_date | to_datetime('%m-%d-%Y %H:%M UTC')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) < min_days | int
+
+
+    - name: Set Client Name for Follow-on Templates
+      tags:
+        - always
+      ansible.builtin.set_stats:
+        data:
+          client: "{{ inventory_hostname }}"
+
+      # ec2-user@rtr4> show security pki local-certificate certificate-id rtr4_local detail
+      # LSYS: root-logical-system
+      # Certificate identifier: rtr4_local
+      #   Certificate version: 1
+
+      #   Serial number:
+      #     hexadecimal: 0x00000015
+      #     decimal: 21
+      #   Issuer:
+      #     Organization: Red Hat, Country: US, Common name: Todd Ruch
+      #   Subject:
+      #     Organization: RedHat, Organizational unit: NAPS, Country: US, State: MD, Locality: Pasadena, Common name: rtr4.ansible.local
+      #   Subject string:
+      #     C=US, ST=MD, L=Pasadena, O=RedHat, OU=NAPS, CN=rtr4.ansible.local
+      #   Cert-Chain: Todd Ruch
+      #   Validity:
+      #     Not before: 03-16-2024 21:23 UTC
+      #     Not after: 04- 6-2024 21:23 UTC
+      #   Public key algorithm: rsaEncryption(2048 bits)
+      #     30:82:01:0a:02:82:01:01:00:d4:84:9c:07:0e:fb:f1:6b:1b:11:4e
+      #     ef:75:db:4e:c1:ec:41:58:5e:f4:ad:2b:5c:24:26:49:29:25:f8:29
+      #     4e:eb:fd:fe:cc:f8:36:e9:f1:94:4c:15:d4:6e:8a:1a:8b:03:a4:b4
+      #     1f:4e:78:81:98:40:33:fc:6e:b9:65:b2:e9:28:55:34:af:24:9f:c1
+      #     d4:64:80:84:03:cb:03:bf:71:7e:0c:29:7a:66:a8:1c:23:5d:dd:b3
+      #     10:c4:49:1c:2f:cc:4c:05:ca:bd:d4:c7:f8:e3:11:a9:a3:28:24:ce
+      #     1e:17:ea:ba:b4:fd:ff:3e:1c:cf:7e:0b:85:0e:b2:6b:1c:bc:04:30
+      #     b9:1e:bf:b1:41:82:57:a8:00:80:da:82:b6:7e:b9:c6:99:8d:e6:c2
+      #     b5:70:6e:62:ed:51:6e:82:2b:5c:d9:9f:6f:00:f9:e3:5c:ef:e6:a7
+      #     d6:eb:8b:41:c8:30:ba:a7:c2:2e:a6:23:48:c7:dd:2b:c1:23:8d:42
+      #     41:9b:91:9f:70:3a:c0:76:d5:a4:13:8a:38:fb:63:ab:83:47:0e:f4
+      #     f9:b7:e3:1e:3a:83:4e:79:4d:39:76:2d:ff:8f:8b:39:33:71:60:a7
+      #     b4:80:19:67:7f:7e:40:91:db:75:82:af:f7:71:9e:8c:c3:31:12:96
+      #     26:55:10:96:f3:02:03:01:00:01
+      #   Signature algorithm: md5WithRSAEncryption
+      #   Fingerprint:
+      #     92:17:fd:4d:e9:d7:cc:d7:27:6e:2a:8b:7e:d4:d5:3c:0e:09:78:f7 (sha1)
+      #     de:47:5b:55:2e:c2:2d:16:ff:73:75:a8:dc:57:b6:fa (md5)
+      #     20:48:bc:38:03:ec:de:28:cb:c0:e8:b3:10:e9:e2:17:68:ee:e7:d2:c6:ed:e3:1c:88:db:e1:3d:d9:d2:78:7a (sha256)
+      #   Auto-re-enrollment:
+      #     Status: Disabled
+      #     Next trigger time: Timer not started
+      # ec2-user@rtr3> show security pki ca-certificate ca-profile CACERT
+      # LSYS: root-logical-system
+      #   CA profile: CACERT
+      # Certificate identifier: CACERT
+      #   Issued to: Todd Ruch, Issued by: C = US, O = Red Hat, CN = Todd Ruch
+      #   Validity:
+      #     Not before: 06-29-2023 15:16 UTC
+      #     Not after: 06-28-2024 15:16 UTC
+      #   Public key algorithm: rsaEncryption(2048 bits)
+      #   Keypair Location: Keypair generated locally
+      # ec2-user@rtr3> show security pki local-certificate certificate-id rtr3
+      # LSYS: root-logical-system
+      # Certificate identifier: rtr3
+      #   Issued to: rtr3.ansible.local, Issued by: C = US, O = Red Hat, CN = Todd Ruch
+      #   Validity:
+      #     Not before: 03-14-2024 21:14 UTC
+      #     Not after: 03-14-2025 21:14 UTC
+      #   Public key algorithm: rsaEncryption(2048 bits)
+      #   Keypair Location: Keypair generated locally
+      #
+      # ec2-user@rtr4> show security pki ca-certificate ca-profile CACERT brief | match "Not after"
+      #     Not after: 06-28-2024 15:16 UTC
+
+...

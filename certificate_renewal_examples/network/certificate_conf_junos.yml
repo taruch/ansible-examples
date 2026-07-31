@@ -1,0 +1,278 @@
+---
+- name: Configure Certificate on Juniper JunOS device
+  hosts: juniper
+  gather_facts: false
+  vars:
+    domain_name: ansible.local
+    ansible_connection: ansible.netcommon.network_cli
+
+  tasks:
+    - name: Backup Config
+      tags:
+        - backup
+        - never
+      junipernetworks.junos.junos_config:
+        backup: true
+        backup_format: json
+        dir_path: /tmp/
+      register: backup_result
+
+    - name: Debug backup result
+      when: backup_result
+      ansible.builtin.debug:
+        var: backup_result
+
+    - name: Configure hostname and domain name
+      tags:
+        - hostinfo
+        - never
+      vars:
+        ansible_connection: netconf
+      junipernetworks.junos.junos_system:
+        hostname: "{{ inventory_hostname }}"
+        domain_name: "{{ domain_name }}"
+        name_servers:
+          - 8.8.8.8
+        domain_search:
+          - "{{ domain_name }}"
+
+    - name: Create a CA Profile on Router
+      tags:
+        - ca_profile_create
+        - never
+      block:
+        - name: Create the CA Profile
+          vars:
+            ansible_connection: netconf
+          junipernetworks.junos.junos_config:
+            lines: "set security pki ca-profile CACERT ca-identity CAcert revocation-check disable"
+            update: merge
+            confirm_commit: true
+          register: create_caprofile_output
+
+        - name: Debug output
+          ansible.builtin.debug:
+            var: create_caprofile_output
+            verbosity: 3
+
+
+    - name: Delete a CA Profile on Router
+      tags:
+        - ca_profile_delete
+        - never
+      block:
+        - name: Delete the CA Profile
+          vars:
+            ansible_connection: netconf
+          junipernetworks.junos.junos_config:
+            lines: "delete security pki ca-profile CACERT "
+            update: merge
+            confirm_commit: true
+          register: create_caprofile_output
+
+        - name: Debug output
+          ansible.builtin.debug:
+            var: create_caprofile_output
+            verbosity: 3
+
+
+    - name: Clear a certificate pair
+      tags:
+        - rsakeypair_clear
+        - never
+      block:
+        - name: Create the Host Keypair (RSA)
+          vars:
+            ansible_connection: netconf
+          junipernetworks.junos.junos_command:
+            commands: "clear security pki key-pair certificate-id {{ inventory_hostname }}_local"
+          register: rsa_key_output
+
+
+    - name: Generate a certificate pair
+      tags:
+        - rsakeypair_generation
+        - never
+      block:
+        - name: Create the Host Keypair (RSA)
+          vars:
+            ansible_connection: netconf
+          junipernetworks.junos.junos_command:
+            commands: "request security pki generate-key-pair certificate-id {{ inventory_hostname }}_local size 2048 type rsa"
+          register: rsa_key_output
+
+        - name: Fail the play if the previous command did not succeed
+          ansible.builtin.fail:
+            msg: "{{ rsa_key_output.stdout }}"
+          when:
+            - rsa_key_output.failed == 'True'
+
+
+    - name: Generate CSR on Switch
+      tags:
+        - csr_create
+        - never
+      block:
+        - name: Clear current CSR
+          junipernetworks.junos.junos_command:
+            commands: "clear security pki certificate-request certificate-id {{ inventory_hostname }}_local"
+
+        - name: Run command expecting user confirmation
+          ansible.netcommon.cli_command:
+            command: "request security pki generate-certificate-request certificate-id {{ inventory_hostname }}_local domain-name {{ inventory_hostname }}.ansible.local subject CN={{ inventory_hostname }}.ansible.local,OU=NAPS,O=RedHat,L=Pasadena,ST=MD,C=US filename /var/tmp/{{ inventory_hostname }}.csr"
+            # command: >
+            #   "request security pki generate-certificate-request
+            #   certificate-id {{ inventory_hostname }}_local domain-name {{ inventory_hostname }}.ansible.local
+            #   subject CN={{ inventory_hostname }}.ansible.local,OU=NAPS,O=Red Hat,L=Pasadena,ST=MD,C=US
+            #   filename /var/tmp/{{ inventory_hostname }}.csr"
+            prompt: "Generated"
+            answer: ""
+          register: csr_output
+
+        - name: Grab the output of the Certificate Signing Request
+          ansible.netcommon.cli_command:
+            command: file show /var/tmp/{{ inventory_hostname }}.csr
+          register: csr
+
+        - name: Debug output
+          ansible.builtin.debug:
+            msg: "{{ csr.stdout_lines }}"
+            verbosity: 3
+
+        - name: Write CSR to file
+          vars:
+            ansible_user: "{{ CA_USERNAME }}"
+            ansible_password: "{{ CA_PASSWORD }}"
+            ansible_connection: ssh
+          ansible.builtin.copy:
+            content: "{{ csr.stdout }}"
+            dest: "/tmp/{{ inventory_hostname }}_{{ trustpoint }}.csr"
+            owner: ca-admin
+            group: ca-admin
+            mode: '0644'
+            backup: true
+          delegate_to: "{{ CA_HOST }}"
+
+    - name: Add the CA Cert to the CA Profile
+      tags:
+        - import_ca_certificate
+        - never
+      block:
+        - name: Slurp cacert from CA Host
+          vars:
+            ansible_connection: ssh
+            ansible_user: "{{ CA_USERNAME }}"
+            ansible_password: "{{ CA_PASSWORD }}"
+          ansible.builtin.slurp:
+            src: "/opt/X509CA/demoCA/cacert.pem"
+          register: slurpedfile
+          delegate_to: ca-host
+
+        - name: Copy the CA cert to EE
+          vars:
+            ansible_connection: local
+          ansible.builtin.copy:
+            content: "{{ (slurpedfile['content'] | b64decode) }}"
+            dest: "/tmp/cacert.pem"
+          delegate_to: localhost
+
+        - name: Copy the cacert to juniper
+          vars:
+            ansible_network_cli_ssh_type: paramiko
+            ansible_connection: network_cli
+            ansible_network_os: junipernetworks.junos.junos
+          ansible.netcommon.net_put:
+            src: /tmp/cacert.pem
+            dest: /var/tmp/cacert.pem
+
+        - name: Clear CA Certificate
+          ansible.netcommon.cli_command:
+            command: "clear security pki ca-certificate ca-profile CACERT"
+          register: copy_output
+
+        - name: Add the CA Certificate to the CA Profile
+          ansible.netcommon.cli_command:
+            command: "request security pki ca-certificate load ca-profile CACERT filename /var/tmp/cacert.pem"
+            prompt: "certificate"
+            answer: "yes"
+          register: copy_output
+
+
+    - name: Add the host Cert to the CA Profile
+      tags:
+        - import_host_certificate
+        - never
+      block:
+        - name: Slurp host certificate from CA Host
+          vars:
+            ansible_connection: ssh
+            ansible_user: "{{ CA_USERNAME }}"
+            ansible_password: "{{ CA_PASSWORD }}"
+          ansible.builtin.slurp:
+            src: "/tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer"
+          register: slurpedfile
+          delegate_to: ca-host
+
+        - name: Copy the CA cert to EE
+          vars:
+            ansible_connection: local
+          ansible.builtin.copy:
+            content: "{{ (slurpedfile['content'] | b64decode) }}"
+            dest: "/tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer"
+          delegate_to: localhost
+
+        - name: Copy the cacert to juniper
+          vars:
+            ansible_network_cli_ssh_type: paramiko
+            ansible_connection: network_cli
+            ansible_network_os: junipernetworks.junos.junos
+          ansible.netcommon.net_put:
+            src: /tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer
+            dest: /var/tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer
+
+        - name: Clear the Current Host Certificate in the CA Profile
+          ansible.netcommon.cli_command:
+            command: "clear security pki local-certificate certificate-id {{ inventory_hostname }}_local"
+          register: copy_output
+
+        - name: Add the Host Certificate to the CA Profile
+          ansible.netcommon.cli_command:
+            command: "request security pki local-certificate load certificate-id {{ inventory_hostname }}_local filename /var/tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer"
+          register: copy_output
+
+    - name: Test Junos Certificate
+      tags:
+        - test_certificates
+        - never
+      block:
+        - name: Show Security for CA Profile
+          junipernetworks.junos.junos_command:
+            commands:
+              - "show security pki ca-certificate ca-profile CACERT"
+              - show security pki local-certificate detail
+          register: test_result
+
+        - name: Debug the test test_result
+          ansible.builtin.debug:
+            msg: "{{ test_result.stdout_lines }}"
+
+    - name: Get running configuration and state data
+      tags:
+        - getconf
+        - never
+      vars:
+        ansible_connection: netconf
+      block:
+        - name: Get stuff
+          ansible.netcommon.netconf_get:
+            display: xml
+            filter: <configuration><security><pki><ca-profile><name>CACERT</name></ca-profile></pki></security></configuration>
+          register: conf
+
+        - name: Debug output
+          ansible.builtin.debug:
+            msg: "{{ conf.stdout_lines }}"
+            verbosity: 3
+
+
+...

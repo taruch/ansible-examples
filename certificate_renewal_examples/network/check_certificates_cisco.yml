@@ -1,0 +1,86 @@
+---
+- name: Check Certificates on IOS XE device
+  hosts: cisco
+  gather_facts: false
+
+  vars:
+    min_days: "{{ (minimum_days | default(10)) | int }}"
+  tasks:
+
+    - name: Check for TrustPoint on Host
+      tags:
+        - check_for_certificate
+        - never
+      block:
+        - name: Get certificates from host
+          ansible.netcommon.cli_command:
+            command: "sho crypto pki certificates {{ trustpoint }}"
+          register: certificates
+
+        - name: Fail when hostname not in certificates
+          ansible.builtin.fail:
+            msg: The system may not be provisioned with the certificate
+          when: inventory_hostname not in certificates.stdout
+
+    - name: Check Certificate Date on Host
+      tags:
+        - check_certificate_date
+        - never
+      block:
+        - name: Get certificates from host
+          ansible.netcommon.cli_command:
+            command: "sho crypto pki certificates {{ trustpoint }}"
+          register: certificates
+
+        - name: Fail when hostname not in certificates
+          ansible.builtin.fail:
+            msg: The system may not be provisioned with a certificate
+          when: inventory_hostname not in certificates.stdout
+
+        - name: Debug Fact
+          ansible.builtin.debug:
+            msg: "{{ certificates }}"
+            verbosity: 3
+
+        - name: "Parse CLI Output from show crypto pki certificates"
+          vars:
+            template: "/usr/local/lib/python3.9/site-packages/ntc_templates/templates/cisco_ios_show_crypto_pki_certificates.textfsm"
+          ansible.builtin.set_fact:
+            certs_parsed: "{{ certificates.stdout | ansible.netcommon.parse_cli_textfsm(template) }}"
+
+        - name: Get System Time
+          ansible.builtin.command:
+            cmd: 'date -u +"%H:%M:%S UTC %b %d %Y"'
+          changed_when: false
+          register: current_date
+          delegate_to: ansible-1
+
+        - name: Debug Days left on certificate
+          ansible.builtin.debug:
+            msg: "{{ (((item.END_DATE | to_datetime('%X UTC %b %d %Y')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) }}"
+          when:
+            - item.CERTIFICATE_TYPE == "Certificate"
+          loop: "{{ certs_parsed }}"
+
+        - name: Debug min_days
+          ansible.builtin.debug:
+            msg: "{{ min_days | int }}"
+          when:
+            - min_days is defined
+
+        - name: Set Current Days
+          ansible.builtin.set_fact:
+            current_days: "{{ (((item.END_DATE | to_datetime('%X UTC %b %d %Y')) - (current_date.stdout | to_datetime('%X UTC %b %d %Y'))).days) | int }}"
+          when:
+            - item.CERTIFICATE_TYPE == "Certificate"
+          loop: "{{ certs_parsed }}"
+
+        - name: Fail when certificate needs to be updated
+          ansible.builtin.fail:
+            msg: The certificate needs to be updated
+          when:
+            - item.CERTIFICATE_TYPE == "Certificate"
+            - current_days < min_days
+          loop: "{{ certs_parsed }}"
+
+...
