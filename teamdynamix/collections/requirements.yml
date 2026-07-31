@@ -1,3 +1,0 @@
----
-# No external collections required — all playbooks use ansible.builtin modules only.
-collections: []

@@ -1,0 +1,216 @@
+---
+# Configuration-as-code for deploying the Linux Patching workflow
+# to Ansible Automation Platform 2.6.
+#
+# Apply with ../controller_setup/configure_aap.yml (or any wrapper that
+# `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
+#
+# Required pre-existing artifacts in AAP:
+#   - A Machine credential for the target Linux hosts. Set its name below
+#     in `machine_credential` so the job templates can reference it.
+#   - An inventory containing the hosts to patch. Set its name below
+#     in `target_inventory`.
+#
+# Workflow topology:
+#   Pre-Patching Checks ──success──▶ Apply Patches ──success──▶ Post-Patching Validation
+#                                     Apply Patches ──failure──▶ Rollback
+#                                                     Post-Patching Validation ──failure──▶ Rollback
+
+# ---------------------------------------------------------------------------
+# Tunables — change these without touching the rest of this file.
+# ---------------------------------------------------------------------------
+machine_credential: "Demo Credential"          # MUST already exist in AAP
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+project_scm_branch: "master"
+target_organization: "Default"
+target_inventory: "Demo Inventory"
+
+# ---------------------------------------------------------------------------
+# Project — git-synced from this repository.
+# ---------------------------------------------------------------------------
+controller_projects:
+  - name: "Patching"
+    description: "Patching workflow — pre-checks, patching, post-validation, rollback."
+    organization: "{{ target_organization }}"
+    scm_type: "git"
+    scm_url: "{{ project_scm_url }}"
+    scm_branch: "{{ project_scm_branch }}"
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: true
+    allow_override: false
+
+# ---------------------------------------------------------------------------
+# Job templates.
+# ---------------------------------------------------------------------------
+controller_templates:
+  - name: "PATCHING / Pre-Patching Checks"
+    description: "System readiness checks, baseline recording, optional VM snapshots, monitoring maintenance mode, service suspension, and user notification."
+    organization: "{{ target_organization }}"
+    project: "Patching"
+    inventory: "{{ target_inventory }}"
+    playbook: "patching_examples/pre_patching_playbook.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+
+  - name: "PATCHING / Apply Patches"
+    description: "List available updates, apply patches via dnf, record changes. Includes rescue block for workflow failure routing."
+    organization: "{{ target_organization }}"
+    project: "Patching"
+    inventory: "{{ target_inventory }}"
+    playbook: "patching_examples/patching_playbook.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+
+  - name: "PATCHING / Post-Patching Validation"
+    description: "Reboot handling, patch verification, service restoration, health checks (HTTP + TCP), monitoring exit, cleanup, and final report."
+    organization: "{{ target_organization }}"
+    project: "Patching"
+    inventory: "{{ target_inventory }}"
+    playbook: "patching_examples/post_patching_playbook.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+
+  - name: "PATCHING / Rollback"
+    description: "VM snapshot revert, service restart, monitoring cleanup, and rollback report. Best-effort with ignore_errors."
+    organization: "{{ target_organization }}"
+    project: "Patching"
+    inventory: "{{ target_inventory }}"
+    playbook: "patching_examples/rollback_playbook.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+
+# ---------------------------------------------------------------------------
+# Workflow — chains the four patching stages with failure routing to rollback.
+# ---------------------------------------------------------------------------
+controller_workflows:
+  - name: "PATCHING / Patching Workflow"
+    description: "End-to-end patching: pre-checks, patch application, post-validation, with automatic rollback on failure."
+    organization: "{{ target_organization }}"
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: target_hosts
+          question_name: !unsafe "Target hosts or group pattern?"
+          question_description: !unsafe "Ansible host pattern — a group name, comma-separated hosts, or 'all'"
+          type: text
+          required: true
+          default: "all"
+          min: 0
+          max: 1024
+          new_question: true
+        - variable: patch_type
+          question_name: !unsafe "Patch type?"
+          question_description: !unsafe "Which updates to apply"
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nsecurity\nbugfix"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: dry_run
+          question_name: !unsafe "Dry run (check mode)?"
+          question_description: !unsafe "Set to true to preview changes without applying patches"
+          type: multiplechoice
+          required: false
+          default: "false"
+          choices: "true\nfalse"
+          min: 0
+          max: 8
+          new_question: false
+        - variable: create_vm_snapshot
+          question_name: !unsafe "Create VM snapshot before patching?"
+          question_description: !unsafe "Requires VMware or compatible hypervisor integration"
+          type: multiplechoice
+          required: false
+          default: "false"
+          choices: "true\nfalse"
+          min: 0
+          max: 8
+          new_question: false
+        - variable: exclude_packages
+          question_name: !unsafe "Packages to exclude from patching?"
+          question_description: !unsafe "Comma-separated list of package names to skip (e.g. kernel,docker-ce)"
+          type: text
+          required: false
+          default: ""
+          min: 0
+          max: 1024
+          new_question: false
+        - variable: reboot_timeout
+          question_name: !unsafe "Reboot timeout (seconds)?"
+          question_description: !unsafe "How long to wait for hosts to come back after reboot"
+          type: integer
+          required: false
+          default: 600
+          min: 60
+          max: 3600
+          new_question: false
+        - variable: services_to_stop
+          question_name: !unsafe "Services to stop before patching?"
+          question_description: !unsafe "Comma-separated list of systemd service names (e.g. httpd,tomcat)"
+          type: text
+          required: false
+          default: ""
+          min: 0
+          max: 1024
+          new_question: false
+        - variable: health_check_urls
+          question_name: !unsafe "Health-check URLs (comma-separated)?"
+          question_description: !unsafe "URLs to verify after patching (e.g. http://localhost:8080/health)"
+          type: text
+          required: false
+          default: ""
+          min: 0
+          max: 2048
+          new_question: false
+    simplified_workflow_nodes:
+      - identifier: "Pre-Patching Checks"
+        unified_job_template: "PATCHING / Pre-Patching Checks"
+        success_nodes:
+          - "Apply Patches"
+      - identifier: "Apply Patches"
+        unified_job_template: "PATCHING / Apply Patches"
+        success_nodes:
+          - "Post-Patching Validation"
+        failure_nodes:
+          - "Rollback"
+      - identifier: "Post-Patching Validation"
+        unified_job_template: "PATCHING / Post-Patching Validation"
+        failure_nodes:
+          - "Rollback"
+      - identifier: "Rollback"
+        unified_job_template: "PATCHING / Rollback"
+
+...

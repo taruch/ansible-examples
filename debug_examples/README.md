@@ -104,3 +104,52 @@ ansible-playbook show_mounts.yml -i "<host>," -e "_hosts=<host>"
 - Uses the `human_readable` filter to convert bytes to GB/MB for the Size/Used/Avail columns
 
 Note: facts only populate `mounts` on hosts where the setup module can collect them (Linux/Unix). For Windows, use `ansible_facts['disks']` or run `win_disk_facts`.
+
+---
+
+## network_interfaces_csv.yml
+
+Uses `arista.eos.eos_facts` to gather `ansible_net_interfaces` from Arista EOS devices and produces a CSV report with one row per interface.
+
+### Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `_hosts` | `all` | Target host or group (network devices) |
+| `report_path` | `/tmp/network_interfaces.csv` | Output CSV file path |
+
+### Usage
+
+```bash
+# All devices in inventory
+ansible-playbook network_interfaces_csv.yml -i inventory
+
+# Specific group
+ansible-playbook network_interfaces_csv.yml -i inventory -e "_hosts=eos_switches"
+
+# Custom output path
+ansible-playbook network_interfaces_csv.yml -i inventory -e "report_path=/opt/reports/interfaces.csv"
+```
+
+### CSV Columns
+
+| Column | Source | Notes |
+|---|---|---|
+| `hostname` | inventory hostname | sorted alphabetically |
+| `interface` | `ansible_net_interfaces` dict key | sorted per host |
+| `ip_address` | `ipv4[].address` | multiple IPs joined with `;` |
+| `subnet` | `ipv4[].subnet` | multiple subnets joined with `;` |
+| `mac_address` | `macaddress` | |
+| `mtu` | `mtu` | |
+| `speed_mbps` | `bandwidth` | converted from bps to Mbps |
+| `duplex` | `duplex` | |
+| `status` | `operstatus` | e.g. `up`, `down` |
+| `description` | `description` | interface description if configured |
+
+### How it works
+
+1. **Play 1** runs `arista.eos.eos_facts` with `gather_subset: interfaces` against the target devices
+2. **Play 2** runs on `localhost` and renders a Jinja2 CSV template using `hostvars[]` from Play 1
+3. The report is written to disk and printed to stdout
+
+Hosts without `ansible_net_interfaces` (e.g. Linux hosts accidentally included) are silently skipped.

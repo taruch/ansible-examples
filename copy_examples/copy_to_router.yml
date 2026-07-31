@@ -5,7 +5,7 @@
   vars:
    new_version: "{{ image_staging }}" 
    #17.15.01a
-   new_image_ios: "c8000v-universalk9.{{ new_version }}.SPA.bin" 
+   new_image_ios: "./files/c8000v-universalk9.{{ new_version }}.SPA.bin" 
    ansible_network_cli_ssh_type: paramiko
    sha_hash: 1627b090a42872b9b92d5fdd31f69356bf0f766cd24bcd2ccdc3c1b1bf642d965057288e49ecba96d8d683ecfc116c9a2f7381c739d60c23380ada498cea9f76
    

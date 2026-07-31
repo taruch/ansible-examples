@@ -1,15 +1,34 @@
 ---
-- name: Install Apache from an MSI 
-  hosts: all 
- 
+# Install any application from an MSI download
+#
+# Usage:
+#   ansible-playbook install-msi.yml -e "msi_url=https://example.com/app.msi"
+#   ansible-playbook install-msi.yml -e "msi_url=https://example.com/app.msi msi_dest=D:\\Installers"
+#   ansible-playbook install-msi.yml -e "_hosts=webservers"
+
+- name: Install application from an MSI
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: false
+
+  vars:
+    msi_url: "http://mirror.cc.columbia.edu/pub/software/apache//httpd/binaries/win32/httpd-2.2.25-win32-x86-no_ssl.msi"
+    msi_dest: 'C:\Temp'
+    msi_filename: "{{ msi_url | urlsplit('path') | win_basename }}"
+
   tasks:
-    - name: Download the Apache installer
-      win_get_url:
-        url: 'http://mirror.cc.columbia.edu/pub/software/apache//httpd/binaries/win32/httpd-2.2.25-win32-x86-no_ssl.msi'
-        dest: 'C:\Users\Administrator\Downloads\httpd-2.2.25-win32-x86-no_ssl.msi'
+    - name: Ensure staging directory exists
+      ansible.windows.win_file:
+        path: "{{ msi_dest }}"
+        state: directory
+
+    - name: Download the MSI installer
+      ansible.windows.win_get_url:
+        url: "{{ msi_url }}"
+        dest: "{{ msi_dest }}\\{{ msi_filename }}"
+        follow_redirects: all
 
     - name: Install MSI
-      win_package: 
-        path: 'C:\Users\Administrator\Downloads\httpd-2.2.25-win32-x86-no_ssl.msi'
+      ansible.windows.win_package:
+        path: "{{ msi_dest }}\\{{ msi_filename }}"
         state: present
-        
+
