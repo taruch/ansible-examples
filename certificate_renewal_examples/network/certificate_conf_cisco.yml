@@ -1,0 +1,206 @@
+---
+- name: Configure Certificate on IOS XE device
+  hosts: cisco
+  gather_facts: false
+
+  vars:
+    domain_name: ansible.local
+
+  tasks:
+    - name: Backup Config
+      tags:
+        - backup
+        - never
+      cisco.ios.ios_config:
+        backup: true
+
+    - name: Configure hostname and domain name
+      tags:
+        - hostinfo
+        - always
+      cisco.ios.ios_system:
+        hostname: "{{ inventory_hostname }}"
+        domain_name: "{{ domain_name }}"
+        name_servers:
+          - 8.8.8.8
+        domain_search:
+          - "{{ domain_name }}"
+
+    - name: Configure host key
+      tags:
+        - key_generation
+        - never
+      block:
+        - name: Generate the RSA key
+          cisco.ios.ios_config:
+            lines: crypto key generate rsa modulus 4096 label my-4096rsa-key
+
+        - name: Get the RSA key
+          cisco.ios.ios_command:
+            commands: show crypto key mypubkey rsa my-4096rsa-key
+          register: my4096rsakey
+
+        - name: Print the RSA key
+          ansible.builtin.debug:
+            msg: "{{ my4096rsakey.stdout_lines }}"
+            verbosity: 2
+
+    - name: Delete the Trustpoint on Switch
+      tags:
+        - trustpoint_delete
+        - never
+      ansible.netcommon.cli_command:
+        command: "{{ item }}"
+        prompt: "this?"
+        answer: "yes"
+      loop:
+        - conf t
+        - no crypto pki trustpoint {{ trustpoint }}
+
+    - name: Create TrustPoint on Switch
+      tags:
+        - trustpoint_create
+        - never
+      block:
+        - name: Create the Trustpoint
+          cisco.ios.ios_config:
+            lines:
+              - enrollment terminal pem
+              - "subject-name C=US,ST=MD,L=Pasadena,O=Red Hat,OU=NAPS,CN={{ inventory_hostname }}.{{ domain_name }}"
+              - "subject-alt-name {{ inventory_hostname }}_{{ trustpoint }}.{{ domain_name }}"
+              - serial-number none
+              - ip-address none
+              - revocation-check none
+              - rsakeypair my-4096rsa-key
+            parents: "crypto pki trustpoint {{ trustpoint }}"
+          register: create_trustpoint_output
+
+        - name: Debug output
+          ansible.builtin.debug:
+            var: create_trustpoint_output
+            verbosity: 3
+
+    - name: Generate CSR on Switch
+      tags:
+        - csr_create
+        - never
+      block:
+        - name: Generate the CSR
+          ansible.netcommon.cli_command:
+            command: "crypto pki enroll {{ trustpoint }}"
+            prompt:
+              - Display Certificate Request to terminal? [yes/no]:
+              - Redisplay enrollment request? [yes/no]:
+            answer:
+              - 'yes'
+              - 'no'
+          register: csr_output
+
+        - name: Debug csr_output
+          ansible.builtin.debug:
+            var: csr_output
+            verbosity: 3
+
+        - name: Debug the Enrolled CSR
+          ansible.builtin.set_fact:
+            csr: "{{ (csr_output.stdout | split('\n\n'))[2] }}"
+
+        - name: Debug output
+          ansible.builtin.debug:
+            var: csr
+            verbosity: 3
+
+        - name: Write CSR to file
+          vars:
+            ansible_user: "{{ CA_USERNAME }}"
+            ansible_password: "{{ CA_PASSWORD }}"
+          ansible.builtin.copy:
+            content: "{{ csr }}"
+            dest: "/tmp/{{ inventory_hostname }}_{{ trustpoint }}.csr"
+            owner: ca-admin
+            group: ca-server-admins
+            mode: '0644'
+            backup: true
+          delegate_to: ca-host
+
+    - name: Add the CA Cert to the Trustpoint
+      tags:
+        - ca_cert_trustpoint
+        - never
+      block:
+        - name: Slurp hosts file
+          vars:
+            ansible_user: "{{ CA_USERNAME }}"
+            ansible_password: "{{ CA_PASSWORD }}"
+          ansible.builtin.slurp:
+            src: "/opt/X509CA/demoCA/cacert.pem"
+          register: slurpfile
+          delegate_to: ca-host
+
+        # - name: Copy the host cert to EE
+        #   ansible.builtin.set_fact:
+        #     host_cert: "{{ (slurpfile['content'] | b64decode).splitlines() }}"
+
+        - name: Create the template variable
+          vars:
+            ca_cert: "{{ (slurpfile['content'] | b64decode).splitlines() }}"
+            # ca_cert: "{{ lookup('file', './certificates/cacert.cer').splitlines() }}"
+          ansible.builtin.set_fact:
+            cacert_var: "{{ lookup('ansible.builtin.template', './templates/rtr_authenticate_CA.j2') | split('\n') }}"
+
+        - name: Authenticate the trustpoint with the CA Cert
+          ansible.netcommon.cli_command:
+            command: "{{ item }}"
+            sendonly: true
+          loop: "{{ cacert_var }}"
+
+
+    - name: Add the host Cert to the Trustpoint
+      vars:
+        certificate_on_host: false
+      tags:
+        - import_host_certificate
+        - never
+      block:
+        - name: Slurp hosts file
+          vars:
+            ansible_user: "{{ CA_USERNAME }}"
+            ansible_password: "{{ CA_PASSWORD }}"
+          ansible.builtin.slurp:
+            src: "/tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer"
+          register: slurpfile
+          delegate_to: ca-host
+
+        - name: Copy the host cert to EE
+          ansible.builtin.set_fact:
+            host_cert: "{{ (slurpfile['content'] | b64decode).splitlines() }}"
+
+        - name: Gather_facts and debug
+          ansible.netcommon.cli_command:
+            command: sho crypto pki certificates
+          register: certificates
+
+        - name: Check for Certificate and Set certificate_on_host
+          ansible.builtin.set_fact:
+            certificate_on_host: true
+          when: inventory_hostname in certificates.stdout
+
+        - name: Create the template variable
+          ansible.builtin.set_fact:
+            host_cert_var: "{{ lookup('ansible.builtin.template', './templates/rtr_import_certificate.j2') | split('\n') }}"
+
+        - name: Import the host Certificate
+          ansible.netcommon.cli_command:
+            command: "{{ item }}"
+            sendonly: true
+          loop: "{{ host_cert_var }}"
+
+    - name: Set Client Name for Follow-on Templates
+      tags:
+        - always
+      ansible.builtin.set_stats:
+        data:
+          client: "{{ inventory_hostname }}"
+
+
+...

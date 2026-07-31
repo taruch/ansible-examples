@@ -1,0 +1,7 @@
+conf t
+crypto pki authenticate {{ trustpoint }}
+{% for line in ca_cert %}
+{{ line }}
+{% endfor %}
+quit
+yes

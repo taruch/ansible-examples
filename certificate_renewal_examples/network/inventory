@@ -1,0 +1,6 @@
+[nexus]
+nxosv1 ansible_host=198.18.1.51 ansible_user=admin ansible_password=admin
+nxosv2 ansible_host=198.18.1.52 ansible_user=admin ansible_password=admin
+
+[remote_host]
+laptop ansible_host=192.168.100.1 ansible_connection=ssh #ansible_user=admin #ansible_password=admin

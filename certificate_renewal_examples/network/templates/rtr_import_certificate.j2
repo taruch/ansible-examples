@@ -1,0 +1,9 @@
+conf t
+crypto pki import {{ trustpoint }} certificate
+{% if certificate_on_host == true %}
+yes
+{% endif %}
+{% for line in host_cert %}
+{{ line }}
+{% endfor %}
+quit

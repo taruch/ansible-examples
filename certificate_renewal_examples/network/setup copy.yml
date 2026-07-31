@@ -1,0 +1,873 @@
+---
+controller_components:
+  - projects
+  - credential_types
+  - credentials
+  - execution_environments
+  - hosts
+  - inventory_sources
+  - job_templates
+  - workflow_job_templates
+
+
+controller_credential_types:
+  - name: ServiceNow ITSM
+    kind: cloud
+    inputs:
+      fields:
+        - id: host
+          label: Host
+          type: string
+        - id: username
+          label: Username
+          type: string
+        - id: password
+          label: Password
+          secret: true
+          type: string
+      required:
+        - instance
+        - username
+        - password
+        - passphrase
+    injectors:
+      extra_vars:
+        SN_HOST: "{  { host }}"
+        SN_PASSWORD: "{  { password }}"
+        SN_USERNAME: "{  { username }}"
+    
+  - name: CA Credential Type
+    kind: cloud
+    description: 'CA Host Credential Type'
+    injectors:
+      extra_vars:
+        CA_HOST: "{  { host }}"
+        CA_PASSWORD: "{  { password }}"
+        CA_USERNAME: "{  { username }}"
+        CA_PASSPHRASE: "{  { passphrase }}"
+    inputs:
+      fields:
+        - id: host
+          label: Host
+          type: string
+        - id: username
+          label: Username
+          type: string
+        - id: password
+          label: Password
+          secret: true
+          type: string
+        - id: passphrase
+          label: CA Secret
+          secret: true
+          type: string
+      required:
+        - host
+        - username
+        - password
+        - passphrase
+
+
+controller_credentials:
+  - name: ServiceNow ITSM
+    credential_type: ServiceNow ITSM
+    description: ''
+    inputs:
+      host: https://ven05430.service-now.com/
+      password: ''
+      username: CHANGE_ME
+    organization: Red Hat network organization
+
+  - name: CA Host Credential
+    credential_type: CA Credential Type
+    inputs:
+      username: ca-admin
+      password: CHANGE_ME
+      passphrase: CHANGE_ME
+    organization: "Red Hat network organization"
+
+
+controller_execution_environments:
+  - name: ruch-network-ee
+    description: 'Network Examples EE'
+    image: quay.io/truch/network-examples:latest
+    pull: missing
+
+
+controller_hosts:
+  - name: ca-host
+    description: "Certificate Authority"
+    inventory: "Workshop Inventory"
+    state: present
+    enabled: true
+    variables:
+        ansible_host: CHANGE_ME
+
+
+controller_projects:
+  - name: ServiceNow Examples
+    organization: "Red Hat network organization"
+    scm_type: git
+    wait: true
+    scm_url: https://github.com/taruch/symmetrical-octo-umbrella.git
+
+  - name: Ansible Network Examples
+    organization: "Red Hat network organization"
+    scm_url: "https://github.com/taruch/ansible-network-examples.git"
+    scm_type: git
+    allow_override: true
+    state: present
+    scm_update_on_launch: yes
+
+controller_templates:
+  - name: CA Server Setup
+    execution_environment: 'ruch-network-ee'
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: ''
+    job_type: run
+    limit: 'ca-host'
+    playbook: certificate_management/ca_server_setup.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - CA Host Credential
+    - Demo Credential
+
+
+  - name: Cisco / CA / Generate Certificate
+    execution_environment: 'ruch-network-ee'
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: ''
+    job_type: run
+    limit: 'cisco'
+    playbook: certificate_management/generate_certificate.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - CA Host Credential 
+
+  - name: Juniper / CA / Generate Certificate
+    execution_environment: 'ruch-network-ee'
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: ''
+    job_type: run
+    limit: 'juniper'
+    playbook: certificate_management/generate_certificate.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - CA Host Credential 
+ 
+  - name: Cisco / Check Certificate Date
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: check_certificate_date
+    job_type: run
+    limit: ''
+    playbook: certificate_management/check_certificates_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    -  Workshop Credential
+
+  - name: Juniper / Check Certificate Date
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: check_host_certificate_date
+    job_type: run
+    limit: ''
+    playbook: certificate_management/check_certificate_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    -  Workshop Credential
+
+  - name: Cisco / Check for Certificate
+    description: Check for Trustpoint on Host with Certificate
+    diff_mode: false
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: check_for_certificate
+    job_type: run
+    limit: ''
+    playbook: certificate_management/check_certificates_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+
+  - name: Juniper / Check for Certificate
+    description: Check for Trustpoint on Host with Certificate
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: check_for_certificate
+    job_type: run
+    limit: ''
+    playbook: certificate_management/check_certificate_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+
+  - name: Cisco / Host Base Configuration
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: hostinfo
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+
+  - name: Juniper / Host Base Configuration
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: hostinfo
+    job_type: run
+    limit: ''
+    playbook: certificate_management/check_certificate_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+
+  - name: Cisco / Trustpoint Create
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: key_generation,trustpoint_create,csr_create
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    - CA Host Credential
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the Trustpoint?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: Juniper / CA Profile Create
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: ca_profile_create,rsakeypair_generation,csr_create
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    - CA Host Credential
+
+  - name: Cisco / Trustpoint Create w/Survey
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: key_generation,trustpoint_create
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the Trustpoint?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: Cisco / Trustpoint Delete
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: trustpoint_delete
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    survey_enabled: true
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the Trustpoint?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: Juniper / CA Profile Delete
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: trustpoint_delete
+    job_type: run
+    limit: ''
+    playbook: certificate_management/check_certificate_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the CA Profile?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: Cisco / Trustpoint Authenticate CA
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: ca_cert_trustpoint
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    - CA Host Credential 
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the Trustpoint?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: Juniper / Import CA Certificate to CA Profile
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: import_ca_certificate
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    - CA Host Credential          
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the Trustpoint?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: Cisco / Trustpoint Import Host Certificate
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: import_host_certificate
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_cisco.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    - CA Host Credential
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the Trustpoint?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: 'Juniper / Import Host Certificate to CA Profile'
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: import_host_certificate
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+    - CA Host Credential
+    survey:
+        description: ''
+        name: ''
+        spec:
+        -   choices: ''
+            default: ''
+            max: 24
+            min: 1
+            new_question: true
+            question_description: ''
+            question_name: What is the name of the Trustpoint?
+            required: true
+            type: text
+            variable: trustpoint
+
+  - name: Juniper / View Certificates
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    force_handlers: false
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: test_certificates
+    job_type: run
+    limit: ''
+    playbook: certificate_management/certificate_conf_junos.yml
+    prevent_instance_group_fallback: false
+    project: Network Demos
+    credentials:
+    - Workshop Credential
+
+  - name: ServiceNow / Change Create
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: ''
+    job_type: run
+    limit: ''
+    playbook: itsm_change_create_cisco.yml
+    prevent_instance_group_fallback: false
+    project: ServiceNow Examples
+    credentials:
+    - ServiceNow ITSM
+
+  - name: ServiceNow / Change Update
+    execution_environment: ruch-network-ee
+    organization: "Red Hat network organization"
+    forks: 0
+    host_config_key: ''
+    inventory: Workshop Inventory
+    job_slice_count: 1
+    job_tags: ''
+    job_type: run
+    limit: ''
+    playbook: itsm_change_update.yml
+    prevent_instance_group_fallback: false
+    project: ServiceNow Examples
+    credentials:
+    - ServiceNow ITSM
+
+
+controller_workflows:
+  - name: 'Cisco / Certificate Management'
+    description: ''
+    inventory: Workshop Inventory
+    organization: Red Hat network organization
+    survey_enabled: true
+    survey:
+      description: ''
+      name: ''
+      spec:
+        - question_name: What is the name of the Trustpoint?
+          required: true
+          type: text
+          variable: trustpoint
+        - question_name: How many days should the certificate be signed for?
+          default: ''
+          max: 1024
+          min: 1
+          new_question: true
+          question_description: ''
+          required: false
+          type: integer
+          variable: renewal_days
+        - question_name: Minimum Days Before Certificate Renewal?
+          max: 1024
+          min: 1
+          new_question: true
+          question_description: ''
+          required: true
+          type: integer
+          variable: minimum_days
+    workflow_nodes:
+      - identifier: Check for Trustpoint
+        unified_job_template:
+          name: 'Cisco / Check for Certificate'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes:
+            - identifier: Create Trustpoint
+          success_nodes:
+            - identifier: Check Certificate Date
+      - identifier: Create Trustpoint
+        unified_job_template:
+          name: 'Cisco / Trustpoint Create'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Create Change Request
+      - identifier: Check Certificate Date
+        unified_job_template:
+          name: 'Cisco / Check Certificate Date'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes:
+            - identifier: Create Change Request
+          success_nodes: []
+      - identifier: Create Change Request
+        unified_job_template:
+          name: 'ServiceNow / Change Create'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Generate Certificate
+      - identifier: Generate Certificate
+        unified_job_template:
+          name: 'Cisco / CA / Generate Certificate'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Trustpoint Authenticate CA
+      - identifier: Trustpoint Authenticate CA
+        unified_job_template:
+          name: 'Cisco / Trustpoint Authenticate CA'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Import Host Certificate
+      - identifier: Import Host Certificate
+        unified_job_template:
+          name: 'Cisco / Trustpoint Import Host Certificate'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+           - identifier: Validate Certificate Date
+      - identifier: Validate Certificate Date
+        unified_job_template:
+          name: 'Cisco / Check Certificate Date'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+           - identifier: Update Change Req
+      - identifier: Update Change Req
+        unified_job_template:
+          name: 'ServiceNow / Change Update'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes: []
+
+  - name: 'Juniper / Certificate Management'
+    description: ''
+    inventory: Workshop Inventory
+    organization: Red Hat network organization
+    survey_enabled: true
+    survey:
+      description: ''
+      name: ''
+      spec:
+        - choices: ''
+          default: ''
+          new_question: true
+          question_description: ''
+          question_name: What is the name of the Trustpoint?
+          required: true
+          type: text
+          variable: trustpoint
+        - choices: ''
+          default: ''
+          new_question: true
+          question_description: ''
+          question_name: How many days should the certificate be signed for?
+          required: true
+          type: integer
+          variable: renewal_days
+          max: 1024
+          min: 1
+        - choices: ''
+          default: ''
+          new_question: true
+          question_description: ''
+          question_name: Minimum Days Before Certificate Renewal?
+          required: true
+          type: integer
+          variable: min_days
+          max: 1024
+          min: 1
+    workflow_nodes:
+      - identifier: Check for Trustpoint
+        unified_job_template:
+          name: 'Juniper / Check for Certificate'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes:
+            - identifier: Create Trustpoint
+          success_nodes:
+            - identifier: Check Certificate Date
+      - identifier: Create Trustpoint
+        unified_job_template:
+          name: 'Juniper / CA Profile Create'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Create Change Request
+      - identifier: Check Certificate Date
+        unified_job_template:
+          name: 'Juniper / Check Certificate Date'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes:
+            - identifier: Create Change Request
+          success_nodes: []
+      - identifier: Create Change Request
+        unified_job_template:
+          name: 'ServiceNow / Change Create'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Generate Certificate
+      - identifier: Generate Certificate
+        unified_job_template:
+          name: 'Juniper / CA / Generate Certificate'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Trustpoint Authenticate CA
+      - identifier: Trustpoint Authenticate CA
+        unified_job_template:
+          name: 'Juniper / Import CA Certificate to CA Profile'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Import Host Certificate
+      - identifier: Import Host Certificate
+        unified_job_template:
+          name: 'Juniper / Import Host Certificate to CA Profile'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Validate Certificate Date
+      - identifier: Validate Certificate Date
+        unified_job_template:
+          name: 'Juniper / Check Certificate Date'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes:
+            - identifier: Update Change Req
+      - identifier: Update Change Req
+        unified_job_template:
+          name: 'ServiceNow / Change Update'
+          organization: 
+            name: "Red Hat network organization"
+          type: job_template 
+        related:
+          always_nodes: []
+          credentials: []
+          failure_nodes: []
+          success_nodes: []
+
+...

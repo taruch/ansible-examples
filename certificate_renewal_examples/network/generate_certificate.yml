@@ -1,0 +1,38 @@
+---
+- name: Generate a client certificate using Demo CA
+  hosts:
+    - cisco
+    - juniper
+  become: false
+  gather_facts: false
+
+  vars:
+    # client: "{{ data.client | default('rtr1')}}"
+    ansible_user: ca-admin
+    ansible_password: "{{ CA_PASSWORD }}"
+    trustpoint: CACERT
+    renewal_days: "{{ renewal_days | default('20') }}"
+
+  tasks:
+    - name: Delete files
+      ansible.builtin.file:
+        path: "/tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer"
+        state: absent
+      become: true
+      delegate_to: ca-host
+
+    - name: Generate Demo Certificate with OpenSSL from CSR
+      ansible.builtin.expect:
+        command: >
+          openssl ca -config /opt/X509CA/openssl.cfg
+          -in /tmp/{{ inventory_hostname }}_{{ trustpoint }}.csr
+          -out /tmp/{{ inventory_hostname }}_{{ trustpoint }}.cer
+          -days {{ renewal_days }} -notext
+        responses:
+          'Enter pass phrase': "{{ CA_PASSPHRASE }}"
+          'certificate?': 'y'
+          'commit?': 'y'
+      delegate_to: ca-host
+
+
+...
