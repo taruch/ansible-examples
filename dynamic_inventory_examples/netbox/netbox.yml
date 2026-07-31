@@ -1,0 +1,496 @@
+---
+# NetBox dynamic inventory configuration
+# Plugin: netbox.netbox.nb_inventory
+# Documentation: https://docs.ansible.com/ansible/latest/collections/netbox/netbox/nb_inventory_inventory.html
+#
+# NetBox is an open-source IPAM (IP Address Management) and DCIM (Data Center
+# Infrastructure Management) tool. This plugin queries NetBox to discover devices,
+# virtual machines, and their associated metadata for dynamic inventory.
+#
+# Authentication:
+#   Option 1: Environment variable (recommended)
+#     export NETBOX_API=https://netbox.example.com
+#     export NETBOX_TOKEN=your_api_token
+#
+#   Option 2: Direct configuration (use vault for token)
+#     api_endpoint: https://netbox.example.com
+#     token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+
+plugin: netbox.netbox.nb_inventory
+
+# NetBox API connection
+# api_endpoint: https://netbox.example.com
+# token: your_api_token_here
+validate_certs: true
+# timeout: 60
+# max_uri_length: 4000
+
+# Query devices, virtual machines, or both
+# Options: "devices", "virtual_machines", "all" (default)
+# device_query_filters:
+#   - status: active
+#   - site: dc1
+
+# virtual_machine_query_filters:
+#   - status: active
+#   - cluster: prod-cluster
+
+# Interfaces to query for IP addresses
+interfaces: true
+
+# Services running on devices/VMs
+services: true
+
+# Include IPs even if no primary IP is set
+fetch_all: false
+
+# Group devices by these NetBox fields
+group_by:
+  - device_roles
+  - platforms
+  - sites
+  - tenants
+  - racks
+  - tags
+  - device_types
+  - manufacturers
+  - status
+  - regions
+  - cluster
+  - cluster_type
+  - cluster_group
+
+# Flatten device-specific groups (e.g., platform_linux instead of platforms_linux)
+flatten_device_data: true
+
+# Group names to lowercase
+group_names_raw: false
+
+# Query these additional data from NetBox
+query_filters:
+  - role: server
+  # - status: active
+  # - tenant: engineering
+
+# Compose host variables from NetBox data
+compose:
+  # Use primary IPv4 as ansible_host
+  ansible_host: |
+    primary_ip4.address | ipaddr('address') if primary_ip4 is defined
+    else primary_ip6.address | ipaddr('address') if primary_ip6 is defined
+    else None
+
+  # Set ansible_user based on platform
+  ansible_user: |
+    'ansible' if platform.slug | default('') in ['linux', 'rhel', 'ubuntu', 'centos', 'debian']
+    else 'Administrator' if platform.slug | default('') in ['windows', 'win']
+    else 'admin' if platform.slug | default('') in ['junos', 'eos', 'nxos', 'ios']
+    else 'root'
+
+  # Set connection type based on platform
+  ansible_connection: |
+    'network_cli' if platform.slug | default('') in ['junos', 'eos', 'nxos', 'ios', 'iosxr']
+    else 'winrm' if platform.slug | default('') in ['windows', 'win']
+    else 'ssh'
+
+  # NetBox metadata
+  netbox_device_id: id
+  netbox_device_name: name
+  netbox_url: url if url is defined else None
+  netbox_primary_ip4: primary_ip4.address if primary_ip4 is defined else None
+  netbox_primary_ip6: primary_ip6.address if primary_ip6 is defined else None
+
+  # Site information
+  site_name: site.name if site is defined else 'Unknown'
+  site_slug: site.slug if site is defined else 'unknown'
+  site_facility: site.facility if site is defined and site.facility is defined else ''
+  site_asn: site.asn if site is defined and site.asn is defined else None
+
+  # Location within site
+  location_name: location.name if location is defined else 'Unknown'
+  rack_name: rack.name if rack is defined else None
+  rack_unit: position if position is defined else None
+
+  # Region/geography
+  region_name: site.region.name if site is defined and site.region is defined else 'Unknown'
+  region_slug: site.region.slug if site is defined and site.region is defined else 'unknown'
+
+  # Device type and manufacturer
+  device_type_model: device_type.model if device_type is defined else 'Unknown'
+  device_type_slug: device_type.slug if device_type is defined else 'unknown'
+  manufacturer_name: device_type.manufacturer.name if device_type is defined and device_type.manufacturer is defined else 'Unknown'
+  manufacturer_slug: device_type.manufacturer.slug if device_type is defined and device_type.manufacturer is defined else 'unknown'
+
+  # Platform/OS
+  platform_name: platform.name if platform is defined else 'Unknown'
+  platform_slug: platform.slug if platform is defined else 'unknown'
+  platform_napalm_driver: platform.napalm_driver if platform is defined and platform.napalm_driver is defined else None
+
+  # Role
+  device_role_name: device_role.name if device_role is defined else role.name if role is defined else 'Unknown'
+  device_role_slug: device_role.slug if device_role is defined else role.slug if role is defined else 'unknown'
+
+  # Status
+  device_status: status.value if status is defined else 'unknown'
+  device_status_label: status.label if status is defined else 'Unknown'
+
+  # Tenant
+  tenant_name: tenant.name if tenant is defined else 'No Tenant'
+  tenant_slug: tenant.slug if tenant is defined else 'no_tenant'
+  tenant_group: tenant.group.name if tenant is defined and tenant.group is defined else None
+
+  # Cluster (for VMs)
+  cluster_name: cluster.name if cluster is defined else None
+  cluster_type: cluster.type.name if cluster is defined and cluster.type is defined else None
+  cluster_group: cluster.group.name if cluster is defined and cluster.group is defined else None
+
+  # Virtual machine specific
+  vm_vcpus: vcpus if vcpus is defined else None
+  vm_memory_mb: memory if memory is defined else None
+  vm_memory_gb: (memory / 1024) | round(1) if memory is defined else None
+  vm_disk_gb: disk if disk is defined else None
+
+  # Tags (convert list to comma-separated string)
+  netbox_tags: tags | map(attribute='name') | join(',') if tags is defined else ''
+  netbox_tags_list: tags | map(attribute='name') | list if tags is defined else []
+
+  # Custom fields (customize based on your NetBox custom fields)
+  environment: custom_fields.environment | default('untagged')
+  application: custom_fields.application | default('none')
+  cost_center: custom_fields.cost_center | default('unassigned')
+  backup_policy: custom_fields.backup_policy | default('none')
+  patch_group: custom_fields.patch_group | default('none')
+  compliance: custom_fields.compliance | default('none')
+  criticality: custom_fields.criticality | default('standard')
+  lifecycle_state: custom_fields.lifecycle_state | default('active')
+
+  # Serial number and asset tag
+  serial_number: serial if serial is defined and serial != '' else 'Unknown'
+  asset_tag: asset_tag if asset_tag is defined and asset_tag != '' else None
+
+  # Management interface
+  oob_ip: oob_ip.address if oob_ip is defined else None
+
+  # Comments
+  comments_text: comments if comments is defined else ''
+
+# Keyed groups - create dynamic groups
+keyed_groups:
+  # Group by site
+  - key: site.slug
+    prefix: site
+    separator: _
+
+  # Group by region
+  - key: site.region.slug if site is defined and site.region is defined else 'no_region'
+    prefix: region
+    separator: _
+
+  # Group by location within site
+  - key: location.slug if location is defined else 'no_location'
+    prefix: location
+    separator: _
+
+  # Group by rack
+  - key: rack.name if rack is defined else 'no_rack'
+    prefix: rack
+    separator: _
+
+  # Group by device role
+  - key: device_role.slug if device_role is defined else role.slug if role is defined else 'unknown'
+    prefix: role
+
+  # Group by platform
+  - key: platform.slug if platform is defined else 'unknown'
+    prefix: platform
+
+  # Group by manufacturer
+  - key: device_type.manufacturer.slug if device_type is defined and device_type.manufacturer is defined else 'unknown'
+    prefix: manufacturer
+
+  # Group by device type
+  - key: device_type.slug if device_type is defined else 'unknown'
+    prefix: device_type
+    separator: _
+
+  # Group by status
+  - key: status.value if status is defined else 'unknown'
+    prefix: status
+
+  # Group by tenant
+  - key: tenant.slug if tenant is defined else 'no_tenant'
+    prefix: tenant
+
+  # Group by tenant group
+  - key: tenant.group.slug if tenant is defined and tenant.group is defined else 'no_tenant_group'
+    prefix: tenant_group
+    separator: _
+
+  # Group by cluster (VMs)
+  - key: cluster.name if cluster is defined else 'no_cluster'
+    prefix: cluster
+    separator: _
+
+  # Group by cluster type
+  - key: cluster.type.slug if cluster is defined and cluster.type is defined else 'no_cluster_type'
+    prefix: cluster_type
+    separator: _
+
+  # Group by tags
+  - key: tags | map(attribute='slug') | list
+    prefix: tag
+
+  # Group by custom fields
+  - key: custom_fields.environment | default('untagged')
+    prefix: env
+
+  - key: custom_fields.application | default('none')
+    prefix: app
+
+  - key: custom_fields.cost_center | default('unassigned')
+    prefix: costcenter
+
+  - key: custom_fields.patch_group | default('none')
+    prefix: patch
+
+  - key: custom_fields.backup_policy | default('none')
+    prefix: backup
+
+  - key: custom_fields.compliance | default('none')
+    prefix: compliance
+
+  - key: custom_fields.criticality | default('standard')
+    prefix: criticality
+
+  - key: custom_fields.lifecycle_state | default('active')
+    prefix: lifecycle
+
+# Static groups
+groups:
+  # All NetBox managed devices
+  netbox: true
+
+  # Devices vs VMs
+  netbox_devices: device_type is defined
+  netbox_vms: cluster is defined
+
+  # Active devices
+  active: status.value | default('') == 'active'
+
+  # Offline/failed devices
+  offline: status.value | default('') in ['offline', 'failed']
+
+  # Planned/staged devices
+  planned: status.value | default('') in ['planned', 'staged']
+
+  # Decommissioned
+  decommissioning: status.value | default('') == 'decommissioning'
+
+  # Has primary IP
+  has_primary_ip: primary_ip4 is defined or primary_ip6 is defined
+
+  # Missing primary IP
+  missing_primary_ip: primary_ip4 is not defined and primary_ip6 is not defined
+
+  # Racked devices
+  racked: rack is defined
+
+  # Not racked
+  not_racked: rack is not defined
+
+  # Has OOB management
+  has_oob: oob_ip is defined
+
+  # Virtual machines
+  virtual_machines: cluster is defined
+
+  # Physical devices
+  physical_devices: device_type is defined and cluster is not defined
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Production environment
+  production: |
+    custom_fields.environment | default('') == 'production' or
+    'prod' in (name | lower) or
+    'production' in (tags | map(attribute='slug') | join(''))
+
+  # Development environment
+  development: |
+    custom_fields.environment | default('') in ['development', 'dev'] or
+    'dev' in (name | lower)
+
+  # Staging environment
+  staging: |
+    custom_fields.environment | default('') == 'staging' or
+    'stage' in (name | lower)
+
+  # Linux platforms
+  os_linux: |
+    platform.slug | default('') in ['linux', 'rhel', 'ubuntu', 'centos', 'debian', 'fedora', 'rocky', 'alma']
+
+  # Windows platforms
+  os_windows: |
+    platform.slug | default('') in ['windows', 'win', 'win2019', 'win2022']
+
+  # Network devices
+  network_devices: |
+    platform.slug | default('') in ['junos', 'eos', 'nxos', 'ios', 'iosxr', 'fortios'] or
+    device_role.slug | default('') in ['router', 'switch', 'firewall', 'load-balancer']
+
+  # Servers
+  servers: |
+    device_role.slug | default('') in ['server', 'compute', 'hypervisor', 'database', 'application', 'web']
+
+  # Web servers
+  webservers: |
+    device_role.slug | default('') == 'web-server' or
+    'web' in (custom_fields.application | default('') | lower) or
+    'nginx' in (name | lower) or
+    'apache' in (name | lower)
+
+  # Database servers
+  databases: |
+    device_role.slug | default('') == 'database' or
+    'db' in (custom_fields.application | default('') | lower) or
+    'mysql' in (name | lower) or
+    'postgres' in (name | lower) or
+    'sql' in (name | lower)
+
+  # Application servers
+  appservers: |
+    device_role.slug | default('') == 'application-server' or
+    'app' in (custom_fields.application | default('') | lower)
+
+  # Load balancers
+  loadbalancers: |
+    device_role.slug | default('') == 'load-balancer' or
+    'lb' in (name | lower) or
+    'haproxy' in (name | lower)
+
+  # Firewalls
+  firewalls: |
+    device_role.slug | default('') == 'firewall' or
+    'fw' in (name | lower)
+
+  # Hypervisors
+  hypervisors: |
+    device_role.slug | default('') == 'hypervisor' or
+    'esx' in (name | lower) or
+    'kvm' in (name | lower) or
+    'hyperv' in (name | lower)
+
+  # Storage devices
+  storage: |
+    device_role.slug | default('') in ['storage', 'san', 'nas'] or
+    'storage' in (name | lower)
+
+  # Cisco devices
+  cisco: |
+    manufacturer_slug == 'cisco'
+
+  # Juniper devices
+  juniper: |
+    manufacturer_slug == 'juniper'
+
+  # Dell servers
+  dell: |
+    manufacturer_slug in ['dell', 'dell-emc']
+
+  # HP/HPE servers
+  hp: |
+    manufacturer_slug in ['hp', 'hpe', 'hewlett-packard']
+
+  # VMware VMs
+  vmware_vms: |
+    cluster_type | default('') | lower in ['vmware', 'vsphere', 'vcenter']
+
+  # Nutanix VMs
+  nutanix_vms: |
+    cluster_type | default('') | lower in ['nutanix', 'ahv']
+
+  # Proxmox VMs
+  proxmox_vms: |
+    cluster_type | default('') | lower == 'proxmox'
+
+  # High CPU VMs (8+ vCPUs)
+  high_cpu: |
+    vcpus is defined and vcpus >= 8
+
+  # High memory VMs (32GB+)
+  high_memory: |
+    memory is defined and memory >= 32768
+
+  # Patch groups
+  patch_group_a: custom_fields.patch_group | default('') == 'A'
+  patch_group_b: custom_fields.patch_group | default('') == 'B'
+  patch_group_c: custom_fields.patch_group | default('') == 'C'
+
+  patch_sunday: custom_fields.patch_group | default('') in ['A', 'Sunday']
+  patch_monday: custom_fields.patch_group | default('') in ['B', 'Monday']
+  patch_tuesday: custom_fields.patch_group | default('') in ['C', 'Tuesday']
+
+  # Backup policies
+  backup_daily: custom_fields.backup_policy | default('') == 'daily'
+  backup_weekly: custom_fields.backup_policy | default('') == 'weekly'
+  backup_monthly: custom_fields.backup_policy | default('') == 'monthly'
+
+  # Compliance
+  compliance_pci: custom_fields.compliance | default('') == 'PCI'
+  compliance_hipaa: custom_fields.compliance | default('') == 'HIPAA'
+  compliance_sox: custom_fields.compliance | default('') == 'SOX'
+  compliance_gdpr: custom_fields.compliance | default('') == 'GDPR'
+
+  # Mission critical
+  mission_critical: |
+    custom_fields.criticality | default('') in ['critical', 'tier1'] or
+    'critical' in (tags | map(attribute='slug') | join(''))
+
+  # End of life
+  end_of_life: |
+    custom_fields.lifecycle_state | default('') in ['eol', 'end-of-life', 'deprecated']
+
+  # Needs replacement
+  needs_replacement: |
+    custom_fields.lifecycle_state | default('') in ['eol', 'end-of-life'] or
+    status.value | default('') == 'decommissioning'
+
+  # Missing metadata (incomplete records)
+  needs_attention: |
+    (primary_ip4 is not defined and primary_ip6 is not defined) or
+    platform is not defined or
+    (custom_fields.environment is not defined or custom_fields.environment == '') or
+    comments is not defined or comments == ''
+
+  # Data center tiers
+  tier1_dc: |
+    site.facility | default('') in ['tier1', 'tier-1', 't1'] or
+    custom_fields.criticality | default('') == 'tier1'
+
+  tier2_dc: |
+    site.facility | default('') in ['tier2', 'tier-2', 't2'] or
+    custom_fields.criticality | default('') == 'tier2'
+
+  # Geographic regions
+  region_us_east: |
+    region_slug | default('') in ['us-east', 'us_east', 'useast']
+
+  region_us_west: |
+    region_slug | default('') in ['us-west', 'us_west', 'uswest']
+
+  region_europe: |
+    region_slug | default('') in ['europe', 'eu', 'emea']
+
+  region_apac: |
+    region_slug | default('') in ['apac', 'asia', 'ap']
+
+# Use device name as hostname
+hostnames:
+  - name
+
+# Caching (highly recommended for NetBox)
+cache: yes
+cache_plugin: jsonfile
+cache_timeout: 300  # 5 minutes
+cache_connection: /tmp/netbox_inventory_cache
+cache_prefix: netbox

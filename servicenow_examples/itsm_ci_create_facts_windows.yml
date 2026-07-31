@@ -1,0 +1,65 @@
+---
+- name: Gather Windows Facts to Push to CMDB
+  hosts: "{{ _hosts }}"
+  gather_facts: true
+  tasks:
+    - name: Clear gathered facts from all currently targeted hosts
+      ansible.builtin.meta: clear_facts
+
+    - name: Get disk facts
+      community.windows.win_disk_facts:
+
+    - name: Get info for all installed services
+      ansible.windows.win_service_info:
+      register: service_info
+
+    - name: place service_info into host facts
+      ansible.builtin.set_fact:
+        cacheable: yes
+        services: "{{ service_info.services }}"
+
+    - name: Get installed software list
+      win_shell: |
+        $apps = Get-WmiObject -Class Win32_Product | Select-Object Name, Version
+        $apps | ConvertTo-Json -Depth 1
+      register: installed_software_raw
+
+    - name: Convert raw output into structured data
+      set_fact:
+        raw_packages: "{{ installed_software_raw.stdout | from_json }}"
+
+    - name: Transform data into a similar structure as ansible.builtin.package_facts used for linux packages
+      set_fact:
+        packages: "{{ packages | default({}) | combine({item.Name: [{'name': item.Name, 'version': item.Version}]}) }}"
+        cacheable: yes
+      loop: "{{ raw_packages }}"
+
+    ## OPTIONNAL YOU CAN CREATE CUSTOM FACT THAT WILL BE INJECT IN THE CMDB AT WILL
+    - name: Create first custom fact
+      ansible.windows.win_command: whoami
+      register: custom_fact_1
+
+    - name: Set custom_fact_1 as a persistent fact
+      ansible.builtin.set_fact:
+        cacheable: yes
+        custom_fact1: "{{ custom_fact_1.stdout }}"
+    
+    ## do not modify the name of the fact (custom_fact1, custom_fact2 & custom_fact3), 
+    ## you will be able to modify the label of the attribute in ServiceNow
+    - name: Create second custom fact
+      ansible.windows.win_command: whoami
+      register: custom_fact_2
+
+    - name: Set custom_fact_2 as a persistent fact
+      ansible.builtin.set_fact:
+      cacheable: yes
+      custom_fact2: "{{ custom_fact_2.stdout }}"
+
+    - name: Create third custom fact
+      ansible.windows.win_command: whoami
+      register: custom_fact_3
+
+    - name: Set custom_fact_3 as a persistent fact
+      ansible.builtin.set_fact:
+      cacheable: yes
+      custom_fact3: "{{ custom_fact_3.stdout }}"

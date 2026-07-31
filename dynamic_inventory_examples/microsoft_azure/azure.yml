@@ -1,0 +1,236 @@
+---
+# Azure dynamic inventory configuration
+# Plugin: azure.azcollection.azure_rm
+# Documentation: https://docs.ansible.com/ansible/latest/collections/azure/azcollection/azure_rm_inventory.html
+#
+# Authentication options (in order of precedence):
+#   1. Service Principal with secret (recommended for automation)
+#   2. Service Principal with certificate
+#   3. Managed Identity (when running on Azure VM)
+#   4. Azure CLI credentials
+#
+# Environment variables for Service Principal authentication:
+#   AZURE_SUBSCRIPTION_ID
+#   AZURE_CLIENT_ID
+#   AZURE_SECRET
+#   AZURE_TENANT
+
+plugin: azure.azcollection.azure_rm
+
+# Authentication
+# auth_source: auto  # Options: auto, cli, credential_file, env, msi
+# tenant_id: your-tenant-id
+# subscription_id: your-subscription-id
+# client_id: your-client-id
+# secret: your-secret
+
+# Filter VMs by resource groups (optional)
+# include_vm_resource_groups:
+#   - rg-production-*
+#   - rg-development-*
+
+# Exclude specific resource groups
+# exclude_vm_resource_groups:
+#   - rg-archived-*
+
+# Filter by location
+# locations:
+#   - eastus
+#   - westus2
+
+# Include only VMs with specific tags
+# conditional_groups:
+#   azure_production: "tags.environment == 'production'"
+#   azure_development: "tags.environment == 'development'"
+
+# Compose custom host variables
+compose:
+  # Set ansible_host to public IP if available, otherwise private IP
+  ansible_host: public_ipv4_addresses[0] | default(private_ipv4_addresses[0])
+
+  # Set ansible_user based on OS
+  ansible_user: |
+    'azureuser' if 'linux' in os_profile.linux_configuration
+    else 'Administrator'
+
+  # Custom variables from VM properties
+  vm_size_tier: |
+    'premium' if 'Standard_D' in vm_size or 'Standard_E' in vm_size
+    else 'standard' if 'Standard_B' in vm_size
+    else 'basic'
+
+  # Extract cost center from tags
+  cost_center: tags.costCenter | default('unassigned')
+
+  # Availability zone
+  availability_zone: zones[0] | default('none')
+
+  # Is production (multiple indicators)
+  is_production: |
+    tags.environment == 'production' or
+    'prod' in resource_group or
+    'production' in name
+
+# Static groups
+groups:
+  # All Azure VMs
+  cloud_azure: true
+
+  # Running VMs only
+  azure_running: power_state == 'running'
+
+  # Stopped/deallocated VMs
+  azure_stopped: power_state != 'running'
+
+  # Production VMs (multiple criteria)
+  production: |
+    tags.environment == 'production' or
+    'prod' in resource_group.lower()
+
+  # Development VMs
+  development: tags.environment == 'development'
+
+  # VMs with managed disks
+  azure_managed_disks: storage_profile.os_disk.managed_disk is defined
+
+  # VMs with availability sets
+  azure_high_availability: availability_set is defined
+
+  # VMs in availability zones
+  azure_zonal: zones is defined and zones | length > 0
+
+# Keyed groups - create groups dynamically from VM properties
+keyed_groups:
+  # Group by resource group
+  - key: resource_group
+    prefix: rg
+    separator: _
+
+  # Group by location
+  - key: location
+    prefix: location
+
+  # Group by VM size
+  - key: vm_size
+    prefix: vmsize
+    separator: _
+
+  # Group by OS type
+  - key: os_profile.linux_configuration is defined | ternary('linux', 'windows')
+    prefix: os
+
+  # Group by environment tag
+  - key: tags.environment | default('untagged')
+    prefix: env
+
+  # Group by application tag
+  - key: tags.application | default('none')
+    prefix: app
+
+  # Group by owner tag
+  - key: tags.owner | default('unassigned')
+    prefix: owner
+
+  # Group by cost center tag
+  - key: tags.costCenter | default('unassigned')
+    prefix: costcenter
+
+  # Group by backup policy tag
+  - key: tags.backup | default('none')
+    prefix: backup
+
+  # Group by data classification
+  - key: tags.dataClassification | default('internal')
+    prefix: data
+
+  # Group by availability zone
+  - key: zones[0] | default('no_zone')
+    prefix: az
+
+  # Group by virtual network
+  - key: network_profile.network_interfaces[0].id | regex_search('/virtualNetworks/([^/]+)/', '\\1') | first | default('no_vnet')
+    prefix: vnet
+
+# Use VM name as inventory hostname
+hostnames:
+  - name
+  - tags.Name
+
+# Include VM tags as host vars
+# plain_host_names: yes
+# use_contrib_script_compatible_sanitization: yes
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Web servers (multiple indicators)
+  webservers: |
+    'web' in tags.role | default('') or
+    'http' in tags.application | default('') or
+    'nginx' in name.lower() or
+    'apache' in name.lower()
+
+  # Database servers
+  databases: |
+    'db' in tags.role | default('') or
+    'database' in tags.application | default('') or
+    'sql' in name.lower() or
+    'postgres' in name.lower() or
+    'mongo' in name.lower()
+
+  # Application servers
+  appservers: |
+    'app' in tags.role | default('') or
+    'application' in tags.application | default('')
+
+  # Load balancers (VMs, not Azure LB)
+  loadbalancers: |
+    'lb' in tags.role | default('') or
+    'haproxy' in name.lower() or
+    'nginx' in name.lower()
+
+  # Kubernetes nodes
+  kubernetes: |
+    'k8s' in tags.role | default('') or
+    'kubernetes' in tags.application | default('') or
+    'node' in name.lower()
+
+  # Patch group A (patch on Sundays)
+  patch_group_a: tags.patchGroup | default('') == 'A'
+
+  # Patch group B (patch on Saturdays)
+  patch_group_b: tags.patchGroup | default('') == 'B'
+
+  # Mission critical VMs
+  mission_critical: |
+    tags.criticality | default('') == 'critical' or
+    tags.tier | default('') == '1'
+
+  # VMs requiring compliance scanning
+  compliance_required: |
+    tags.compliance | default('') in ['pci', 'hipaa', 'sox', 'gdpr']
+
+  # Premium tier VMs (based on size)
+  premium_tier: |
+    'Standard_D' in vm_size or
+    'Standard_E' in vm_size or
+    'Standard_F' in vm_size
+
+  # Burstable VMs
+  burstable: |
+    'Standard_B' in vm_size
+
+  # VMs with accelerated networking
+  accelerated_networking: |
+    network_profile.network_interfaces[0].enable_accelerated_networking | default(false)
+
+  # Domain joined VMs
+  domain_joined: |
+    tags.domainJoined | default('no') == 'yes' or
+    'domain' in tags
+
+# Caching (improves performance for large inventories)
+# cache: yes
+# cache_plugin: jsonfile
+# cache_timeout: 3600
+# cache_connection: /tmp/azure_inventory_cache
+# cache_prefix: azure_rm

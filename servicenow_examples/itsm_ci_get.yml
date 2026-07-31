@@ -1,0 +1,62 @@
+---
+- name: Fetch and Debug ServiceNow CI
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # --- ServiceNow Connection Details ---
+    instance_data:
+      host: "{{ lookup('env', 'SN_HOST') | default(omit) }}"
+      username: "{{ lookup('env', 'SN_USERNAME') | default(omit) }}"
+      password: "{{ lookup('env', 'SN_PASSWORD') | default(omit) }}"
+    
+    # The name of the CI you want to find
+    target_ci_name: "{{ ci_name | default('rhel9test1') }}" 
+    
+    # The table to search (cmdb_ci_server, cmdb_ci_linux_server, or base cmdb_ci)
+    target_table: "cmdb_ci"
+
+  tasks:
+
+    - name: Check for existing CI
+      throttle: 1
+      block:
+        - name: "Check for existing CI with name '{{ ansible_fqdn }}'"
+          servicenow.itsm.api_info:
+            instance: "{{ instance_data }}"
+            resource: cmdb_ci_vm_instance  # The table for Virtual Machine CIs
+            sysparm_query: "name={{ target_ci_name }}"
+          register: existing_ci_check
+
+        - name: Debug existing CI check
+          ansible.builtin.debug:
+            msg: "Existing record: {{ existing_ci_check.record }}"
+            verbosity: 2
+
+    - name: Retrieve CI information from ServiceNow
+      servicenow.itsm.configuration_item_info:
+        instance: "{{ instance_data }}"
+        # table: "{{ target_table }}"
+        # sys_parm_query allows standard ServiceNow encoded queries
+        # Example: name=server1^ORip_address=192.168.1.1
+        name: "{{ target_ci_name }}"
+      register: ci_result
+
+    - name: Debug - Show the raw output
+      ansible.builtin.debug:
+        var: ci_result
+
+    - name: Debug - Show specific fields (Cleaner view)
+      ansible.builtin.debug:
+        msg: 
+          - "Name: {{ item.name }}"
+          - "Sys ID: {{ item.sys_id }}"
+          - "OS: {{ item.os | default('N/A') }}"
+          - "IP Address: {{ item.ip_address | default('N/A') }}"
+      loop: "{{ ci_result.record }}"
+      when: ci_result.record | length > 0
+
+    - name: Alert if no CI found
+      ansible.builtin.debug:
+        msg: "No CI found with name {{ target_ci_name }} in table {{ target_table }}"
+      when: ci_result.record | length == 0

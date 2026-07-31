@@ -24,5 +24,9 @@ collections:
   - name: community.general
     version: ">=8.0.0"
 
+<<<<<<< HEAD
+  - name: servicenow.itsm
+=======
   # Servicenow collection
   - name: servicenow.itsm
+>>>>>>> 9672aabdf404cea37c72eccf0bd7d5d0540d2f4d

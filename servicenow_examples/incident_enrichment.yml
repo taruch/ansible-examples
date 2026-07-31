@@ -1,0 +1,54 @@
+---
+- name: Enrich and update an incident ticket in ServiceNow
+  hosts: "{{ _hosts | default('localhost') }}"
+  gather_facts: true
+
+  tasks:
+    - name: Get service status (Linux)
+      become: true
+      ansible.builtin.service_facts:
+      when: ansible_os_family != "Windows"
+
+    - name: Set failed services (Linux)
+      when: ansible_os_family != "Windows"
+      ansible.builtin.set_fact:
+        failed_services: >-
+          {{ ansible_facts.services | dict2items
+             | selectattr('value.status', 'equalto', 'failed')
+             | items2dict }}
+
+    - name: Get service status (Windows)
+      when: ansible_os_family == "Windows"
+      block:
+        - name: Get service status (Windows)
+          ansible.windows.win_service_info:
+          register: win_service_info
+
+        - name: Set failed services (Windows)
+          ansible.builtin.set_fact:
+            failed_services: >-
+              {{ win_service_info.services
+                 | selectattr('start_mode', 'equalto', 'auto')
+                 | rejectattr('state', 'equalto', 'running')
+                 | list }}
+
+    - name: Update incident
+      delegate_to: localhost
+      run_once: true # noqa: run-once[task]
+      register: incident_out
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ lookup('env', 'SN_HOST') | default(omit) }}"
+          username: "{{ lookup('env', 'SN_USERNAME') | default(omit) }}"
+          password: "{{ lookup('env', 'SN_PASSWORD') | default(omit) }}"
+        number: "{{ req_number }}"
+        other:
+          work_notes: >
+            Host: {{ inventory_hostname }}
+            Failed Services: {{ failed_services | to_nice_json }}
+
+    - name: Set Incident Number
+      run_once: true # noqa: run-once[task]
+      ansible.builtin.set_stats:
+        data:
+          ServiceNow_Incident_Number: "{{ incident_out.record.number }}"

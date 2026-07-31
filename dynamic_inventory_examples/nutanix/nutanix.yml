@@ -1,0 +1,428 @@
+---
+# Nutanix AHV dynamic inventory configuration
+# Plugin: nutanix.ncp.ntnx_vms_inventory
+# Documentation: https://docs.ansible.com/ansible/latest/collections/nutanix/ncp/ntnx_vms_inventory_inventory.html
+#
+# This plugin queries Nutanix Prism Central to discover VMs running on
+# Nutanix AHV (Acropolis Hypervisor) and create dynamic inventory
+#
+# Authentication:
+#   Option 1: Environment variables (recommended)
+#     export NUTANIX_HOST=prism-central.example.com
+#     export NUTANIX_USERNAME=admin
+#     export NUTANIX_PASSWORD=your_password
+#     export NUTANIX_PORT=9440
+#
+#   Option 2: Direct configuration (use vault for password)
+#     nutanix_hostname: prism-central.example.com
+#     nutanix_username: admin
+#     nutanix_password: "{{ lookup('env', 'NUTANIX_PASSWORD') }}"
+#     nutanix_port: 9440
+
+plugin: nutanix.ncp.ntnx_vms_inventory
+
+# Prism Central connection settings
+# nutanix_hostname: prism-central.example.com
+# nutanix_username: admin
+# nutanix_password: your_password
+# nutanix_port: 9440
+validate_certs: false
+
+# Filter VMs (optional)
+# filter:
+#   power_state: "ON"
+#   cluster_name: "prod-cluster"
+
+# Include only running VMs
+# power_state: ON
+
+# Compose host variables
+compose:
+  # Use first NIC's IP address as ansible_host
+  ansible_host: |
+    spec.resources.nic_list[0].ip_endpoint_list[0].ip if
+    (spec.resources.nic_list is defined and
+     spec.resources.nic_list | length > 0 and
+     spec.resources.nic_list[0].ip_endpoint_list is defined and
+     spec.resources.nic_list[0].ip_endpoint_list | length > 0)
+    else None
+
+  # Set ansible_user based on guest OS or categories
+  ansible_user: |
+    'ansible' if (metadata.categories.OS | default('') | lower in ['linux', 'rhel', 'ubuntu', 'centos'])
+    else 'Administrator' if (metadata.categories.OS | default('') | lower in ['windows', 'win'])
+    else 'root'
+
+  # Set connection type based on OS
+  ansible_connection: |
+    'winrm' if (metadata.categories.OS | default('') | lower in ['windows', 'win'])
+    else 'ssh'
+
+  # VM UUID and name
+  vm_uuid: metadata.uuid
+  vm_name: spec.name
+  vm_description: spec.description | default('')
+
+  # Cluster information
+  cluster_name: spec.cluster_reference.name if spec.cluster_reference is defined else 'Unknown'
+  cluster_uuid: spec.cluster_reference.uuid if spec.cluster_reference is defined else None
+
+  # Power state
+  power_state: spec.resources.power_state | default('UNKNOWN')
+  is_powered_on: spec.resources.power_state | default('OFF') == 'ON'
+
+  # VM resources
+  vcpus: spec.resources.num_vcpus_per_socket * spec.resources.num_sockets if spec.resources.num_vcpus_per_socket is defined and spec.resources.num_sockets is defined else 1
+  num_sockets: spec.resources.num_sockets | default(1)
+  vcpus_per_socket: spec.resources.num_vcpus_per_socket | default(1)
+  memory_mb: spec.resources.memory_size_mib | default(0)
+  memory_gb: (spec.resources.memory_size_mib / 1024) | round(1) if spec.resources.memory_size_mib is defined else 0
+
+  # VM size tier based on resources
+  vm_size: |
+    'xlarge' if (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) >= 8 and (spec.resources.memory_size_mib | default(0)) >= 32768
+    else 'large' if (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) >= 4 and (spec.resources.memory_size_mib | default(0)) >= 16384
+    else 'medium' if (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) >= 2 and (spec.resources.memory_size_mib | default(0)) >= 8192
+    else 'small'
+
+  # Disk information
+  disk_count: spec.resources.disk_list | length if spec.resources.disk_list is defined else 0
+  total_disk_gb: |
+    (spec.resources.disk_list | sum(attribute='disk_size_mib') / 1024) | round(1)
+    if spec.resources.disk_list is defined else 0
+
+  # Network information
+  nic_count: spec.resources.nic_list | length if spec.resources.nic_list is defined else 0
+  primary_nic_network: |
+    spec.resources.nic_list[0].subnet_reference.name
+    if (spec.resources.nic_list is defined and
+        spec.resources.nic_list | length > 0 and
+        spec.resources.nic_list[0].subnet_reference is defined)
+    else None
+
+  # IP addresses (all NICs)
+  ip_addresses: |
+    spec.resources.nic_list | map(attribute='ip_endpoint_list') | flatten | map(attribute='ip') | list
+    if spec.resources.nic_list is defined else []
+
+  # Categories (Nutanix metadata/tags)
+  nutanix_categories: metadata.categories if metadata.categories is defined else {}
+
+  # Extract common category values
+  environment: metadata.categories.Environment | default('untagged')
+  application: metadata.categories.Application | default('none')
+  owner: metadata.categories.Owner | default('unassigned')
+  cost_center: metadata.categories.CostCenter | default('unassigned')
+  backup_policy: metadata.categories.Backup | default('none')
+  patch_group: metadata.categories.PatchGroup | default('none')
+  os_type: metadata.categories.OS | default('unknown')
+  criticality: metadata.categories.Criticality | default('standard')
+  compliance: metadata.categories.Compliance | default('none')
+
+  # VM creation and modification time
+  vm_created: metadata.creation_time if metadata.creation_time is defined else None
+  vm_modified: metadata.last_update_time if metadata.last_update_time is defined else None
+
+  # VM age in days
+  vm_age_days: |
+    ((ansible_date_time.epoch | int) - (metadata.creation_time | to_datetime | int)) / 86400 | int
+    if metadata.creation_time is defined else 0
+
+  # Protection policy (backup)
+  has_protection: |
+    spec.resources.protection_policy_state is defined and
+    spec.resources.protection_policy_state != None
+
+  # Guest tools (NGT - Nutanix Guest Tools)
+  ngt_enabled: |
+    spec.resources.guest_tools is defined and
+    spec.resources.guest_tools.nutanix_guest_tools is defined and
+    spec.resources.guest_tools.nutanix_guest_tools.state == 'ENABLED'
+
+  ngt_version: |
+    spec.resources.guest_tools.nutanix_guest_tools.version if
+    (spec.resources.guest_tools is defined and
+     spec.resources.guest_tools.nutanix_guest_tools is defined and
+     spec.resources.guest_tools.nutanix_guest_tools.version is defined)
+    else None
+
+  # GPU assignments
+  has_gpu: |
+    spec.resources.gpu_list is defined and
+    spec.resources.gpu_list | length > 0
+
+  gpu_count: |
+    spec.resources.gpu_list | length
+    if spec.resources.gpu_list is defined else 0
+
+# Static groups
+groups:
+  # All Nutanix VMs
+  nutanix: true
+
+  # Powered on VMs
+  nutanix_running: spec.resources.power_state | default('OFF') == 'ON'
+
+  # Powered off VMs
+  nutanix_stopped: spec.resources.power_state | default('OFF') == 'OFF'
+
+  # VMs with NGT installed
+  ngt_installed: |
+    spec.resources.guest_tools is defined and
+    spec.resources.guest_tools.nutanix_guest_tools is defined and
+    spec.resources.guest_tools.nutanix_guest_tools.state == 'ENABLED'
+
+  # VMs without NGT
+  ngt_not_installed: |
+    spec.resources.guest_tools is not defined or
+    spec.resources.guest_tools.nutanix_guest_tools is not defined or
+    spec.resources.guest_tools.nutanix_guest_tools.state != 'ENABLED'
+
+  # VMs with protection policy
+  protected: |
+    spec.resources.protection_policy_state is defined and
+    spec.resources.protection_policy_state != None
+
+  # VMs without protection
+  unprotected: |
+    spec.resources.protection_policy_state is not defined or
+    spec.resources.protection_policy_state == None
+
+  # VMs with GPUs
+  gpu_vms: |
+    spec.resources.gpu_list is defined and
+    spec.resources.gpu_list | length > 0
+
+  # High CPU VMs (8+ vCPUs)
+  high_cpu: |
+    (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) >= 8
+
+  # High memory VMs (32GB+)
+  high_memory: |
+    spec.resources.memory_size_mib | default(0) >= 32768
+
+  # VMs with multiple NICs
+  multi_nic: |
+    spec.resources.nic_list is defined and
+    spec.resources.nic_list | length > 1
+
+# Keyed groups - create groups dynamically
+keyed_groups:
+  # Group by cluster
+  - key: spec.cluster_reference.name if spec.cluster_reference is defined else 'unknown'
+    prefix: cluster
+    separator: _
+
+  # Group by power state
+  - key: spec.resources.power_state | default('UNKNOWN')
+    prefix: power
+
+  # Group by vCPU count
+  - key: |
+      (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1))
+    prefix: vcpu
+
+  # Group by memory size (in GB)
+  - key: |
+      (spec.resources.memory_size_mib / 1024) | round(0) | int if spec.resources.memory_size_mib is defined else 0
+    prefix: memory_gb
+
+  # Group by VM size tier
+  - key: |
+      'xlarge' if (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) >= 8 and (spec.resources.memory_size_mib | default(0)) >= 32768
+      else 'large' if (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) >= 4 and (spec.resources.memory_size_mib | default(0)) >= 16384
+      else 'medium' if (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) >= 2 and (spec.resources.memory_size_mib | default(0)) >= 8192
+      else 'small'
+    prefix: size
+
+  # Group by primary network
+  - key: |
+      spec.resources.nic_list[0].subnet_reference.name
+      if (spec.resources.nic_list is defined and
+          spec.resources.nic_list | length > 0 and
+          spec.resources.nic_list[0].subnet_reference is defined)
+      else 'no_network'
+    prefix: network
+    separator: _
+
+  # Group by Nutanix categories
+  - key: metadata.categories.Environment | default('untagged')
+    prefix: env
+
+  - key: metadata.categories.Application | default('none')
+    prefix: app
+
+  - key: metadata.categories.Owner | default('unassigned')
+    prefix: owner
+
+  - key: metadata.categories.CostCenter | default('unassigned')
+    prefix: costcenter
+
+  - key: metadata.categories.OS | default('unknown')
+    prefix: os
+
+  - key: metadata.categories.PatchGroup | default('none')
+    prefix: patch
+
+  - key: metadata.categories.Backup | default('none')
+    prefix: backup
+
+  - key: metadata.categories.Criticality | default('standard')
+    prefix: criticality
+
+  - key: metadata.categories.Compliance | default('none')
+    prefix: compliance
+
+# Use VM name as hostname
+hostnames:
+  - spec.name
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Production VMs
+  production: |
+    metadata.categories.Environment | default('') == 'production' or
+    'prod' in (spec.name | default('') | lower)
+
+  # Development VMs
+  development: |
+    metadata.categories.Environment | default('') in ['development', 'dev'] or
+    'dev' in (spec.name | default('') | lower)
+
+  # Staging VMs
+  staging: |
+    metadata.categories.Environment | default('') == 'staging' or
+    'stage' in (spec.name | default('') | lower)
+
+  # Linux VMs
+  os_linux: |
+    metadata.categories.OS | default('') | lower in ['linux', 'rhel', 'ubuntu', 'centos', 'debian', 'fedora', 'rocky', 'alma']
+
+  # Windows VMs
+  os_windows: |
+    metadata.categories.OS | default('') | lower in ['windows', 'win', 'win2019', 'win2022']
+
+  # RHEL VMs
+  rhel: |
+    'rhel' in (metadata.categories.OS | default('') | lower) or
+    'red hat' in (metadata.categories.OS | default('') | lower)
+
+  # Ubuntu VMs
+  ubuntu: |
+    'ubuntu' in (metadata.categories.OS | default('') | lower)
+
+  # CentOS VMs
+  centos: |
+    'centos' in (metadata.categories.OS | default('') | lower)
+
+  # Windows Server 2022
+  windows_2022: |
+    '2022' in (metadata.categories.OS | default(''))
+
+  # Windows Server 2019
+  windows_2019: |
+    '2019' in (metadata.categories.OS | default(''))
+
+  # Web servers
+  webservers: |
+    metadata.categories.Application | default('') | lower in ['web', 'nginx', 'apache', 'iis'] or
+    'web' in (spec.name | default('') | lower)
+
+  # Database servers
+  databases: |
+    metadata.categories.Application | default('') | lower in ['database', 'mysql', 'postgresql', 'oracle', 'mssql', 'mongodb'] or
+    'db' in (spec.name | default('') | lower) or
+    'sql' in (spec.name | default('') | lower)
+
+  # Application servers
+  appservers: |
+    metadata.categories.Application | default('') | lower in ['application', 'app', 'tomcat', 'jboss']
+
+  # Load balancers
+  loadbalancers: |
+    metadata.categories.Application | default('') | lower in ['loadbalancer', 'lb', 'haproxy', 'f5'] or
+    'lb' in (spec.name | default('') | lower)
+
+  # Kubernetes nodes
+  kubernetes: |
+    metadata.categories.Application | default('') | lower in ['kubernetes', 'k8s'] or
+    'k8s' in (spec.name | default('') | lower) or
+    'kube' in (spec.name | default('') | lower)
+
+  # VDI/Virtual desktops
+  vdi: |
+    metadata.categories.Application | default('') | lower in ['vdi', 'virtual-desktop', 'citrix'] or
+    'vdi' in (spec.name | default('') | lower)
+
+  # Patch groups
+  patch_group_a: metadata.categories.PatchGroup | default('') == 'A'
+  patch_group_b: metadata.categories.PatchGroup | default('') == 'B'
+  patch_group_c: metadata.categories.PatchGroup | default('') == 'C'
+
+  patch_sunday: metadata.categories.PatchGroup | default('') in ['A', 'Sunday']
+  patch_monday: metadata.categories.PatchGroup | default('') in ['B', 'Monday']
+  patch_tuesday: metadata.categories.PatchGroup | default('') in ['C', 'Tuesday']
+
+  # Backup policies
+  backup_daily: metadata.categories.Backup | default('') == 'daily'
+  backup_weekly: metadata.categories.Backup | default('') == 'weekly'
+  backup_monthly: metadata.categories.Backup | default('') == 'monthly'
+
+  # Compliance
+  compliance_pci: metadata.categories.Compliance | default('') == 'PCI'
+  compliance_hipaa: metadata.categories.Compliance | default('') == 'HIPAA'
+  compliance_sox: metadata.categories.Compliance | default('') == 'SOX'
+  compliance_gdpr: metadata.categories.Compliance | default('') == 'GDPR'
+
+  # Mission critical
+  mission_critical: |
+    metadata.categories.Criticality | default('') in ['critical', 'tier1']
+
+  # VMs needing NGT update
+  needs_ngt_update: |
+    spec.resources.power_state | default('OFF') == 'ON' and
+    (spec.resources.guest_tools is not defined or
+     spec.resources.guest_tools.nutanix_guest_tools is not defined or
+     spec.resources.guest_tools.nutanix_guest_tools.state != 'ENABLED')
+
+  # VMs without protection and should have it
+  needs_protection: |
+    (spec.resources.protection_policy_state is not defined or
+     spec.resources.protection_policy_state == None) and
+    metadata.categories.Backup | default('') != 'none' and
+    spec.resources.power_state | default('OFF') == 'ON'
+
+  # Old VMs (> 1 year)
+  old_vms: |
+    metadata.creation_time is defined and
+    ((ansible_date_time.epoch | int) - (metadata.creation_time | to_datetime | int)) / 86400 > 365
+
+  # New VMs (< 30 days)
+  new_vms: |
+    metadata.creation_time is defined and
+    ((ansible_date_time.epoch | int) - (metadata.creation_time | to_datetime | int)) / 86400 < 30
+
+  # VMs missing categories (needs attention)
+  needs_attention: |
+    metadata.categories is not defined or
+    metadata.categories.Environment is not defined or
+    metadata.categories.Owner is not defined or
+    spec.description | default('') == ''
+
+  # Candidates for rightsizing (low CPU, high memory)
+  rightsize_candidates: |
+    (spec.resources.num_vcpus_per_socket | default(1) * spec.resources.num_sockets | default(1)) <= 2 and
+    spec.resources.memory_size_mib | default(0) >= 16384 and
+    spec.resources.power_state | default('OFF') == 'ON'
+
+  # Test/development VMs that are powered on (cost optimization)
+  cost_optimization_candidates: |
+    spec.resources.power_state | default('OFF') == 'ON' and
+    metadata.categories.Environment | default('') in ['development', 'test', 'staging']
+
+# Caching
+cache: yes
+cache_plugin: jsonfile
+cache_timeout: 300  # 5 minutes
+cache_connection: /tmp/nutanix_inventory_cache
+cache_prefix: nutanix

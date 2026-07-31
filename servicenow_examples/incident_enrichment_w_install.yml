@@ -1,0 +1,104 @@
+---
+- name: Enrich and update an incident ticket in ServiceNow
+  hosts: "{{ _hosts | default('localhost') }}"
+  gather_facts: true
+
+  tasks:
+    - name: Simulate a failed service (Linux)
+      when: ansible_os_family != "Windows"
+      become: true
+      block:
+        - name: Install httpd
+          ansible.builtin.dnf:
+            name: httpd
+            state: present
+
+        - name: Reload systemd to pick up override
+          ansible.builtin.systemd:
+            daemon_reload: true
+
+        - name: Start httpd
+          ansible.builtin.service:
+            name: httpd
+            state: started
+
+        - name: Kill httpd main process to simulate OOM
+          ansible.builtin.shell: kill -9 $(systemctl show httpd -p MainPID --value) # noqa: command-instead-of-module[systemd]
+          changed_when: true
+
+        - name: Wait for systemd to register the failure
+          ansible.builtin.command: systemctl is-failed httpd # noqa: command-instead-of-module[systemd]
+          register: httpd_state
+          until: httpd_state.rc == 0
+          retries: 10
+          delay: 1
+          changed_when: false
+          failed_when: false
+
+    - name: Simulate a failed service (Windows)
+      when: ansible_os_family == "Windows"
+      block:
+        - name: Install IIS web server
+          ansible.windows.win_feature:
+            name: Web-Server
+            state: present
+
+        - name: Stop IIS service to simulate failure
+          ansible.windows.win_service:
+            name: W3SVC
+            state: stopped
+
+    - name: Get service status (Linux)
+      become: true
+      ansible.builtin.service_facts:
+      when: ansible_os_family != "Windows"
+
+    - name: Debug httpd service entry
+      when: ansible_os_family != "Windows"
+      ansible.builtin.debug:
+        msg: "{{ ansible_facts.services['httpd.service'] | default('NOT FOUND IN service_facts') }}"
+
+    - name: Set failed services (Linux)
+      when: ansible_os_family != "Windows"
+      ansible.builtin.set_fact:
+        failed_services: >-
+          {{ ansible_facts.services | dict2items
+             | selectattr('value.status', 'equalto', 'failed')
+             | items2dict }}
+
+    - name: Get service status (Windows)
+      when: ansible_os_family == "Windows"
+      block:
+        - name: Get service status (Windows)
+          ansible.windows.win_service_info:
+          register: win_service_info
+
+        - name: Set failed services (Windows)
+          ansible.builtin.set_fact:
+            failed_services: >-
+              {{ win_service_info.services
+                 | selectattr('start_mode', 'equalto', 'auto')
+                 | rejectattr('state', 'equalto', 'running')
+                 | list }}
+
+    - name: Update incident
+      delegate_to: localhost
+      run_once: true # noqa: run-once[task]
+      register: incident_out
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ lookup('env', 'SN_HOST') | default(omit) }}"
+          # api_key: "{{ lookup('env', 'SN_API_KEY') | default(omit) }}"
+          username: "{{ lookup('env', 'SN_USERNAME') | default(omit) }}"
+          password: "{{ lookup('env', 'SN_PASSWORD') | default(omit) }}"
+        number: "{{ req_number }}"
+        other:
+          work_notes: >
+            Host: {{ inventory_hostname }}
+            Failed Services: {{ failed_services | to_nice_json }}
+
+    - name: Set Incident Number
+      run_once: true # noqa: run-once[task]
+      ansible.builtin.set_stats:
+        data:
+          ServiceNow_Incident_Number: "{{ incident_out.record.number }}"

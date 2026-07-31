@@ -1,0 +1,69 @@
+---
+
+# use sno
+plugin: servicenow.itsm.now
+table: cmdb_ci_server
+#table: cmdb_ci_vm_object
+#table: cmdb_ci_linux_server
+columns: 
+  - ip_address
+  - fqdn
+  - dns_domain
+  - sys_class_name
+  - name
+  - environment
+  - os
+  - cpu_type
+  - operational_status
+
+enhanced: yes
+
+#inventory_hostname_source: fqdn
+#
+# Optional: Map ServiceNow variables to Ansible hostvars
+compose:
+  ansible_host: ip_address
+  inventory_hostname: "{{ name | upper }}"
+
+hostnames:
+  - "name | upper"
+
+groups:
+# Define your groups
+  # 1. Primary Group: Development Servers
+  development_nodes: "install_status == '1' and environment == 'Development'"
+
+  # 2. Primary Group: Production Servers
+  production_nodes: "install_status == '1' and environment == 'Production'"
+
+  # 3. The "Remainder" Group: Anything not in the above two
+  # This checks if the 'environment' field is NOT 'Development' AND NOT 'Production'
+  unclassified_nodes: "solaris not in ['os']"
+  
+  uninstalled: "install_status != 'installed'"
+
+  operational1: "operational_status != 'Operational'"
+
+  notunix: "os != 'AIX' and os != 'Solaris' and os != 'Linux Red Hat' and os != 'HP/UX'  and os != 'null'"
+
+  operational2: install_status == '1' and operational_status not in ['Operational', 'WAYOperational']
+
+  # fileservers: "'file' in (name | lower) "
+
+keyed_groups:
+  - key: dns_domain | lower
+    #prefix: ''
+    #seperator: ''
+  - key: subclass_name | lower | regex_replace("[/ ]", "_")
+    #prefix: ''
+    #separator: ''
+  - key: sys_class_name | lower | regex_replace("[/ ]", "_")
+    #prefix: ''
+    #separator: ''
+  - key: cpu_type | lower | regex_replace("[,^ /+]", "")
+    prefix: ''
+    separator: ''
+  - key: os | lower | regex_replace("[/ ]", "_")
+    prefix: ''
+    separator: ''
+

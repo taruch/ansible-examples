@@ -1,0 +1,10 @@
+- name: Extend Windows Partition to Maximum Available Size
+  hosts: "{{ _hosts } default('windows_servers') }}"
+  tasks:
+    - name: Resize drive D to its maximum supported size
+      community.windows.win_partition:
+        drive_letter: D
+        partition_size: -1
+        state: present
+
+...

@@ -1,0 +1,288 @@
+---
+# OpenShift Virtualization (KubeVirt) dynamic inventory configuration
+# Plugin: kubernetes.core.k8s
+# Documentation: https://docs.ansible.com/ansible/latest/collections/kubernetes/core/k8s_inventory.html
+#
+# This example focuses on VirtualMachine and VirtualMachineInstance resources
+# in OpenShift Virtualization (formerly CNV/Container-Native Virtualization)
+#
+# Authentication options:
+#   1. kubeconfig file (default: ~/.kube/config)
+#   2. Service account token (when running in-cluster)
+#   3. Username/password (not recommended)
+#
+# Environment variables:
+#   K8S_AUTH_KUBECONFIG - path to kubeconfig
+#   K8S_AUTH_CONTEXT - kubeconfig context to use
+#   K8S_AUTH_API_KEY - service account token
+
+plugin: kubernetes.core.k8s
+
+# Connection settings
+# host: https://api.openshift.example.com:6443
+# api_key: your-service-account-token
+# validate_certs: false
+# kubeconfig: ~/.kube/config
+# context: default
+
+# Target VirtualMachine and VirtualMachineInstance resources
+connections:
+  # VirtualMachine (VM definitions)
+  - kind: VirtualMachine
+    api_version: kubevirt.io/v1
+    namespaces:
+      - default
+      - production
+      - development
+      - staging
+    # Label selector to filter VMs
+    # label_selector: environment=production
+
+  # VirtualMachineInstance (running VM instances)
+  - kind: VirtualMachineInstance
+    api_version: kubevirt.io/v1
+    namespaces:
+      - default
+      - production
+      - development
+      - staging
+
+# Compose host variables from VM spec and status
+compose:
+  # Use VMI IP address if available
+  ansible_host: |
+    status.interfaces[0].ipAddress if status.interfaces is defined and status.interfaces | length > 0
+    else None
+
+  # Set ansible_user based on guest OS
+  ansible_user: |
+    'cloud-user' if 'rhel' in (metadata.labels['os.template.kubevirt.io/rhel'] | default(''))
+    else 'ubuntu' if 'ubuntu' in (metadata.labels['os.template.kubevirt.io/ubuntu'] | default(''))
+    else 'centos' if 'centos' in (metadata.labels['os.template.kubevirt.io/centos'] | default(''))
+    else 'fedora' if 'fedora' in (metadata.labels['os.template.kubevirt.io/fedora'] | default(''))
+    else 'Administrator' if 'windows' in (metadata.labels['os.template.kubevirt.io/win'] | default(''))
+    else 'root'
+
+  # VM properties
+  vm_namespace: metadata.namespace
+  vm_name: metadata.name
+  vm_uid: metadata.uid
+  vm_created: metadata.creationTimestamp
+
+  # Resource requests and limits
+  vcpu_cores: spec.template.spec.domain.cpu.cores | default(1)
+  vcpu_sockets: spec.template.spec.domain.cpu.sockets | default(1)
+  vcpu_threads: spec.template.spec.domain.cpu.threads | default(1)
+  total_vcpus: |
+    (spec.template.spec.domain.cpu.cores | default(1)) *
+    (spec.template.spec.domain.cpu.sockets | default(1)) *
+    (spec.template.spec.domain.cpu.threads | default(1))
+
+  memory_requested: spec.template.spec.domain.resources.requests.memory | default('1Gi')
+  memory_limit: spec.template.spec.domain.resources.limits.memory | default(memory_requested)
+
+  # VM state
+  vm_running: spec.running | default(false)
+  vm_ready: status.ready | default(false)
+  vm_phase: status.printableStatus | default('Unknown')
+
+  # Guest OS info from labels
+  guest_os_name: metadata.labels['os.template.kubevirt.io/name'] | default('unknown')
+  guest_os_version: metadata.labels['os.template.kubevirt.io/version'] | default('unknown')
+
+  # Workload type
+  workload_flavor: metadata.labels['flavor.template.kubevirt.io/name'] | default('custom')
+
+  # Network info
+  primary_network: spec.template.spec.networks[0].name if spec.template.spec.networks is defined else 'default'
+  primary_ip: status.interfaces[0].ipAddress if status.interfaces is defined and status.interfaces | length > 0 else None
+
+  # Storage info
+  disk_count: spec.template.spec.domain.devices.disks | default([]) | length
+  primary_disk: spec.template.spec.domain.devices.disks[0].name if spec.template.spec.domain.devices.disks is defined else None
+
+  # Custom annotations
+  vm_description: metadata.annotations['description'] | default('')
+  backup_policy: metadata.annotations['backup.kubevirt.io/policy'] | default('none')
+
+# Static groups
+groups:
+  # All VMs in OpenShift Virtualization
+  virt_vms: true
+
+  # Running VMs
+  virt_running: spec.running | default(false) == true
+
+  # Stopped VMs
+  virt_stopped: spec.running | default(false) == false
+
+  # Ready VMs (running and ready)
+  virt_ready: status.ready | default(false) == true
+
+  # VMs with live migration enabled
+  virt_migratable: |
+    spec.template.spec.domain.devices.disks is defined and
+    spec.template.spec.domain.devices.disks | selectattr('disk', 'defined') | list | length > 0
+
+  # Linux VMs
+  os_linux: |
+    'rhel' in (metadata.labels | dict2items | selectattr('key', 'match', 'os.template.kubevirt.io/.*') | map(attribute='key') | join('')) or
+    'centos' in (metadata.labels | dict2items | selectattr('key', 'match', 'os.template.kubevirt.io/.*') | map(attribute='key') | join('')) or
+    'ubuntu' in (metadata.labels | dict2items | selectattr('key', 'match', 'os.template.kubevirt.io/.*') | map(attribute='key') | join('')) or
+    'fedora' in (metadata.labels | dict2items | selectattr('key', 'match', 'os.template.kubevirt.io/.*') | map(attribute='key') | join(''))
+
+  # Windows VMs
+  os_windows: |
+    'win' in (metadata.labels | dict2items | selectattr('key', 'match', 'os.template.kubevirt.io/.*') | map(attribute='key') | join(''))
+
+# Keyed groups
+keyed_groups:
+  # Group by namespace (project)
+  - key: metadata.namespace
+    prefix: ns
+
+  # Group by environment label
+  - key: metadata.labels.environment | default('untagged')
+    prefix: env
+
+  # Group by application label
+  - key: metadata.labels.app | default('none')
+    prefix: app
+
+  # Group by tier label
+  - key: metadata.labels.tier | default('none')
+    prefix: tier
+
+  # Group by owner label
+  - key: metadata.labels.owner | default('unassigned')
+    prefix: owner
+
+  # Group by workload flavor
+  - key: metadata.labels['flavor.template.kubevirt.io/name'] | default('custom')
+    prefix: flavor
+
+  # Group by OS name
+  - key: metadata.labels['os.template.kubevirt.io/name'] | default('unknown')
+    prefix: os
+
+  # Group by OS version
+  - key: |
+      (metadata.labels['os.template.kubevirt.io/name'] | default('unknown')) + '-' +
+      (metadata.labels['os.template.kubevirt.io/version'] | default('unknown'))
+    prefix: osver
+    separator: _
+
+  # Group by vCPU count
+  - key: |
+      (spec.template.spec.domain.cpu.cores | default(1)) *
+      (spec.template.spec.domain.cpu.sockets | default(1)) *
+      (spec.template.spec.domain.cpu.threads | default(1))
+    prefix: vcpu
+
+  # Group by memory size (in GB)
+  - key: |
+      spec.template.spec.domain.resources.requests.memory | default('1Gi') |
+      regex_replace('([0-9]+)Gi', '\\1') | int
+    prefix: memory_gb
+
+  # Group by VM phase/status
+  - key: status.printableStatus | default('Unknown')
+    prefix: status
+
+  # Group by primary network
+  - key: spec.template.spec.networks[0].name if spec.template.spec.networks is defined else 'default'
+    prefix: network
+
+# Use VM name as hostname
+hostnames:
+  - metadata.name
+
+# Conditional groups based on complex logic
+conditional_groups:
+  # Production VMs
+  production: |
+    metadata.namespace == 'production' or
+    metadata.labels.environment | default('') == 'production'
+
+  # Development VMs
+  development: |
+    metadata.namespace in ['development', 'dev'] or
+    metadata.labels.environment | default('') == 'development'
+
+  # Staging VMs
+  staging: |
+    metadata.namespace == 'staging' or
+    metadata.labels.environment | default('') == 'staging'
+
+  # Web servers
+  webservers: |
+    metadata.labels.app | default('') in ['nginx', 'apache', 'httpd', 'web'] or
+    metadata.labels.tier | default('') == 'frontend'
+
+  # Database servers
+  databases: |
+    metadata.labels.app | default('') in ['mysql', 'postgresql', 'mongodb', 'redis', 'mariadb'] or
+    metadata.labels.tier | default('') == 'database'
+
+  # Application servers
+  appservers: |
+    metadata.labels.tier | default('') in ['application', 'backend']
+
+  # RHEL VMs
+  rhel: |
+    'rhel' in (metadata.labels['os.template.kubevirt.io/rhel'] | default(''))
+
+  # Ubuntu VMs
+  ubuntu: |
+    'ubuntu' in (metadata.labels['os.template.kubevirt.io/ubuntu'] | default(''))
+
+  # CentOS VMs
+  centos: |
+    'centos' in (metadata.labels['os.template.kubevirt.io/centos'] | default(''))
+
+  # Windows Server VMs
+  windows_server: |
+    'win' in (metadata.labels | dict2items | selectattr('key', 'match', 'os.template.kubevirt.io/.*') | map(attribute='key') | join('')) and
+    'server' in (metadata.labels['os.template.kubevirt.io/name'] | default('') | lower)
+
+  # High CPU VMs (4+ vCPUs)
+  high_cpu: |
+    (spec.template.spec.domain.cpu.cores | default(1)) *
+    (spec.template.spec.domain.cpu.sockets | default(1)) *
+    (spec.template.spec.domain.cpu.threads | default(1)) >= 4
+
+  # High memory VMs (8GB+)
+  high_memory: |
+    (spec.template.spec.domain.resources.requests.memory | default('1Gi') |
+    regex_replace('([0-9]+)Gi', '\\1') | int) >= 8
+
+  # VMs with persistent storage
+  persistent_storage: |
+    spec.template.spec.volumes is defined and
+    (spec.template.spec.volumes | selectattr('persistentVolumeClaim', 'defined') | list | length > 0)
+
+  # VMs with cloud-init
+  cloud_init: |
+    spec.template.spec.volumes is defined and
+    (spec.template.spec.volumes | selectattr('cloudInitNoCloud', 'defined') | list | length > 0 or
+     spec.template.spec.volumes | selectattr('cloudInitConfigDrive', 'defined') | list | length > 0)
+
+  # VMs requiring backup
+  backup_required: |
+    metadata.annotations['backup.kubevirt.io/policy'] | default('none') != 'none'
+
+  # Mission critical VMs
+  mission_critical: |
+    metadata.labels.criticality | default('') == 'critical' or
+    metadata.labels.tier | default('') == '1'
+
+  # VMs in node affinity groups (for anti-affinity)
+  affinity_configured: |
+    spec.template.spec.affinity is defined
+
+# Caching
+# cache: yes
+# cache_plugin: jsonfile
+# cache_timeout: 300
+# cache_connection: /tmp/k8s_inventory_cache
+# cache_prefix: k8s_virt

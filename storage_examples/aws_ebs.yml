@@ -1,0 +1,14 @@
+- name: Provision and Attach an AWS EBS Volume
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create a 50 GiB gp3 EBS volume and attach to target instance
+      amazon.aws.ec2_vol:
+        instance: "i-0123456789abcdef0"
+        volume_size: 50
+        volume_type: gp3
+        device_name: /dev/sdf
+        encrypted: true
+        zone: us-east-1a
+        state: present
+      register: ebs_volume_info

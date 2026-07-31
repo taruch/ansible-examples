@@ -1,0 +1,17 @@
+- name: Expand Virtual Disk on VMware vSphere
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Expand a specific VM disk size to 100 GB
+      community.vmware.vmware_guest_disk:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+        datacenter: "Datacenter-01"
+        name: "target-vm-name"
+        disk:
+          - scsi_controller: 0
+            unit_number: 1
+            size_gb: 100
+            state: present
