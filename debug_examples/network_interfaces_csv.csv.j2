@@ -1,0 +1,14 @@
+hostname,interface,ip_address,subnet,mac_address,mtu,speed_mbps,duplex,status,description
+{% for host in ansible_play_hosts | sort %}
+{% set hv = hostvars[host] %}
+{% if hv.ansible_net_interfaces is defined %}
+{% for iface_name in hv.ansible_net_interfaces | sort %}
+{% set iface = hv.ansible_net_interfaces[iface_name] %}
+{% set ips = iface.ipv4 | default([]) %}
+{% set ip_str = ips | map(attribute='address') | join(';') if ips | length > 0 else 'N/A' %}
+{% set subnet_str = ips | map(attribute='subnet') | join(';') if ips | length > 0 else 'N/A' %}
+{% set speed = ((iface.bandwidth | default(0) | int) / 1000000) | int if iface.bandwidth is defined and iface.bandwidth else 'N/A' %}
+{{ host }},{{ iface_name }},{{ ip_str }},{{ subnet_str }},{{ iface.macaddress | default('N/A') }},{{ iface.mtu | default('N/A') }},{{ speed }},{{ iface.duplex | default('N/A') }},{{ iface.operstatus | default('N/A') }},{{ iface.description | default('') }}
+{% endfor %}
+{% endif %}
+{% endfor %}

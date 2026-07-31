@@ -1,0 +1,43 @@
+---
+# Generate a CSV report of Arista EOS device interfaces from ansible_net_interfaces
+#
+# Uses arista.eos.eos_facts to gather interface data.
+#
+# Usage:
+#   ansible-playbook network_interfaces_csv.yml -i inventory
+#   ansible-playbook network_interfaces_csv.yml -i inventory -e "_hosts=eos_switches"
+#   ansible-playbook network_interfaces_csv.yml -i inventory -e "report_path=/opt/reports/interfaces.csv"
+
+- name: Gather network facts from devices
+  hosts: "{{ _hosts | default('all') }}"
+  gather_facts: false
+  tasks:
+    - name: Gather EOS facts
+      arista.eos.eos_facts:
+        gather_subset: interfaces
+
+- name: Generate network interfaces CSV report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    report_path: "/tmp/network_interfaces.csv"
+  tasks:
+    - name: Generate CSV from template
+      ansible.builtin.template:
+        src: network_interfaces_csv.csv.j2
+        dest: "{{ report_path }}"
+        mode: '0644'
+
+    - name: Display report location
+      ansible.builtin.debug:
+        msg: "Report written to {{ report_path }}"
+
+    - name: Show report contents
+      ansible.builtin.command: cat "{{ report_path }}"
+      register: report_contents
+      changed_when: false
+
+    - name: Print report
+      ansible.builtin.debug:
+        msg: "{{ report_contents.stdout_lines }}"
