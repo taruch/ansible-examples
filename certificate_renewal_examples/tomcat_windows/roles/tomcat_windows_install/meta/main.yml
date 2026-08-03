@@ -12,5 +12,6 @@ galaxy_info:
 
 collections:
   - ansible.windows
+  - community.windows   # win_firewall_rule
 
 dependencies: []

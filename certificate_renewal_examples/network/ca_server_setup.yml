@@ -1,0 +1,269 @@
+---
+- name: Configure Demo Environment CA Server
+  hosts: ca-host
+  gather_facts: false
+  become: false
+
+  vars:
+    ansible_user: ec2-user
+    ca_files: "{{ _ca_files | default('/opt/X509CA') }}"
+
+  tasks:
+
+    - name: Create a ca-server-admins group
+      ansible.builtin.group:
+        name: ca-server-admins
+        state: present
+      become: true
+
+    - name: Create a CA Server user
+      ansible.builtin.user:
+        name: ca-admin
+        password: "{{ CA_PASSWORD | password_hash('sha512') }}"
+        groups: adm,ca-server-admins,wheel
+        home: /home/ca-admin
+        shell: /bin/bash
+        state: present
+        generate_ssh_key: true
+        ssh_key_bits: 2048
+        ssh_key_file: .ssh/id_rsa
+      become: true
+
+    - name: Add existing user ec2-user to group
+      ansible.builtin.user:
+        name: 'ec2-user'
+        groups: ca-server-admins
+        append: true
+      become: true
+
+    - name: Create CA Directory on CA Server
+      ansible.builtin.file:
+        path: "{{ ca_files }}"
+        state: directory
+        mode: '0775'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Check that the 50-cloud-init.conf exists
+      ansible.builtin.stat:
+        path: /etc/ssh/sshd_config.d/50-cloud-init.conf
+      register: stat_result
+      become: true
+
+    - name: Allow Password Based Login when necessary
+      block:
+        - name: "Allow password based login"
+          ansible.builtin.lineinfile:
+            dest: "/etc/ssh/sshd_config.d/50-cloud-init.conf"
+            state: "present"
+            regexp: "PasswordAuthentication no"
+            line: "PasswordAuthentication yes"
+          become: true
+          register: ssh_password
+
+        - name: Restart sshd
+          when: ssh_password.changed
+          block:
+            - name: Restart sshd
+              ansible.builtin.service:
+                name: sshd
+                state: reloaded
+              timeout: 10
+              register: command_result
+              failed_when: "'Unable to reload service sshd' in command_result.msg"
+              ignore_errors: true
+
+            - name: Sleep for 300 seconds and continue with play
+              ansible.builtin.wait_for:
+                timeout: 30
+                delay: 10
+                port: 22
+                host: "{{ (ansible_ssh_host | default(ansible_host)) | default(inventory_hostname) }}"
+              connection: local
+      when: stat_result.stat.exists
+
+    - name: Ensure correct crypto policy
+      block:
+        - name: Check current crypto policy
+          ansible.builtin.command: update-crypto-policies --show
+          register: crypto_policy
+
+        - name: Set crypto policy
+          when: crypto_policy.msg != 'LEGACY'
+          ansible.builtin.command: update-crypto-policies --set LEGACY
+          become: true
+          register: crypto_result
+
+        - name: Reboot
+          when: crypto_result.changed
+          ansible.builtin.reboot:
+          become: true
+
+        - name: Sleep for 300 seconds and continue with play
+          ansible.builtin.wait_for:
+            timeout: 30
+            delay: 10
+            port: 22
+            host: "{{ (ansible_ssh_host | default(ansible_host)) | default(inventory_hostname) }}"
+          connection: local
+
+    - name: "Allow admin users to sudo without a password"
+      ansible.builtin.lineinfile:
+        dest: "/etc/sudoers"
+        state: "present"
+        regexp: "^%wheel"
+        line: "%wheel ALL=(ALL) NOPASSWD: ALL"
+      become: true
+
+    - name: Copy openssl.cfg file to CA Directory
+      ansible.builtin.copy:
+        src: ./files/openssl.cfg
+        dest: "{{ ca_files }}"
+        mode: '0660'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Copy openssl.cfg file to CA Directory
+      ansible.builtin.copy:
+        src: ./files/.rnd
+        dest: "{{ ca_files }}"
+        mode: '0660'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create demoCA Directory on CA Server
+      ansible.builtin.file:
+        path: "{{ ca_files }}/demoCA"
+        state: directory
+        mode: '0770'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create CA Certs Directory on CA Server
+      ansible.builtin.file:
+        path: "{{ ca_files }}/demoCA/certs"
+        state: directory
+        mode: '0770'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create CA Private Key Directory on CA Server
+      ansible.builtin.file:
+        path: "{{ ca_files }}/demoCA/crl"
+        state: directory
+        mode: '0770'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create newcerts CA Directory on CA Server
+      ansible.builtin.file:
+        path: "{{ ca_files }}/demoCA/newcerts"
+        state: directory
+        mode: '0770'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create private CA Directory on CA Server
+      ansible.builtin.file:
+        path: "{{ ca_files }}/demoCA/private"
+        state: directory
+        mode: '0770'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create index.txt file
+      ansible.builtin.copy:
+        content: ""
+        dest: '{{ ca_files }}/demoCA/index.txt'
+        mode: '0660'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create index.txt.attr file
+      ansible.builtin.copy:
+        content: "unique_subject = no"
+        dest: '{{ ca_files }}/demoCA/index.txt.attr'
+        mode: '0660'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Create serial file
+      ansible.builtin.copy:
+        content: "01"
+        dest: '{{ ca_files }}/demoCA/serial'
+        mode: '0660'
+        owner: ca-admin
+        group: ca-server-admins
+      become: true
+
+    - name: Install pip
+      ansible.builtin.dnf:
+        name: python3-pip
+        state: installed
+      become: true
+
+    - name: Install community python package on version 1.2.3
+      vars:
+        ansible_user: ca-admin
+        ansible_password: "{{ CA_PASSWORD }}"
+      ansible.builtin.pip:
+        name:
+          - cryptography>=1.2.3
+          - pexpect
+
+    - name: Create private key with password protection
+      vars:
+        ansible_user: ca-admin
+        ansible_password: "{{ CA_PASSWORD }}"
+      community.crypto.openssl_privatekey:
+        path: "{{ ca_files }}/demoCA/private/cakey.pem"
+        passphrase: "{{ CA_PASSPHRASE }}"
+        cipher: auto
+        size: 2048
+
+    - name: Create certificate signing request (CSR) for CA certificate
+      vars:
+        ansible_user: ca-admin
+        ansible_password: "{{ CA_PASSWORD }}"
+      community.crypto.openssl_csr_pipe:
+        privatekey_path: "{{ ca_files }}/demoCA/private/cakey.pem"
+        privatekey_passphrase: "{{ CA_PASSPHRASE }}"
+        # common_name: Ansible CA
+        subject:
+          CN: ca-server.ansible.local
+          OU: NAPS
+          O: RedHat
+          L: Pasadena
+          ST: MD
+          C: US
+        use_common_name_for_san: false  # since we do not specify SANs, don't use CN as a SAN
+        basic_constraints:
+          - 'CA:TRUE'
+        basic_constraints_critical: true
+        key_usage:
+          - keyCertSign
+        key_usage_critical: true
+      register: ca_csr
+
+    - name: Create self-signed CA certificate from CSR
+      vars:
+        ansible_user: ca-admin
+        ansible_password: "{{ CA_PASSWORD }}"
+      community.crypto.x509_certificate:
+        path: "{{ ca_files }}/demoCA/cacert.pem"
+        csr_content: "{{ ca_csr.csr }}"
+        privatekey_path: "{{ ca_files }}/demoCA/private/cakey.pem"
+        privatekey_passphrase: "{{ CA_PASSPHRASE }}"
+        provider: selfsigned
+
+...

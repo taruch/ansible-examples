@@ -1,0 +1,102 @@
+---
+# Configuration-as-code for deploying Server Reboot job templates
+# to Ansible Automation Platform 2.6.
+#
+# Apply with ../controller_setup/configure_aap.yml (or any wrapper that
+# `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
+#
+# Required pre-existing artifacts in AAP:
+#   - A Machine credential for the target hosts. Set its name below
+#     in `machine_credential`.
+#   - An inventory containing the hosts to reboot. Set its name below
+#     in `target_inventory`.
+
+# ---------------------------------------------------------------------------
+# Tunables — change these without touching the rest of this file.
+# ---------------------------------------------------------------------------
+machine_credential: "Demo Credential"
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+project_scm_branch: "master"
+target_organization: "Default"
+target_inventory: "Demo Inventory"
+
+# ---------------------------------------------------------------------------
+# Project — git-synced from this repository.
+# ---------------------------------------------------------------------------
+controller_projects:
+  - name: "Server Reboot"
+    description: "Server reboot playbooks for Linux and Windows."
+    organization: "{{ target_organization }}"
+    scm_type: "git"
+    scm_url: "{{ project_scm_url }}"
+    scm_branch: "{{ project_scm_branch }}"
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: true
+    allow_override: false
+
+# ---------------------------------------------------------------------------
+# Job templates.
+# ---------------------------------------------------------------------------
+controller_templates:
+  - name: "SERVER REBOOT / Linux"
+    description: "Reboot a Linux server and wait for it to come back online."
+    organization: "{{ target_organization }}"
+    project: "Server Reboot"
+    inventory: "{{ target_inventory }}"
+    playbook: "server_reboot/linux_server_reboot.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: _hosts
+          question_name: !unsafe "Which server(s) do you want to reboot?"
+          question_description: !unsafe "Ansible host pattern — a hostname, group name, comma-separated list, or 'all'"
+          type: text
+          required: true
+          default: ""
+          min: 1
+          max: 1024
+          new_question: true
+
+  - name: "SERVER REBOOT / Windows"
+    description: "Reboot a Windows server and wait for it to come back online."
+    organization: "{{ target_organization }}"
+    project: "Server Reboot"
+    inventory: "{{ target_inventory }}"
+    playbook: "server_reboot/windows_server_reboot.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: _hosts
+          question_name: !unsafe "Which server(s) do you want to reboot?"
+          question_description: !unsafe "Ansible host pattern — a hostname, group name, comma-separated list, or 'all'"
+          type: text
+          required: true
+          default: ""
+          min: 1
+          max: 1024
+          new_question: true
+
+...

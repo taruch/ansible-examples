@@ -1,0 +1,143 @@
+---
+# Install a deliberately-fake "AnsibleDemoSvc" on each targeted host so the
+# scheduled service-validation playbook (ensure_service.yml) has something
+# safe to demo against — stop it from a console and watch the schedule
+# restart it + open a ServiceNow incident.
+#
+# Per-host OS detection:
+#   - Windows (ansible_system == "Win32NT") → PowerShell loop wrapped via NSSM
+#     (installed via Chocolatey, auto-bootstrapped if missing).
+#   - Linux   (ansible_system == "Linux")    → bash loop wrapped via systemd.
+#
+# Idempotent — re-running is a no-op once the service exists.
+#
+# After deploy, set the validation playbook's `service_name` to
+# `AnsibleDemoSvc` (host_vars, group_vars, or `-e service_name=AnsibleDemoSvc`)
+# so it watches the demo service rather than the default `Tomcat10`.
+
+- name: Deploy the AnsibleDemoSvc fake service for the validation demo
+  hosts: all
+  gather_facts: true
+  vars:
+    demo_service_name: AnsibleDemoSvc
+    win_demo_dir: 'C:\demo'
+    lin_demo_script: /usr/local/bin/ansible-demo-svc
+
+  tasks:
+    # =========================================================================
+    # Windows hosts
+    # =========================================================================
+    - name: Windows — set up AnsibleDemoSvc via NSSM
+      when: ansible_system == "Win32NT"
+      vars:
+        nssm_version: "2.24"
+        nssm_zip_url: "https://nssm.cc/release/nssm-{{ nssm_version }}.zip"
+      block:
+        - name: Ensure demo directory exists
+          ansible.windows.win_file:
+            path: "{{ win_demo_dir }}"
+            state: directory
+
+        - name: Drop the fake-service loop script
+          ansible.windows.win_copy:
+            content: |
+              # No-op loop. Sleeps forever, returning to the SCM-aware nssm
+              # wrapper so the service reports "running". Safe to stop/start.
+              while ($true) { Start-Sleep -Seconds 60 }
+            dest: '{{ win_demo_dir }}\fake_service.ps1'
+
+        - name: Check whether nssm.exe is already in the demo dir
+          ansible.windows.win_stat:
+            path: '{{ win_demo_dir }}\nssm.exe'
+          register: nssm_stat
+
+        - name: Download NSSM zip
+          ansible.windows.win_get_url:
+            url: "{{ nssm_zip_url }}"
+            dest: 'C:\Windows\Temp\nssm-{{ nssm_version }}.zip'
+          when: not nssm_stat.stat.exists
+
+        - name: Extract NSSM
+          community.windows.win_unzip:
+            src: 'C:\Windows\Temp\nssm-{{ nssm_version }}.zip'
+            dest: 'C:\Windows\Temp\'
+          when: not nssm_stat.stat.exists
+
+        - name: Place nssm.exe in {{ win_demo_dir }}
+          ansible.windows.win_copy:
+            src: 'C:\Windows\Temp\nssm-{{ nssm_version }}\win64\nssm.exe'
+            dest: '{{ win_demo_dir }}\nssm.exe'
+            remote_src: true
+          when: not nssm_stat.stat.exists
+
+        - name: Check whether the service already exists
+          ansible.windows.win_service_info:
+            name: "{{ demo_service_name }}"
+          register: win_demo_svc
+
+        - name: Register the demo service with NSSM
+          ansible.windows.win_shell: |
+            & '{{ win_demo_dir }}\nssm.exe' install {{ demo_service_name }} powershell.exe "-NoProfile -ExecutionPolicy Bypass -File {{ win_demo_dir }}\fake_service.ps1"
+            & '{{ win_demo_dir }}\nssm.exe' set {{ demo_service_name }} DisplayName "Ansible Demo Service"
+            & '{{ win_demo_dir }}\nssm.exe' set {{ demo_service_name }} Description "Fake service for the AAP service-validation demo. Safe to stop."
+            & '{{ win_demo_dir }}\nssm.exe' set {{ demo_service_name }} Start SERVICE_AUTO_START
+          when: not win_demo_svc.exists
+
+        - name: Ensure the service is started
+          ansible.windows.win_service:
+            name: "{{ demo_service_name }}"
+            state: started
+            start_mode: auto
+
+    # =========================================================================
+    # Linux hosts
+    # =========================================================================
+    - name: Linux — set up ansible-demo-svc via systemd
+      when: ansible_system == "Linux"
+      become: true
+      block:
+        - name: Drop the fake-service loop script
+          ansible.builtin.copy:
+            content: |
+              #!/usr/bin/env bash
+              # No-op loop. Safe to stop; systemd reports "active (running)"
+              # while the bash process sleeps. Safe to demo.
+              while true; do
+                sleep 60
+              done
+            dest: "{{ lin_demo_script }}"
+            mode: '0755'
+            owner: root
+            group: root
+
+        - name: Drop the systemd unit
+          ansible.builtin.copy:
+            content: |
+              [Unit]
+              Description=Ansible Demo Service (no-op loop, safe to stop)
+              After=network.target
+
+              [Service]
+              Type=simple
+              ExecStart={{ lin_demo_script }}
+              Restart=on-failure
+              RestartSec=5
+
+              [Install]
+              WantedBy=multi-user.target
+            dest: "/etc/systemd/system/{{ demo_service_name }}.service"
+            mode: '0644'
+            owner: root
+            group: root
+          register: lin_unit
+
+        - name: Reload systemd if the unit changed
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: lin_unit is changed
+
+        - name: Enable and start the demo service
+          ansible.builtin.systemd_service:
+            name: "{{ demo_service_name }}"
+            enabled: true
+            state: started

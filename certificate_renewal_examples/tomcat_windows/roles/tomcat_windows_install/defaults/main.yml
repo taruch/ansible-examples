@@ -8,5 +8,10 @@ tomcat_installer_url: "https://dlcdn.apache.org/tomcat/tomcat-10/v{{ tomcat_vers
 tomcat_home: 'C:\Program Files\Apache Software Foundation\Tomcat 10.1'
 tomcat_service: "Tomcat10"
 
+# TLS connector port. Matches the same default in tomcat_windows_tls; the
+# install role opens the Windows firewall for this port at the end so the
+# host is reachable as soon as TLS is configured.
+connector_port: 8443
+
 # WAR to deploy as ROOT. Built on the control node by the demo_prep role.
 war_path: "{{ playbook_dir }}/files/hello.war"
