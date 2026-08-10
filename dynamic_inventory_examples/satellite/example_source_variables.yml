@@ -1,4 +1,12 @@
 ---
+;plugin: theforeman.foreman.foreman
+
+legacy_hostvars: true
+validate_certs: false
+want_facts: true
+want_hostcollections: true
+want_params: true
+
 compose:
   ansible_host: foreman_ip
 satellite6_group_prefix: Satellite_
@@ -21,9 +29,27 @@ keyed_groups:
 - key: foreman['content_facet_attributes']['content_view_name'] | lower | regex_replace(' ', '') | regex_replace('[^A-Za-z0-9_]', '_')
   prefix: foreman_content_view_
   separator: ''
-legacy_hostvars: true
-;plugin: theforeman.foreman.foreman
-validate_certs: false
-want_facts: true
-want_hostcollections: false
-want_params: true
+- key: foreman['operatingsystem_name'] | lower | regex_replace(' ', '_') | regex_replace('[^A-Za-z0-9_]', '_')
+  prefix: foreman_os_
+  separator: ''
+- key: foreman['hostgroup_title'] | default('ungrouped') | lower | regex_replace(' ', '') | regex_replace('[^A-Za-z0-9_]', '_')
+  prefix: foreman_hostgroup_
+  separator: ''
+- key: foreman['domain_name'] | default('') | lower | regex_replace('[^A-Za-z0-9_]', '_')
+  prefix: foreman_domain_
+  separator: ''
+- key: foreman['architecture_name'] | default('') | lower
+  prefix: foreman_arch_
+  separator: ''
+- key: foreman['compute_resource_name'] | default('baremetal') | lower | regex_replace(' ', '') | regex_replace('[^A-Za-z0-9_]', '_')
+  prefix: foreman_compute_
+  separator: ''
+- key: foreman['subnet_name'] | default('') | lower | regex_replace(' ', '_') | regex_replace('[^A-Za-z0-9_]', '_')
+  prefix: foreman_subnet_
+  separator: ''
+- key: foreman['model_name'] | default('') | lower | regex_replace(' ', '_') | regex_replace('[^A-Za-z0-9_]', '_')
+  prefix: foreman_model_
+  separator: ''
+- key: foreman['host_collections'] | default([]) | map(attribute='name') | list
+  prefix: foreman_hostcollection_
+  separator: ''
