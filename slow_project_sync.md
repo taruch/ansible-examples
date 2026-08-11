@@ -43,7 +43,7 @@ If your Git repository contains a `collections/requirements.yml` or `roles/requi
 Many teams check the **"Update Revision on Launch"** box on their Projects to guarantee they are always running the newest playbooks. However, if you trigger a workflow or launch 10 jobs back-to-back, AAP will hit Git 10 consecutive times, queueing up your jobs.
 
 * **The Fix:** Set the **SCM Update Cache Timeout** (configured in seconds) on your Project settings.
-* **How it works:** If you set this to `120` or `300` seconds, AAP will say: *"I know you asked to update on launch, but I literally just did a Git sync 45 seconds ago. I will reuse that cache and skip hitting Git."* This drastically prevents bottlenecking during concurrent job launches.
+* **How it works:** If you set this to `120` or `300` seconds, AAP will say: *"I know you asked to update on launch, but I literally just did a Git sync 45 seconds ago. I will reuse that cache and skip hitting Git."* This drastically prevents bottlenecking during concurrent job launches, but also means if an update was made the job won't get this update. If you are experiencing project sync issues, a much better solution is a proactive sync (directions below).
 
 ---
 
