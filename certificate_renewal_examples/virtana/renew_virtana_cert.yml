@@ -1,0 +1,201 @@
+---
+# Renew the SSL certificate on a Virtana appliance (Infrastructure Observability / VirtualWisdom).
+# Virtana does not expose certificate management via REST API.
+# Pattern: SSH to the appliance -> backup keystore -> import new cert via keytool -> restart services.
+
+- name: Renew Virtana appliance SSL certificate
+  hosts: virtana
+  become: true
+
+  vars:
+    cert_name: "{{ inventory_hostname | regex_replace('\\.', '_') }}"
+
+    # Local (control node) cert sources
+    cert_src: "files/{{ cert_name }}.crt"
+    key_src: "files/{{ cert_name }}.key"
+    chain_src: "files/{{ cert_name }}_chain.crt"
+    p12_src: "files/{{ cert_name }}.p12"
+
+    # Virtana appliance paths (adjust if your installation differs)
+    virtana_home: "/opt/virtana"
+    keystore_path: "{{ virtana_home }}/conf/keystore.jks"
+    keystore_password: "changeit"
+    keystore_alias: "virtana"
+
+    # Backup
+    backup_dir: "/opt/virtana/backups"
+    backup_suffix: "{{ ansible_date_time.date }}"
+
+    # PKCS12 password for import bundle
+    p12_password: "changeit"
+
+    # Services to restart after cert replacement
+    virtana_services:
+      - virtana
+      - virtana-proxy
+
+  pre_tasks:
+    - name: Verify local cert files exist on control node
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: src_files
+      failed_when: not src_files.stat.exists
+      loop:
+        - "{{ cert_src }}"
+        - "{{ key_src }}"
+
+    - name: Read new cert metadata
+      community.crypto.x509_certificate_info:
+        path: "{{ cert_src }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: cert_info
+
+    - name: Show new cert validity
+      ansible.builtin.debug:
+        msg: >-
+          New cert subject={{ cert_info.subject.commonName | default('?') }}
+          not_after={{ cert_info.not_after }}
+      run_once: true
+
+  tasks:
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Backup current keystore
+      ansible.builtin.copy:
+        src: "{{ keystore_path }}"
+        dest: "{{ backup_dir }}/keystore.jks.{{ backup_suffix }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Create PKCS12 bundle from cert and key on control node
+      community.crypto.openssl_pkcs12:
+        path: "{{ p12_src }}"
+        certificate_path: "{{ cert_src }}"
+        privatekey_path: "{{ key_src }}"
+        other_certificates: "{{ chain_src if (chain_src is defined and chain_src | length > 0) else omit }}"
+        passphrase: "{{ p12_password }}"
+        friendly_name: "{{ keystore_alias }}"
+        state: present
+        action: export
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Copy PKCS12 bundle to appliance
+      ansible.builtin.copy:
+        src: "{{ p12_src }}"
+        dest: "/tmp/{{ cert_name }}.p12"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Remove existing alias from keystore
+      ansible.builtin.command:
+        cmd: >-
+          keytool -delete
+          -alias {{ keystore_alias }}
+          -keystore {{ keystore_path }}
+          -storepass {{ keystore_password }}
+          -noprompt
+      register: delete_result
+      changed_when: delete_result.rc == 0
+      failed_when: false
+      no_log: true
+
+    - name: Import PKCS12 into Java keystore
+      ansible.builtin.command:
+        cmd: >-
+          keytool -importkeystore
+          -srckeystore /tmp/{{ cert_name }}.p12
+          -srcstoretype PKCS12
+          -srcstorepass {{ p12_password }}
+          -destkeystore {{ keystore_path }}
+          -deststoretype JKS
+          -deststorepass {{ keystore_password }}
+          -destalias {{ keystore_alias }}
+          -srcalias {{ keystore_alias }}
+          -noprompt
+      no_log: true
+
+    - name: Copy chain file to appliance for import
+      ansible.builtin.copy:
+        src: "{{ chain_src }}"
+        dest: "/tmp/{{ cert_name }}_chain.crt"
+        owner: root
+        group: root
+        mode: "0644"
+      when: chain_src is defined
+
+    - name: Import CA chain into keystore
+      ansible.builtin.command:
+        cmd: >-
+          keytool -importcert
+          -alias {{ keystore_alias }}_ca
+          -file /tmp/{{ cert_name }}_chain.crt
+          -keystore {{ keystore_path }}
+          -storepass {{ keystore_password }}
+          -noprompt
+      when: chain_src is defined
+      no_log: true
+
+    - name: Verify the keystore contains the new cert
+      ansible.builtin.command:
+        cmd: >-
+          keytool -list
+          -alias {{ keystore_alias }}
+          -keystore {{ keystore_path }}
+          -storepass {{ keystore_password }}
+          -v
+      register: keystore_verify
+      changed_when: false
+      no_log: true
+
+    - name: Restart Virtana services to apply new certificate
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: restarted
+      loop: "{{ virtana_services }}"
+      register: restart_result
+
+    - name: Wait for Virtana web interface to come back up
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 443
+        timeout: 120
+        delay: 10
+
+    - name: Verify the renewed cert is being served
+      community.crypto.get_certificate:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 443
+      delegate_to: localhost
+      become: false
+      register: live_cert
+
+    - name: Assert the served cert matches the renewed cert
+      ansible.builtin.assert:
+        that:
+          - live_cert.not_after == cert_info.not_after
+        fail_msg: "Served cert does not match the renewed cert."
+        success_msg: "Certificate renewed successfully. New expiry: {{ live_cert.not_after }}"
+
+    - name: Clean up temporary files on appliance
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/{{ cert_name }}.p12"
+        - "/tmp/{{ cert_name }}_chain.crt"

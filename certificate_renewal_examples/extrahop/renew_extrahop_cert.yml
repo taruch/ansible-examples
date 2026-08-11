@@ -1,0 +1,156 @@
+---
+# Renew the SSL certificate on an ExtraHop appliance (EDA, ECA, EXA, Reveal(x)).
+# Pattern: generate CSR on appliance -> sign externally -> upload signed cert via REST API.
+# Alternatively: upload a pre-signed cert + key directly.
+
+- name: Renew ExtraHop SSL certificate
+  hosts: extrahop
+  gather_facts: false
+  connection: local
+
+  vars:
+    extrahop_api_key: "{{ lookup('env', 'EXTRAHOP_API_KEY') }}"
+    extrahop_host: "{{ ansible_host | default(inventory_hostname) }}"
+    extrahop_base_url: "https://{{ extrahop_host }}/api/v1"
+    validate_certs: false
+
+    cert_name: "{{ inventory_hostname | regex_replace('\\.', '_') }}"
+    cert_src: "files/{{ cert_name }}.pem"
+    key_src: "files/{{ cert_name }}.key"
+
+    # CSR generation options (used when generate_csr is true)
+    generate_csr: false
+    csr_subject:
+      common_name: "{{ inventory_hostname }}"
+      organization_name: "Example Org"
+      country_code: "US"
+    csr_sans: []
+
+  pre_tasks:
+    - name: Validate API key is provided
+      ansible.builtin.assert:
+        that:
+          - extrahop_api_key | length > 0
+        fail_msg: "EXTRAHOP_API_KEY environment variable or extrahop_api_key variable must be set."
+
+  tasks:
+    # --- Option A: Generate CSR on the appliance, sign externally, then upload ---
+
+    - name: Generate CSR on the ExtraHop appliance
+      when: generate_csr | bool
+      block:
+        - name: Request CSR from ExtraHop
+          ansible.builtin.uri:
+            url: "{{ extrahop_base_url }}/extrahop/sslcert/signingrequest"
+            method: POST
+            headers:
+              Authorization: "ExtraHop apikey={{ extrahop_api_key }}"
+              Accept: application/json
+            body_format: json
+            body:
+              subject: "{{ csr_subject }}"
+              subject_alternative_names: "{{ csr_sans }}"
+            validate_certs: "{{ validate_certs }}"
+            status_code: 200
+          register: csr_result
+
+        - name: Save CSR to local file
+          ansible.builtin.copy:
+            content: "{{ csr_result.json.pem }}"
+            dest: "files/{{ cert_name }}.csr"
+            mode: "0644"
+          delegate_to: localhost
+
+        - name: CSR generated — sign it and re-run with generate_csr=false
+          ansible.builtin.debug:
+            msg: >-
+              CSR saved to files/{{ cert_name }}.csr.
+              Sign it with your CA, place the signed cert at {{ cert_src }},
+              then re-run this playbook with generate_csr=false.
+
+        - name: End play after CSR generation
+          ansible.builtin.meta: end_play
+
+    # --- Option B: Upload a pre-signed certificate + key ---
+
+    - name: Verify local cert and key files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      delegate_to: localhost
+      register: cert_files
+      failed_when: not cert_files.stat.exists
+      loop:
+        - "{{ cert_src }}"
+        - "{{ key_src }}"
+
+    - name: Read the certificate PEM
+      ansible.builtin.slurp:
+        src: "{{ cert_src }}"
+      delegate_to: localhost
+      register: cert_content
+
+    - name: Read the private key PEM
+      ansible.builtin.slurp:
+        src: "{{ key_src }}"
+      delegate_to: localhost
+      register: key_content
+      no_log: true
+
+    - name: Check current certificate expiry
+      community.crypto.get_certificate:
+        host: "{{ extrahop_host }}"
+        port: 443
+      delegate_to: localhost
+      register: current_cert
+      ignore_errors: true
+
+    - name: Show current cert expiry
+      ansible.builtin.debug:
+        msg: "Current cert expires: {{ current_cert.not_after | default('unable to retrieve') }}"
+
+    - name: Build combined PEM (cert + key)
+      ansible.builtin.set_fact:
+        combined_pem: "{{ (cert_content.content | b64decode) + '\n' + (key_content.content | b64decode) }}"
+      no_log: true
+
+    - name: Upload new certificate to ExtraHop
+      ansible.builtin.uri:
+        url: "{{ extrahop_base_url }}/extrahop/sslcert"
+        method: PUT
+        headers:
+          Authorization: "ExtraHop apikey={{ extrahop_api_key }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          pem: "{{ combined_pem }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: [200, 202]
+      no_log: true
+      register: upload_result
+
+    - name: Wait for appliance to apply the new certificate
+      ansible.builtin.wait_for:
+        host: "{{ extrahop_host }}"
+        port: 443
+        timeout: 60
+        delay: 5
+
+    - name: Verify the renewed certificate is being served
+      community.crypto.get_certificate:
+        host: "{{ extrahop_host }}"
+        port: 443
+      delegate_to: localhost
+      register: new_cert
+
+    - name: Read expected cert info for comparison
+      community.crypto.x509_certificate_info:
+        path: "{{ cert_src }}"
+      delegate_to: localhost
+      register: expected_cert
+
+    - name: Assert the served cert matches the uploaded cert
+      ansible.builtin.assert:
+        that:
+          - new_cert.not_after == expected_cert.not_after
+        fail_msg: "Served cert does not match the uploaded cert. Manual investigation required."
+        success_msg: "Certificate renewed successfully. New expiry: {{ new_cert.not_after }}"
