@@ -2,28 +2,50 @@
 
 Renews the SSL certificate on Virtana appliances (Infrastructure Observability /
 VirtualWisdom) via SSH. Virtana does not expose certificate management through
-its REST API, so this playbook connects to the appliance over SSH, backs up the
-Java keystore, imports the new certificate via `keytool`, and restarts services.
+its public REST API, so this playbook connects to the appliance over SSH and
+uses the appropriate CLI method for your appliance version.
+
+## Vendor Documentation
+
+- [IO Administrator Guide — Certificate Management](https://docs.virtana.com/en/infrastructure-observability/io-administrator-guide/installation-and-configuration/appliance-configuration/certificate-management.html) — Appliance certificate configuration (navigate to Appliance Configuration > Certificate Management)
+- [Exporting a Certificate (IO Virtual Edition)](https://docs.virtana.com/en/infrastructure-observability-docs/io-virtual-edition-guide/completing-the-configuration-checklist/exporting-a-certificate.html) — Certificate export/import for IO integration trust
+- [Public API](https://docs.virtana.com/en/public-api.html) — API reference (confirms certificate management is not available via API)
+
+**Important:** Virtana appliance architectures vary significantly by product and
+version. The exact certificate update procedure depends on your specific
+appliance. Consult the Virtana IO Administrator Guide for your version before
+running this playbook. The three methods below cover the most common
+configurations, but your environment may differ.
+
+## Supported Methods
+
+This playbook supports three methods — set `appliance_type` to match your
+environment:
+
+| `appliance_type` | Method | Appliance Type |
+|-------------------|--------|----------------|
+| `virtana_config` | `virtana-config --update-ssl` CLI utility | Modern IO appliances |
+| `k3s` | `kubectl create secret tls` | Global View / Platform appliances running K3s |
+| `legacy` | File replacement + nginx restart | Older VirtualWisdom appliances |
 
 ## What it does
 
 1. Validates the new cert/key files on the control node and reads cert metadata.
-2. Backs up the current Java keystore on the appliance.
-3. Creates a PKCS12 bundle from the new cert + key on the control node using
-   `community.crypto.openssl_pkcs12`.
-4. Copies the PKCS12 bundle to the appliance and imports it into the Java
-   keystore via `keytool -importkeystore`.
-5. Optionally imports the CA chain into the keystore.
-6. Restarts Virtana services to apply the new certificate.
-7. Waits for the web interface to come back up and verifies the served
-   certificate matches the uploaded one.
-8. Cleans up temporary files on the appliance.
+2. Copies the cert, key, and chain to the appliance.
+3. Backs up the current certificate configuration.
+4. Applies the new certificate using the selected method:
+   - **virtana_config:** Runs `virtana-config --update-ssl` and restarts nginx
+   - **k3s:** Replaces the Kubernetes TLS secret and restarts deployments
+   - **legacy:** Copies cert/key files to the standard paths and restarts nginx/virtana-web
+5. Waits for the web interface to come back up.
+6. Verifies the served certificate matches the uploaded one.
+7. Cleans up temporary files on the appliance.
 
 ## Requirements
 
 - SSH access to the Virtana appliance with sudo/root privileges
-- Java `keytool` available on the appliance (ships with the Virtana installation)
 - `community.crypto` collection
+- For `k3s` method: `kubectl` available on the appliance
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
@@ -52,8 +74,15 @@ cp signed_cert.crt files/virtana01_example_com.crt
 cp private_key.key files/virtana01_example_com.key
 cp ca_chain.crt files/virtana01_example_com_chain.crt
 
-# Run the playbook
+# Run the playbook (defaults to virtana_config method)
 ansible-playbook -i inventory/hosts.yml renew_virtana_cert.yml
+
+# Use a specific method
+ansible-playbook -i inventory/hosts.yml renew_virtana_cert.yml \
+  -e appliance_type=k3s
+
+ansible-playbook -i inventory/hosts.yml renew_virtana_cert.yml \
+  -e appliance_type=legacy
 ```
 
 ### Target a specific appliance
@@ -67,52 +96,57 @@ ansible-playbook -i inventory/hosts.yml renew_virtana_cert.yml \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `appliance_type` | `virtana_config` | Method to use: `virtana_config`, `k3s`, or `legacy` |
 | `cert_src` | `files/<hostname>.crt` | Path to the signed certificate |
 | `key_src` | `files/<hostname>.key` | Path to the private key |
 | `chain_src` | `files/<hostname>_chain.crt` | Path to CA chain (optional) |
-| `virtana_home` | `/opt/virtana` | Virtana installation directory |
-| `keystore_path` | `<virtana_home>/conf/keystore.jks` | Java keystore path |
-| `keystore_password` | `changeit` | Keystore password (vault this in production) |
-| `keystore_alias` | `virtana` | Alias for the certificate in the keystore |
-| `virtana_services` | `[virtana, virtana-proxy]` | Services to restart after renewal |
+| `legacy_cert_dir` | `/etc/pki/tls/certs` | Cert directory for legacy method |
+| `legacy_key_dir` | `/etc/pki/tls/private` | Key directory for legacy method |
+| `k3s_namespace` | `default` | Kubernetes namespace for K3s method |
+| `k3s_secret_name` | `virtana-tls` | TLS secret name for K3s method |
 
 ## Rollback
 
-The playbook creates a timestamped backup of the keystore before making changes.
-To rollback:
+The playbook creates timestamped backups before making changes.
 
+**virtana_config method:**
 ```bash
-# On the appliance
-cp /opt/virtana/backups/keystore.jks.<date> /opt/virtana/conf/keystore.jks
-systemctl restart virtana virtana-proxy
+# Restore backed-up cert files
+cp -a /opt/virtana/backups/certs_<date>/* /etc/pki/tls/certs/
+cp -a /opt/virtana/backups/private_<date>/* /etc/pki/tls/private/
+systemctl restart nginx
 ```
 
-Or use the rollback as a playbook extra var:
-
+**k3s method:**
 ```bash
-ansible-playbook -i inventory/hosts.yml renew_virtana_cert.yml \
-  -e restore_backup=true -e backup_date=2026-08-01
+# Restore the backed-up Kubernetes secret
+kubectl apply -f /opt/virtana/backups/virtana-tls_<date>.yaml
+kubectl rollout restart deployment -n default
+```
+
+**legacy method:**
+```bash
+# Backup copies are created by Ansible's backup: true option
+# Check /etc/pki/tls/certs/ and /etc/pki/tls/private/ for .bak files
+systemctl restart nginx virtana-web
 ```
 
 ## Important Notes
 
-- **Keystore path and password:** The defaults assume a standard Virtana
-  installation. Check your appliance's actual keystore location and password.
-  Consult the Virtana IO Administrator Guide under Appliance Configuration >
-  Certificate Management for your specific version.
-- **Service names:** The default service names (`virtana`, `virtana-proxy`) may
-  differ on your installation. Verify with `systemctl list-units 'virtana*'` on
-  the appliance.
+- **Verify your method first:** SSH to the appliance and check which components
+  are present before choosing a method:
+  - `which virtana-config` — if found, use `virtana_config`
+  - `which kubectl && kubectl get nodes` — if K3s is running, use `k3s`
+  - `systemctl status nginx` — if nginx serves the UI directly, use `legacy`
+- **Cert file paths may vary:** Legacy VirtualWisdom appliances may store certs
+  in `/etc/nginx/certs/` instead of `/etc/pki/tls/`. Check your appliance and
+  override `legacy_cert_dir` / `legacy_key_dir` as needed.
 - **No REST API:** Virtana's public API covers alerts, topology, and dashboards
-  but does not include certificate management endpoints. This playbook uses SSH
-  and `keytool` as the supported path.
-- **Vault the keystore password:** In production, store `keystore_password` in
-  Ansible Vault or an AAP credential rather than in plaintext variables.
+  but does not include certificate management endpoints.
 
 ## AAP / Controller
 
 Create a Job Template with:
 - **Credential:** Machine credential with SSH access to the Virtana appliance
-- **Extra Variables:** Override `keystore_password` (ideally via a custom
-  credential type that injects it as a variable)
-- **Survey:** Add `cert_name` for flexibility across multiple appliances
+- **Survey:** Add `appliance_type` as a choice list (`virtana_config`, `k3s`,
+  `legacy`) so operators can select the correct method at launch time

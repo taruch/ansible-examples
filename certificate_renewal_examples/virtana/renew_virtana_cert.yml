@@ -1,7 +1,16 @@
 ---
 # Renew the SSL certificate on a Virtana appliance (Infrastructure Observability / VirtualWisdom).
-# Virtana does not expose certificate management via REST API.
-# Pattern: SSH to the appliance -> backup keystore -> import new cert via keytool -> restart services.
+# Virtana does not expose certificate management via its public REST API.
+#
+# IMPORTANT: Virtana appliance architectures vary by product and version.
+# This playbook provides three methods — set appliance_type to match your environment:
+#
+#   virtana_config  - Modern IO appliances with the virtana-config CLI utility
+#   k3s             - Global View / Platform appliances using K3s (Kubernetes) and kubectl
+#   legacy          - Older VirtualWisdom appliances using nginx with cert files on disk
+#
+# Verify the correct method for your appliance version in the Virtana IO Administrator
+# Guide under Appliance Configuration > Certificate Management before running.
 
 - name: Renew Virtana appliance SSL certificate
   hosts: virtana
@@ -14,25 +23,24 @@
     cert_src: "files/{{ cert_name }}.crt"
     key_src: "files/{{ cert_name }}.key"
     chain_src: "files/{{ cert_name }}_chain.crt"
-    p12_src: "files/{{ cert_name }}.p12"
 
-    # Virtana appliance paths (adjust if your installation differs)
-    virtana_home: "/opt/virtana"
-    keystore_path: "{{ virtana_home }}/conf/keystore.jks"
-    keystore_password: "changeit"
-    keystore_alias: "virtana"
+    # Appliance type — choose the method that matches your appliance:
+    #   virtana_config  - uses: virtana-config --update-ssl
+    #   k3s             - uses: kubectl create secret tls
+    #   legacy          - uses: file copy + nginx restart
+    appliance_type: virtana_config
+
+    # Legacy cert paths (only used when appliance_type == legacy)
+    legacy_cert_dir: "/etc/pki/tls/certs"
+    legacy_key_dir: "/etc/pki/tls/private"
+
+    # K3s options (only used when appliance_type == k3s)
+    k3s_namespace: "default"
+    k3s_secret_name: "virtana-tls"
 
     # Backup
     backup_dir: "/opt/virtana/backups"
     backup_suffix: "{{ ansible_date_time.date }}"
-
-    # PKCS12 password for import bundle
-    p12_password: "changeit"
-
-    # Services to restart after cert replacement
-    virtana_services:
-      - virtana
-      - virtana-proxy
 
   pre_tasks:
     - name: Verify local cert files exist on control node
@@ -71,106 +79,164 @@
         group: root
         mode: "0750"
 
-    - name: Backup current keystore
+    # -----------------------------------------------------------------------
+    # Transfer cert files to the appliance
+    # -----------------------------------------------------------------------
+
+    - name: Copy certificate to appliance
       ansible.builtin.copy:
-        src: "{{ keystore_path }}"
-        dest: "{{ backup_dir }}/keystore.jks.{{ backup_suffix }}"
-        remote_src: true
+        src: "{{ cert_src }}"
+        dest: "/tmp/{{ cert_name }}.crt"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Copy private key to appliance
+      ansible.builtin.copy:
+        src: "{{ key_src }}"
+        dest: "/tmp/{{ cert_name }}.key"
         owner: root
         group: root
         mode: "0600"
-
-    - name: Create PKCS12 bundle from cert and key on control node
-      community.crypto.openssl_pkcs12:
-        path: "{{ p12_src }}"
-        certificate_path: "{{ cert_src }}"
-        privatekey_path: "{{ key_src }}"
-        other_certificates: "{{ chain_src if (chain_src is defined and chain_src | length > 0) else omit }}"
-        passphrase: "{{ p12_password }}"
-        friendly_name: "{{ keystore_alias }}"
-        state: present
-        action: export
-      delegate_to: localhost
-      become: false
-      run_once: true
-
-    - name: Copy PKCS12 bundle to appliance
-      ansible.builtin.copy:
-        src: "{{ p12_src }}"
-        dest: "/tmp/{{ cert_name }}.p12"
-        owner: root
-        group: root
-        mode: "0600"
-
-    - name: Remove existing alias from keystore
-      ansible.builtin.command:
-        cmd: >-
-          keytool -delete
-          -alias {{ keystore_alias }}
-          -keystore {{ keystore_path }}
-          -storepass {{ keystore_password }}
-          -noprompt
-      register: delete_result
-      changed_when: delete_result.rc == 0
-      failed_when: false
       no_log: true
 
-    - name: Import PKCS12 into Java keystore
-      ansible.builtin.command:
-        cmd: >-
-          keytool -importkeystore
-          -srckeystore /tmp/{{ cert_name }}.p12
-          -srcstoretype PKCS12
-          -srcstorepass {{ p12_password }}
-          -destkeystore {{ keystore_path }}
-          -deststoretype JKS
-          -deststorepass {{ keystore_password }}
-          -destalias {{ keystore_alias }}
-          -srcalias {{ keystore_alias }}
-          -noprompt
-      no_log: true
-
-    - name: Copy chain file to appliance for import
+    - name: Copy CA chain to appliance
       ansible.builtin.copy:
         src: "{{ chain_src }}"
-        dest: "/tmp/{{ cert_name }}_chain.crt"
+        dest: "/tmp/{{ cert_name }}_chain.pem"
         owner: root
         group: root
         mode: "0644"
       when: chain_src is defined
 
-    - name: Import CA chain into keystore
-      ansible.builtin.command:
-        cmd: >-
-          keytool -importcert
-          -alias {{ keystore_alias }}_ca
-          -file /tmp/{{ cert_name }}_chain.crt
-          -keystore {{ keystore_path }}
-          -storepass {{ keystore_password }}
-          -noprompt
-      when: chain_src is defined
-      no_log: true
+    # -----------------------------------------------------------------------
+    # Method 1: virtana-config CLI (modern IO appliances)
+    # -----------------------------------------------------------------------
 
-    - name: Verify the keystore contains the new cert
-      ansible.builtin.command:
-        cmd: >-
-          keytool -list
-          -alias {{ keystore_alias }}
-          -keystore {{ keystore_path }}
-          -storepass {{ keystore_password }}
-          -v
-      register: keystore_verify
-      changed_when: false
-      no_log: true
+    - name: Renew certificate via virtana-config
+      when: appliance_type == "virtana_config"
+      block:
+        - name: Backup current SSL files
+          ansible.builtin.shell: >-
+            cp -a /etc/pki/tls/certs/ {{ backup_dir }}/certs_{{ backup_suffix }}/ 2>/dev/null;
+            cp -a /etc/pki/tls/private/ {{ backup_dir }}/private_{{ backup_suffix }}/ 2>/dev/null;
+            cp -a /etc/nginx/certs/ {{ backup_dir }}/nginx_certs_{{ backup_suffix }}/ 2>/dev/null;
+            true
+          changed_when: true
 
-    - name: Restart Virtana services to apply new certificate
-      ansible.builtin.service:
-        name: "{{ item }}"
-        state: restarted
-      loop: "{{ virtana_services }}"
-      register: restart_result
+        - name: Update SSL certificate via virtana-config
+          ansible.builtin.command:
+            cmd: >-
+              virtana-config --update-ssl
+              --cert /tmp/{{ cert_name }}.crt
+              --key /tmp/{{ cert_name }}.key
+              --chain /tmp/{{ cert_name }}_chain.pem
+          no_log: true
 
-    - name: Wait for Virtana web interface to come back up
+        - name: Restart nginx
+          ansible.builtin.systemd:
+            name: nginx
+            state: restarted
+
+    # -----------------------------------------------------------------------
+    # Method 2: K3s / kubectl (Global View / Platform appliances)
+    # -----------------------------------------------------------------------
+
+    - name: Renew certificate via K3s secret
+      when: appliance_type == "k3s"
+      block:
+        - name: Backup current TLS secret
+          ansible.builtin.shell: >-
+            kubectl get secret {{ k3s_secret_name }}
+            -n {{ k3s_namespace }}
+            -o yaml > {{ backup_dir }}/{{ k3s_secret_name }}_{{ backup_suffix }}.yaml
+          changed_when: true
+          failed_when: false
+
+        - name: Delete existing TLS secret
+          ansible.builtin.command:
+            cmd: >-
+              kubectl delete secret {{ k3s_secret_name }}
+              -n {{ k3s_namespace }}
+              --ignore-not-found=true
+
+        - name: Create new TLS secret from cert and key
+          ansible.builtin.command:
+            cmd: >-
+              kubectl create secret tls {{ k3s_secret_name }}
+              -n {{ k3s_namespace }}
+              --cert=/tmp/{{ cert_name }}.crt
+              --key=/tmp/{{ cert_name }}.key
+          no_log: true
+
+        - name: Restart pods to pick up new secret
+          ansible.builtin.shell: >-
+            kubectl rollout restart deployment -n {{ k3s_namespace }}
+          changed_when: true
+
+    # -----------------------------------------------------------------------
+    # Method 3: File replacement (legacy VirtualWisdom appliances)
+    # -----------------------------------------------------------------------
+
+    - name: Renew certificate via file replacement (legacy)
+      when: appliance_type == "legacy"
+      block:
+        - name: Backup current certificate files
+          ansible.builtin.copy:
+            src: "{{ item }}"
+            dest: "{{ backup_dir }}/{{ item | basename }}.{{ backup_suffix }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          loop:
+            - "{{ legacy_cert_dir }}/server.crt"
+            - "{{ legacy_key_dir }}/server.key"
+          failed_when: false
+
+        - name: Install new certificate
+          ansible.builtin.copy:
+            src: "{{ cert_src }}"
+            dest: "{{ legacy_cert_dir }}/server.crt"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+
+        - name: Install new private key
+          ansible.builtin.copy:
+            src: "{{ key_src }}"
+            dest: "{{ legacy_key_dir }}/server.key"
+            owner: root
+            group: root
+            mode: "0600"
+            backup: true
+          no_log: true
+
+        - name: Install CA chain
+          ansible.builtin.copy:
+            src: "{{ chain_src }}"
+            dest: "{{ legacy_cert_dir }}/ca-chain.pem"
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+          when: chain_src is defined
+
+        - name: Restart web services
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop:
+            - nginx
+            - virtana-web
+          failed_when: false
+
+    # -----------------------------------------------------------------------
+    # Verify the new certificate is being served
+    # -----------------------------------------------------------------------
+
+    - name: Wait for web interface to come back up
       ansible.builtin.wait_for:
         host: "{{ ansible_host | default(inventory_hostname) }}"
         port: 443
@@ -197,5 +263,6 @@
         path: "{{ item }}"
         state: absent
       loop:
-        - "/tmp/{{ cert_name }}.p12"
-        - "/tmp/{{ cert_name }}_chain.crt"
+        - "/tmp/{{ cert_name }}.crt"
+        - "/tmp/{{ cert_name }}.key"
+        - "/tmp/{{ cert_name }}_chain.pem"

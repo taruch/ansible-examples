@@ -4,6 +4,13 @@ Renews the SSL certificate on ExtraHop appliances (EDA, ECA, EXA, Reveal(x))
 via the ExtraHop REST API. Supports two workflows: generating a CSR on the
 appliance for external signing, or uploading a pre-signed certificate directly.
 
+## Vendor Documentation
+
+- [Create a trusted TLS certificate through the REST API](https://docs.extrahop.com/current/rest-ssl-cert/) — CSR generation and cert upload via the API Explorer
+- [ExtraHop REST API Guide](https://docs.extrahop.com/current/rest-api-guide/) — Full API reference covering authentication, endpoints, and resources
+- [Create a certificate signing request (Admin UI)](https://docs.extrahop.com/current/certificate-signing-request/) — CSR generation and cert upload through the admin web interface
+- [Sensor Administration Guide](https://docs.extrahop.com/current/eh-admin-ui-guide/) — Includes SSL/TLS certificate management sections for self-signed, CSR export, and CA-signed cert upload
+
 ## What it does
 
 1. **Option A (CSR):** Generates a Certificate Signing Request on the ExtraHop
