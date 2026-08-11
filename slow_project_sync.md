@@ -10,6 +10,7 @@ If your Git repository contains a `collections/requirements.yml` or `roles/requi
 
 * **The Fix:** Move those dependencies out of your playbook repository. Use `ansible-builder` to compile those collections directly into a custom **Execution Environment (EE)** container image.
 * **The Result:** Your project sync completely skips the download phase, dropping sync times from minutes down to a couple of seconds. The heavy lifting is done once during the image build, not during your automation runs.
+* **Alternative:** If baking collections into an EE isn't feasible, upload them to your **Private Automation Hub (PAH)**. Configure your AAP projects to pull collections from PAH instead of the public Galaxy or Automation Hub. Since PAH is on your local network, downloads are significantly faster and not subject to internet latency or rate limits. This also gives you control over which collection versions are approved for use in your environment.
 
 ---
 
