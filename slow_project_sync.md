@@ -197,7 +197,6 @@ Developer pushes to main
 | **Setup** | Simpler — fewer AAP objects to create | More steps but cleaner architecture |
 | **Best for** | Development, testing, single-activation setups | Production, multiple projects, environments behind load balancers |
 
-Combine this with **SCM Cache Timeout** (option 2 above) for maximum effect — the webhook keeps the cache fresh, and the cache timeout prevents redundant syncs if multiple pushes happen in quick succession.
 
 ---
 
