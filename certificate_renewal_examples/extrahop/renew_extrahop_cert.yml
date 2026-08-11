@@ -119,10 +119,9 @@
         method: PUT
         headers:
           Authorization: "ExtraHop apikey={{ extrahop_api_key }}"
-          Content-Type: application/json
-        body_format: json
-        body:
-          pem: "{{ combined_pem }}"
+          Content-Type: application/octet-stream
+        body_format: raw
+        body: "{{ combined_pem }}"
         validate_certs: "{{ validate_certs }}"
         status_code: [200, 202]
       no_log: true
