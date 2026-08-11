@@ -42,7 +42,7 @@ Because AAP has to pull the repository down to the controller's local environmen
 
 ## 5. Proactive Sync via Event-Driven Ansible (EDA)
 
-Event-Driven Ansible provides a flexible way to trigger a project sync automatically whenever code is pushed to your repository. EDA can filter on branch, event type, and payload content before deciding whether to trigger a sync — giving you fine-grained control. By the time anyone launches a job, the sync is already done.
+Event-Driven Ansible provides a flexible way to trigger a project sync automatically whenever code is pushed to your repository. EDA can filter on branch, event type, and payload content before deciding whether to trigger a sync — giving you fine-grained control. By the time anyone launches a job, the sync is already done; this enables you to automatically update your project when a change is made, rather than using "update on launch" in AAP.
 
 ### Prerequisites
 
@@ -255,6 +255,4 @@ Developer pushes to main
 | **Payload inspection** | Full condition engine — filter on changed files, commit messages, authors, etc. | Payload available as extra var but no pre-launch filtering |
 | **Use case** | Multiple projects, complex event routing, audit trail | Single project, simple push-to-sync |
 
----
 
-Are your project syncs currently hanging during the `ansible-galaxy` dependency installation phase, or is the lag strictly due to network overhead pulling down a massive Git repository?
