@@ -40,4 +40,221 @@ Because AAP has to pull the repository down to the controller's local environmen
 
 ---
 
+## 5. Proactive Sync via Event-Driven Ansible (EDA)
+
+Event-Driven Ansible provides a flexible way to trigger a project sync automatically whenever code is pushed to your repository. EDA can filter on branch, event type, and payload content before deciding whether to trigger a sync — giving you fine-grained control. By the time anyone launches a job, the sync is already done.
+
+### Prerequisites
+
+- AAP 2.5+ with Event-Driven Ansible controller enabled
+- The `ansible.eda` collection installed in your EDA environment
+- A **Controller API credential** (or Personal Access Token) so EDA can call back to the automation controller
+
+### Step 1: Create a Workflow Job Template for Project Sync
+
+1. Navigate to **Resources > Workflow Job Templates** and click **Add**
+2. Name it something like `Project Sync - <your project name>`
+3. Save, then click the **Visualizer** tab
+4. Click **Start** to add a node
+5. Set **Node Type** to **Project Sync**
+6. Select the project you want to sync
+7. Click **Save** on the node, then **Save** on the visualizer
+
+This gives you a launchable workflow that does nothing but sync your project.
+
+### Step 2: Create the EDA Rulebook
+
+There are two approaches for receiving webhooks in EDA — direct port listening or using an Event Stream. Choose the one that fits your environment.
+
+#### Option A: Direct Port (Simple)
+
+The rulebook opens its own listener port. Simple to set up, but requires exposing an additional port on the EDA host and managing network/firewall rules for each activation.
+
+Create a rulebook file (e.g., `rulebooks/project_sync_on_push.yml`):
+
+```yaml
+---
+- name: Sync project on GitHub push to main
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: Trigger project sync on push to main or master
+      condition: >-
+        event.meta.headers.X_GitHub_Event == "push"
+        and (
+          event.payload.ref == "refs/heads/main"
+          or event.payload.ref == "refs/heads/master"
+        )
+      action:
+        run_workflow_template:
+          name: "Project Sync - <your project name>"
+          organization: "<your organization>"
+```
+
+#### Option B: Event Stream (Recommended for AAP 2.5+)
+
+Event Streams provide a centralized webhook endpoint managed by the EDA controller itself. Instead of each rulebook activation opening its own port, all webhooks flow through the EDA controller's gateway URL. This eliminates the need to expose extra ports and lets multiple rulebook activations share a single incoming endpoint.
+
+**Step 2a: Create an Event Stream**
+
+1. Navigate to **Event-Driven Ansible > Event Streams** and click **Add**
+2. **Name**: `GitHub Push Events`
+3. **Event stream type**: Select `Basic` or the appropriate type for your setup
+4. **Credential**: Optional — create an **HMAC Event Stream** credential type if you want GitHub webhook secret validation:
+   - Navigate to **Resources > Credentials** and click **Add**
+   - **Credential Type**: `HMAC Event Stream`
+   - **Secret**: Enter the same secret you will configure in GitHub
+   - Save and select this credential on the event stream
+5. Click **Save**
+6. After saving, AAP generates the **Event Stream URL** — copy this (e.g., `https://<aap-gateway-host>/api/eda/v1/external_event_stream/<uuid>/post/`)
+
+**Step 2b: Create the Rulebook using the Event Stream source**
+
+Create a rulebook file (e.g., `rulebooks/project_sync_on_push_eventstream.yml`):
+
+```yaml
+---
+- name: Sync project on GitHub push to main
+  hosts: all
+  sources:
+    - ansible.eda.pg_listener:
+        event_stream: "GitHub Push Events"
+
+  rules:
+    - name: Trigger project sync on push to main or master
+      condition: >-
+        event.meta.headers.X_GitHub_Event == "push"
+        and (
+          event.payload.ref == "refs/heads/main"
+          or event.payload.ref == "refs/heads/master"
+        )
+      action:
+        run_workflow_template:
+          name: "Project Sync - <your project name>"
+          organization: "<your organization>"
+```
+
+The only difference from Option A is the source — `ansible.eda.pg_listener` with an `event_stream` reference replaces the direct `ansible.eda.webhook` listener. The rules and conditions are identical.
+
+### Step 3: Create an EDA Rulebook Activation in AAP
+
+1. Navigate to **Event-Driven Ansible > Rulebook Activations** and click **Add**
+2. **Name**: `GitHub Push - Project Sync`
+3. **Project**: Select the EDA project containing your rulebook (or create one pointing to the repo with the rulebook file)
+4. **Rulebook**: Select the appropriate rulebook (`project_sync_on_push.yml` for direct port, or `project_sync_on_push_eventstream.yml` for event stream)
+5. **Decision Environment**: Select an appropriate decision environment with `ansible.eda` installed
+6. **Controller Credential**: Select (or create) a credential that allows EDA to launch jobs on the automation controller — this is a **Red Hat Ansible Automation Platform** credential type with a URL and token/password for the controller API
+7. **Event Stream** (Option B only): Select the `GitHub Push Events` event stream you created — this binds the activation to receive events from that stream
+8. **Restart Policy**: Set to `Always` so the activation recovers if it stops
+9. Click **Save**, then **Enable** the activation
+
+### Step 4: Configure the Webhook in GitHub
+
+1. Go to your GitHub repository > **Settings > Webhooks > Add webhook**
+2. **Payload URL**:
+   - **Option A (direct port)**: `https://<eda-host>:5000/endpoint`
+   - **Option B (event stream)**: The Event Stream URL from step 2a (e.g., `https://<aap-gateway-host>/api/eda/v1/external_event_stream/<uuid>/post/`)
+3. **Content type**: `application/json`
+4. **Secret**:
+   - **Option A**: Optional — add `token: <your-secret>` under the `ansible.eda.webhook` source in the rulebook
+   - **Option B**: Enter the same secret configured in the HMAC Event Stream credential
+5. **Which events would you like to trigger this webhook?**: Select **Just the push event**
+6. Check **Active** and click **Add webhook**
+
+### How It Works
+
+**Option A — Direct Port:**
+```
+Developer pushes to main
+    → GitHub sends POST to EDA webhook listener (port 5000)
+    → EDA evaluates the rulebook condition (branch == main or master?)
+    → If matched, EDA calls the controller API to launch the Project Sync workflow
+    → Project is synced and cached before any job needs it
+```
+
+**Option B — Event Stream:**
+```
+Developer pushes to main
+    → GitHub sends POST to AAP Gateway event stream URL
+    → EDA controller receives the event and routes it to bound rulebook activations
+    → EDA evaluates the rulebook condition (branch == main or master?)
+    → If matched, EDA calls the controller API to launch the Project Sync workflow
+    → Project is synced and cached before any job needs it
+```
+
+### Direct Port vs Event Stream
+
+| | Direct Port (Option A) | Event Stream (Option B) |
+|---|---|---|
+| **Network** | Requires opening a custom port on the EDA host per activation | Uses the existing AAP gateway port (443) — no extra ports |
+| **Scalability** | Each activation manages its own listener | Multiple activations can share one event stream endpoint |
+| **Secret validation** | Configured in the rulebook source | Managed centrally via an HMAC credential on the event stream |
+| **Setup** | Simpler — fewer AAP objects to create | More steps but cleaner architecture |
+| **Best for** | Development, testing, single-activation setups | Production, multiple projects, environments behind load balancers |
+
+Combine this with **SCM Cache Timeout** (option 2 above) for maximum effect — the webhook keeps the cache fresh, and the cache timeout prevents redundant syncs if multiple pushes happen in quick succession.
+
+---
+
+## 6. Proactive Sync via Built-in GitHub Webhook
+
+If you don't have EDA available, AAP's built-in webhook support provides a simpler alternative. It has less filtering capability but requires no additional components.
+
+### Step 1: Create a Workflow Job Template for Project Sync
+
+Follow the same steps from option 5, step 1 — create a workflow job template with a single Project Sync node.
+
+### Step 2: Enable the Webhook on the Workflow Job Template
+
+1. Edit the workflow job template you just created
+2. Check **Enable Webhook**
+3. Set **Webhook Service** to **GitHub**
+4. **Save** the template
+5. After saving, AAP generates two values — copy both:
+   - **Webhook URL** — the endpoint GitHub will POST to (e.g., `https://<aap-host>/api/controller/v2/workflow_job_templates/<id>/github/`)
+   - **Webhook Key** — the secret used to sign and verify payloads
+
+### Step 3: Configure the Webhook in GitHub
+
+1. Go to your GitHub repository > **Settings > Webhooks > Add webhook**
+2. **Payload URL**: Paste the Webhook URL from AAP
+3. **Content type**: `application/json`
+4. **Secret**: Paste the Webhook Key from AAP
+5. **Which events would you like to trigger this webhook?**: Select **Just the push event**
+6. Check **Active** and click **Add webhook**
+
+### Step 4: Filter to Main/Master Branch Only (Optional)
+
+AAP will trigger the workflow on every push event regardless of branch. To limit syncs to only main or master pushes, add a branch filter in the workflow:
+
+1. Edit the workflow job template
+2. In the **Extra Variables** field or via a survey, you can use **Webhook Payload** data — AAP automatically provides the webhook payload as `tower_webhook_payload`
+3. Alternatively, in your GitHub webhook settings, you can use **branch filter patterns** (GitHub Enterprise) or rely on the AAP project's default branch setting to only sync the relevant branch
+
+### How It Works
+
+```
+Developer pushes to main
+    → GitHub sends POST to AAP webhook URL
+    → AAP launches the Project Sync workflow
+    → Project is synced and cached before any job needs it
+    → Next job launch uses the already-synced project (instant)
+```
+
+### EDA vs Built-in Webhook — When to Use Which
+
+| | EDA (Option 5) | Built-in Webhook (Option 6) |
+|---|---|---|
+| **Setup complexity** | Requires EDA controller, rulebook, decision environment | Simple — checkbox in AAP |
+| **Branch filtering** | Native — filter on branch, event type, file paths, etc. | Limited — fires on all push events |
+| **Multiple actions** | One rulebook can trigger multiple workflows based on different conditions | One workflow per webhook |
+| **Payload inspection** | Full condition engine — filter on changed files, commit messages, authors, etc. | Payload available as extra var but no pre-launch filtering |
+| **Use case** | Multiple projects, complex event routing, audit trail | Single project, simple push-to-sync |
+
+---
+
 Are your project syncs currently hanging during the `ansible-galaxy` dependency installation phase, or is the lag strictly due to network overhead pulling down a massive Git repository?
