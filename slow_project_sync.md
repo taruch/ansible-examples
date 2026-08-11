@@ -1,10 +1,34 @@
 Slow project syncs are one of the most common bottlenecks in Ansible Automation Platform (AAP). When a project sync takes minutes instead of seconds, it delays your entire automation pipeline because jobs sit in a "pending" or "waiting" state while the controller fetches data.
 
-To radically speed up your project syncs, apply these high-impact optimizations:
+To radically speed up your project syncs, start by identifying the bottleneck, then apply the appropriate fix:
 
 ---
 
-## 1. Bake Collections into an Execution Environment (The #1 Speed Killer)
+## 1. Identify the Bottleneck with profile_tasks
+
+Before applying fixes, determine where your project sync is actually spending its time. Enable the `ansible.posix.profile_tasks` callback plugin in the `ansible.cfg` at the root of your project repository:
+
+```ini
+[defaults]
+callbacks_enabled = ansible.posix.profile_tasks
+
+[callback_profile_tasks]
+sort_order = descending
+output_limit = 30
+```
+
+This adds timing information to every task in the job output, showing exactly how long each step takes. Look at the project sync job stdout in AAP to identify whether the delay is in:
+
+- **Galaxy/collection downloads** — long pauses during `ansible-galaxy collection install` (see fix #2)
+- **Full git clone** — slow initial checkout (see fixes #4 and #5)
+- **Network latency** — timeouts or slow transfers from remote SCM (see fix #3)
+- **Waiting on SCM** — redundant Git fetches during concurrent launches (see fix #3)
+
+**Important:** Adding `profile_tasks` to your project's `ansible.cfg` enables it for **all job templates** that use this project, not just the project sync. This adds overhead to every job run. Once you have identified the slow phase, remove or comment out the `callbacks_enabled` line and commit the change so it does not affect normal job execution.
+
+---
+
+## 2. Bake Collections into an Execution Environment (The #1 Speed Killer)
 
 If your Git repository contains a `collections/requirements.yml` or `roles/requirements.yml` file, AAP executes an `ansible-galaxy` download **every single time the project syncs**. Downloading massive collections from Automation Hub or Galaxy at runtime is incredibly slow.
 
@@ -14,7 +38,7 @@ If your Git repository contains a `collections/requirements.yml` or `roles/requi
 
 ---
 
-## 2. Leverage SCM Cache Timeout
+## 3. Leverage SCM Cache Timeout
 
 Many teams check the **"Update Revision on Launch"** box on their Projects to guarantee they are always running the newest playbooks. However, if you trigger a workflow or launch 10 jobs back-to-back, AAP will hit Git 10 consecutive times, queueing up your jobs.
 
@@ -23,7 +47,7 @@ Many teams check the **"Update Revision on Launch"** box on their Projects to gu
 
 ---
 
-## 3. Disable "Delete on Update"
+## 4. Disable "Delete on Update"
 
 In your Project's advanced settings, there is a checkbox for **"Delete on Update"**.
 
@@ -32,7 +56,7 @@ In your Project's advanced settings, there is a checkbox for **"Delete on Update
 
 ---
 
-## 4. Keep Your Git Repository Lean
+## 5. Keep Your Git Repository Lean
 
 Because AAP has to pull the repository down to the controller's local environment, repository bloat directly correlates to sync lag.
 
@@ -41,7 +65,7 @@ Because AAP has to pull the repository down to the controller's local environmen
 
 ---
 
-## 5. Proactive Sync via Event-Driven Ansible (EDA)
+## 6. Proactive Sync via Event-Driven Ansible (EDA)
 
 Event-Driven Ansible provides a flexible way to trigger a project sync automatically whenever code is pushed to your repository. EDA can filter on branch, event type, and payload content before deciding whether to trigger a sync — giving you fine-grained control. By the time anyone launches a job, the sync is already done; this enables you to automatically update your project when a change is made, rather than using "update on launch" in AAP.
 
@@ -200,13 +224,13 @@ Developer pushes to main
 
 ---
 
-## 6. Proactive Sync via Built-in GitHub Webhook
+## 7. Proactive Sync via Built-in GitHub Webhook
 
 If you don't have EDA available, AAP's built-in webhook support provides a simpler alternative. It has less filtering capability but requires no additional components.
 
 ### Step 1: Create a Workflow Job Template for Project Sync
 
-Follow the same steps from option 5, step 1 — create a workflow job template with a single Project Sync node.
+Follow the same steps from option 6, step 1 — create a workflow job template with a single Project Sync node.
 
 ### Step 2: Enable the Webhook on the Workflow Job Template
 
@@ -247,7 +271,7 @@ Developer pushes to main
 
 ### EDA vs Built-in Webhook — When to Use Which
 
-| | EDA (Option 5) | Built-in Webhook (Option 6) |
+| | EDA (Option 6) | Built-in Webhook (Option 7) |
 |---|---|---|
 | **Setup complexity** | Requires EDA controller, rulebook, decision environment | Simple — checkbox in AAP |
 | **Branch filtering** | Native — filter on branch, event type, file paths, etc. | Limited — fires on all push events |
