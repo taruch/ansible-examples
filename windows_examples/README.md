@@ -61,6 +61,9 @@ Joins a Windows server to an existing Active Directory domain. Uses `microsoft.a
 
 **Survey variables**: `_hosts` (target server), `domain_controller` (hostname or IP of the DC — required, no default), `domain_name`, `domain_admin_user`, `domain_admin_password`
 
+### `registry_examples.yml`
+Demonstrates common Windows registry operations using `ansible.windows.win_regedit` and `ansible.windows.win_reg_stat`. Covers creating and updating registry values across all common types (DWORD, string, multi-string, expanded string, binary), creating empty registry keys, removing values and keys, and querying registry data.
+
 <<<<<<< HEAD
 ---
 
