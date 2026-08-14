@@ -1,0 +1,80 @@
+---
+# This playbook demonstrates common Windows registry operations
+
+- name: Windows Registry Examples
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Add or update a DWORD registry value
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany
+        name: RedHat
+        data: 1337
+        type: dword
+
+    - name: Add a string registry value
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany
+        name: AppName
+        data: "Ansible Automation Platform"
+        type: string
+
+    - name: Add a multi-string registry value
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany
+        name: AllowedHosts
+        data:
+          - host1.example.com
+          - host2.example.com
+          - host3.example.com
+        type: multistring
+
+    - name: Add an expanded string registry value
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany
+        name: LogPath
+        data: "%USERPROFILE%\\AppLogs"
+        type: expandstring
+
+    - name: Add a binary registry value
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany
+        name: ConfigData
+        data: hex:be,ef,ca,fe
+        type: binary
+
+    - name: Create a registry key without setting a value
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany\Settings
+
+    - name: Remove a registry value
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany
+        name: RedHat
+        state: absent
+
+    - name: Remove an entire registry key and all its values
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\MyCompany\Settings
+        state: absent
+        delete_key: true
+
+    - name: Gather information on a registry key
+      ansible.windows.win_reg_stat:
+        path: HKCU:\Software\Microsoft\Windows\CurrentVersion
+      register: version
+
+    - name: Display registry key info
+      ansible.builtin.debug:
+        var: version
+
+    - name: Gather a specific registry value
+      ansible.windows.win_reg_stat:
+        path: HKCU:\Software\Microsoft\Windows\CurrentVersion
+        name: ProgramFilesDir
+      register: program_files
+
+    - name: Display the registry value
+      ansible.builtin.debug:
+        msg: "ProgramFilesDir is set to: {{ program_files.value }}"
+      when: program_files.exists
