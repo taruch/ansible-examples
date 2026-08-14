@@ -64,6 +64,9 @@ Joins a Windows server to an existing Active Directory domain. Uses `microsoft.a
 ### `registry_examples.yml`
 Demonstrates common Windows registry operations using `ansible.windows.win_regedit` and `ansible.windows.win_reg_stat`. Covers creating and updating registry values across all common types (DWORD, string, multi-string, expanded string, binary), creating empty registry keys, removing values and keys, and querying registry data.
 
+### `security_policy_examples.yml`
+Demonstrates configuring Windows Local Security Policy settings using `community.windows.win_security_policy`. Covers password policies (length, age, complexity, history), account lockout policies (threshold, duration, reset counter), audit policies (logon events, policy changes, privilege use, account management, object access), and security options (rename admin/guest accounts, disable guest, require Ctrl+Alt+Del, logon legal notice, hide last username).
+
 <<<<<<< HEAD
 ---
 

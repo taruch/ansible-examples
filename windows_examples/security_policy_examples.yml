@@ -1,0 +1,149 @@
+---
+# This playbook demonstrates common Windows security policy configurations
+# using the community.windows.win_security_policy module.
+# Security policies map to Local Security Policy (secpol.msc) settings.
+
+- name: Windows Security Policy Examples
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    # --- Account Policies: Password Policy ---
+
+    - name: Set minimum password length to 14 characters
+      community.windows.win_security_policy:
+        section: System Access
+        key: MinimumPasswordLength
+        value: 14
+
+    - name: Set maximum password age to 90 days
+      community.windows.win_security_policy:
+        section: System Access
+        key: MaximumPasswordAge
+        value: 90
+
+    - name: Set minimum password age to 1 day
+      community.windows.win_security_policy:
+        section: System Access
+        key: MinimumPasswordAge
+        value: 1
+
+    - name: Enforce password history (remember 24 passwords)
+      community.windows.win_security_policy:
+        section: System Access
+        key: PasswordHistorySize
+        value: 24
+
+    - name: Enable password complexity requirements
+      community.windows.win_security_policy:
+        section: System Access
+        key: PasswordComplexity
+        value: 1
+
+    - name: Disable storing passwords using reversible encryption
+      community.windows.win_security_policy:
+        section: System Access
+        key: ClearTextPassword
+        value: 0
+
+    # --- Account Policies: Account Lockout Policy ---
+
+    - name: Set account lockout threshold to 5 failed attempts
+      community.windows.win_security_policy:
+        section: System Access
+        key: LockoutBadCount
+        value: 5
+
+    - name: Set account lockout duration to 30 minutes
+      community.windows.win_security_policy:
+        section: System Access
+        key: LockoutDuration
+        value: 30
+
+    - name: Reset account lockout counter after 30 minutes
+      community.windows.win_security_policy:
+        section: System Access
+        key: ResetLockoutCount
+        value: 30
+
+    # --- Local Policies: Audit Policy ---
+
+    - name: Audit account logon events (success and failure)
+      community.windows.win_security_policy:
+        section: Event Audit
+        key: AuditAccountLogon
+        value: 3
+
+    - name: Audit logon events (success and failure)
+      community.windows.win_security_policy:
+        section: Event Audit
+        key: AuditLogonEvents
+        value: 3
+
+    - name: Audit policy change (success only)
+      community.windows.win_security_policy:
+        section: Event Audit
+        key: AuditPolicyChange
+        value: 1
+
+    - name: Audit privilege use (failure only)
+      community.windows.win_security_policy:
+        section: Event Audit
+        key: AuditPrivilegeUse
+        value: 2
+
+    - name: Audit account management (success and failure)
+      community.windows.win_security_policy:
+        section: Event Audit
+        key: AuditAccountManage
+        value: 3
+
+    - name: Audit object access (failure only)
+      community.windows.win_security_policy:
+        section: Event Audit
+        key: AuditObjectAccess
+        value: 2
+
+    # --- Local Policies: Security Options ---
+
+    - name: Rename the built-in Administrator account
+      community.windows.win_security_policy:
+        section: System Access
+        key: NewAdministratorName
+        value: '"LocalAdmin"'
+
+    - name: Rename the built-in Guest account
+      community.windows.win_security_policy:
+        section: System Access
+        key: NewGuestName
+        value: '"LocalGuest"'
+
+    - name: Disable the Guest account
+      community.windows.win_security_policy:
+        section: System Access
+        key: EnableGuestAccount
+        value: 0
+
+    - name: Require Ctrl+Alt+Del for interactive logon
+      community.windows.win_security_policy:
+        section: Registry Values
+        key: MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\DisableCAD
+        value: "4,0"
+
+    - name: Set legal notice caption for logon screen
+      community.windows.win_security_policy:
+        section: Registry Values
+        key: MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\LegalNoticeCaption
+        value: "1,Authorized Access Only"
+
+    - name: Set legal notice text for logon screen
+      community.windows.win_security_policy:
+        section: Registry Values
+        key: MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\LegalNoticeText
+        value: "7,This system is for authorized use only. All activity may be monitored and reported."
+
+    - name: Do not display last signed-in user
+      community.windows.win_security_policy:
+        section: Registry Values
+        key: MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\DontDisplayLastUserName
+        value: "4,1"
