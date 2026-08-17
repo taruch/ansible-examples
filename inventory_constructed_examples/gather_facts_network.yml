@@ -1,0 +1,68 @@
+---
+# Run this playbook first to populate the fact cache for network devices.
+# Enable "Use Fact Cache" on the job template in AAP.
+# Network devices use ansible_network_os and the *_facts modules
+# instead of standard gather_facts.
+
+- name: Gather and cache facts from network devices
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Gather network device facts
+      ansible.builtin.setup:
+      ignore_errors: true
+      register: setup_result
+
+    - name: Gather facts via network OS modules (Cisco IOS)
+      cisco.ios.ios_facts:
+        gather_subset:
+          - all
+      when: ansible_network_os | default('') is search('ios')
+      ignore_errors: true
+
+    - name: Gather facts via network OS modules (Cisco NXOS)
+      cisco.nxos.nxos_facts:
+        gather_subset:
+          - all
+      when: ansible_network_os | default('') is search('nxos')
+      ignore_errors: true
+
+    - name: Gather facts via network OS modules (Arista EOS)
+      arista.eos.eos_facts:
+        gather_subset:
+          - all
+      when: ansible_network_os | default('') is search('eos')
+      ignore_errors: true
+
+    - name: Gather facts via network OS modules (Juniper JunOS)
+      junipernetworks.junos.junos_facts:
+        gather_subset:
+          - all
+      when: ansible_network_os | default('') is search('junos')
+      ignore_errors: true
+
+    - name: Gather facts via network OS modules (VyOS)
+      vyos.vyos.vyos_facts:
+        gather_subset:
+          - all
+      when: ansible_network_os | default('') is search('vyos')
+      ignore_errors: true
+
+    - name: Set cacheable network device facts
+      ansible.builtin.set_fact:
+        cacheable: true
+        net_os: "{{ ansible_network_os | default('unknown') }}"
+        net_hostname: "{{ ansible_net_hostname | default(inventory_hostname) }}"
+        net_model: "{{ ansible_net_model | default('unknown') }}"
+        net_version: "{{ ansible_net_version | default('unknown') }}"
+        net_serialnum: "{{ ansible_net_serialnum | default('unknown') }}"
+        net_image: "{{ ansible_net_image | default('unknown') }}"
+        net_interface_count: "{{ ansible_net_all_ipv4_addresses | default([]) | length }}"
+        net_api: "{{ ansible_net_api | default(ansible_connection | default('unknown')) }}"
+
+    - name: Display cached fact summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: {{ net_os }} {{ net_version }},
+          model={{ net_model }}, serial={{ net_serialnum }},
+          interfaces={{ net_interface_count }}

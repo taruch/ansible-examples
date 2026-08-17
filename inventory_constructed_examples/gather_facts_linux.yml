@@ -1,0 +1,33 @@
+---
+# Run this playbook first to populate the fact cache for Linux hosts.
+# Enable "Use Fact Cache" on the job template in AAP.
+
+- name: Gather and cache facts from Linux hosts
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Set additional cacheable facts for constructed groups
+      ansible.builtin.set_fact:
+        cacheable: true
+        host_kernel: "{{ ansible_kernel }}"
+        host_arch: "{{ ansible_architecture }}"
+        host_vcpus: "{{ ansible_processor_vcpus }}"
+        host_memory_gb: "{{ (ansible_memtotal_mb / 1024) | round(0, 'ceil') | int }}"
+        host_swap_mb: "{{ ansible_swaptotal_mb }}"
+        host_disk_count: "{{ ansible_devices | length }}"
+        host_selinux_status: "{{ ansible_selinux.status | default('disabled') }}"
+        host_python_version: "{{ ansible_python_version }}"
+        host_pkg_mgr: "{{ ansible_pkg_mgr }}"
+        host_service_mgr: "{{ ansible_service_mgr }}"
+        host_virtualization_type: "{{ ansible_virtualization_type | default('none') }}"
+        host_virtualization_role: "{{ ansible_virtualization_role | default('none') }}"
+        host_fqdn: "{{ ansible_fqdn }}"
+      when: ansible_os_family != "Windows"
+
+    - name: Display cached fact summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          ({{ ansible_os_family }}), {{ host_vcpus }} vCPUs, {{ host_memory_gb }}GB RAM,
+          pkg_mgr={{ host_pkg_mgr }}, selinux={{ host_selinux_status }}
+      when: ansible_os_family != "Windows"

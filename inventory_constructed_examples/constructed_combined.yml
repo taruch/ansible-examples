@@ -1,0 +1,61 @@
+---
+# Combined constructed inventory source for all device types.
+# Use this instead of the individual files if you have a single
+# mixed inventory with Linux, Windows, and network devices.
+# Requires fact cache to be populated by running the appropriate
+# gather_facts playbook for each device type.
+
+plugin: ansible.builtin.constructed
+strict: false
+use_vars_plugins: true
+
+groups:
+  # --- Top-level platform groups ---
+  os_linux: ansible_os_family is defined and ansible_os_family not in ["Windows", "Darwin"] and ansible_network_os is not defined
+  os_windows: ansible_os_family | default('') == "Windows"
+  network_devices: ansible_network_os is defined
+
+  # --- Linux distributions ---
+  os_redhat: ansible_os_family | default('') == "RedHat"
+  os_debian: ansible_os_family | default('') == "Debian"
+  distro_rhel: ansible_distribution | default('') == "RedHat"
+  distro_centos: ansible_distribution | default('') == "CentOS"
+  distro_ubuntu: ansible_distribution | default('') == "Ubuntu"
+  distro_amazon: ansible_distribution | default('') == "Amazon"
+  distro_rocky: ansible_distribution | default('') == "Rocky"
+
+  # --- Linux major versions ---
+  rhel_8: ansible_distribution | default('') == "RedHat" and ansible_distribution_major_version | default('') == "8"
+  rhel_9: ansible_distribution | default('') == "RedHat" and ansible_distribution_major_version | default('') == "9"
+
+  # --- Windows versions ---
+  windows_server: ansible_os_family | default('') == "Windows" and host_os_build | default('') in ["Server", "server"]
+  windows_2019: ansible_distribution_version | default('') is search('^10\.0\.17763')
+  windows_2022: ansible_distribution_version | default('') is search('^10\.0\.20348')
+  domain_joined: host_is_domain_joined | default(false) | bool
+
+  # --- Network vendors ---
+  cisco_ios: ansible_network_os | default('') is search('ios') and ansible_network_os | default('') is not search('nxos')
+  cisco_nxos: ansible_network_os | default('') is search('nxos')
+  arista_eos: ansible_network_os | default('') is search('eos')
+  juniper_junos: ansible_network_os | default('') is search('junos')
+
+  # --- Cross-platform sizing ---
+  small: (host_vcpus | default(0) | int) <= 2 and (host_memory_gb | default(0) | int) <= 4
+  medium: (host_vcpus | default(0) | int) > 2 and (host_vcpus | default(0) | int) <= 8
+  large: (host_vcpus | default(0) | int) > 8
+
+keyed_groups:
+  - key: ansible_os_family | default(ansible_network_os | default('unknown'))
+    prefix: platform
+    separator: "_"
+
+  - key: ansible_distribution | default('unknown')
+    prefix: distro
+    separator: "_"
+    parent_group: os_linux
+
+  - key: ansible_network_os | default('unknown')
+    prefix: net_os
+    separator: "_"
+    parent_group: network_devices

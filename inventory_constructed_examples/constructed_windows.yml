@@ -1,0 +1,48 @@
+---
+# Constructed inventory source for Windows hosts.
+# Add this as an inventory source (type: Sourced from a Project) in AAP.
+# Requires fact cache to be populated by running gather_facts_windows.yml first.
+
+plugin: ansible.builtin.constructed
+strict: false
+use_vars_plugins: true
+
+groups:
+  # OS family
+  os_windows: ansible_os_family | default('') == "Windows"
+
+  # Server vs Workstation
+  windows_server: ansible_os_family | default('') == "Windows" and host_os_build | default('') in ["Server", "server"]
+  windows_workstation: ansible_os_family | default('') == "Windows" and host_os_build | default('') not in ["Server", "server"]
+
+  # Windows Server versions
+  windows_2016: ansible_distribution_version | default('') is search('^10\.0\.14393')
+  windows_2019: ansible_distribution_version | default('') is search('^10\.0\.17763')
+  windows_2022: ansible_distribution_version | default('') is search('^10\.0\.20348')
+  windows_2025: ansible_distribution_version | default('') is search('^10\.0\.26100')
+
+  # Domain membership
+  domain_joined: host_is_domain_joined | default(false) | bool
+  workgroup: not (host_is_domain_joined | default(false) | bool)
+
+  # Domain role
+  domain_controller: host_domain_role | default('') is search('(?i)domain controller')
+  member_server: host_domain_role | default('') is search('(?i)member server')
+
+  # Resource sizing
+  small_windows: (host_vcpus | default(0) | int) <= 2 and (host_memory_gb | default(0) | int) <= 4
+  medium_windows: (host_vcpus | default(0) | int) > 2 and (host_vcpus | default(0) | int) <= 8
+  large_windows: (host_vcpus | default(0) | int) > 8
+
+keyed_groups:
+  - key: host_domain | default('WORKGROUP')
+    prefix: domain
+    separator: "_"
+
+  - key: host_timezone | default('unknown')
+    prefix: tz
+    separator: "_"
+
+  - key: host_domain_role | default('unknown') | regex_replace(' ', '_') | lower
+    prefix: role
+    separator: "_"

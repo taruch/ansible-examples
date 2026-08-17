@@ -1,0 +1,70 @@
+---
+# Constructed inventory source for Linux hosts.
+# Add this as an inventory source (type: Sourced from a Project) in AAP.
+# Requires fact cache to be populated by running gather_facts_linux.yml first.
+
+plugin: ansible.builtin.constructed
+strict: false
+use_vars_plugins: true
+
+groups:
+  # OS family
+  os_linux: ansible_os_family is defined and ansible_os_family not in ["Windows", "Darwin"]
+  os_redhat: ansible_os_family | default('') == "RedHat"
+  os_debian: ansible_os_family | default('') == "Debian"
+  os_suse: ansible_os_family | default('') == "Suse"
+
+  # Specific distributions
+  distro_rhel: ansible_distribution | default('') == "RedHat"
+  distro_centos: ansible_distribution | default('') == "CentOS"
+  distro_fedora: ansible_distribution | default('') == "Fedora"
+  distro_ubuntu: ansible_distribution | default('') == "Ubuntu"
+  distro_amazon: ansible_distribution | default('') == "Amazon"
+  distro_rocky: ansible_distribution | default('') == "Rocky"
+  distro_alma: ansible_distribution | default('') == "AlmaLinux"
+  distro_oracle: ansible_distribution | default('') == "OracleLinux"
+
+  # Major version groups
+  rhel_8: ansible_distribution | default('') == "RedHat" and ansible_distribution_major_version | default('') == "8"
+  rhel_9: ansible_distribution | default('') == "RedHat" and ansible_distribution_major_version | default('') == "9"
+  ubuntu_22: ansible_distribution | default('') == "Ubuntu" and ansible_distribution_major_version | default('') == "22"
+  ubuntu_24: ansible_distribution | default('') == "Ubuntu" and ansible_distribution_major_version | default('') == "24"
+
+  # Package manager
+  pkg_dnf: host_pkg_mgr | default('') == "dnf"
+  pkg_yum: host_pkg_mgr | default('') == "yum"
+  pkg_apt: host_pkg_mgr | default('') == "apt"
+
+  # SELinux status
+  selinux_enforcing: host_selinux_status | default('') == "enforcing"
+  selinux_permissive: host_selinux_status | default('') == "permissive"
+  selinux_disabled: host_selinux_status | default('') == "disabled"
+
+  # Init system
+  systemd: host_service_mgr | default('') == "systemd"
+
+  # Virtualization
+  virtual: host_virtualization_role | default('') == "guest"
+  physical: host_virtualization_role | default('') == "host" or host_virtualization_type | default('') == "NA"
+
+  # Resource sizing
+  small_linux: (host_vcpus | default(0) | int) <= 2 and (host_memory_gb | default(0) | int) <= 4
+  medium_linux: (host_vcpus | default(0) | int) > 2 and (host_vcpus | default(0) | int) <= 8
+  large_linux: (host_vcpus | default(0) | int) > 8
+
+keyed_groups:
+  - key: ansible_distribution | default('unknown')
+    prefix: distro
+    separator: "_"
+
+  - key: ansible_distribution_major_version | default('unknown')
+    prefix: "{{ 'distro_' + (ansible_distribution | default('unknown') | lower) }}"
+    separator: "_"
+
+  - key: ansible_architecture | default('unknown')
+    prefix: arch
+    separator: "_"
+
+  - key: host_virtualization_type | default('unknown')
+    prefix: virt
+    separator: "_"

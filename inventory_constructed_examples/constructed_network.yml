@@ -1,0 +1,43 @@
+---
+# Constructed inventory source for network devices.
+# Add this as an inventory source (type: Sourced from a Project) in AAP.
+# Requires fact cache to be populated by running gather_facts_network.yml first.
+
+plugin: ansible.builtin.constructed
+strict: false
+use_vars_plugins: true
+
+groups:
+  # All network devices
+  network_devices: ansible_network_os is defined
+
+  # Vendor / Platform
+  cisco_ios: ansible_network_os | default('') is search('ios') and ansible_network_os | default('') is not search('nxos')
+  cisco_nxos: ansible_network_os | default('') is search('nxos')
+  arista_eos: ansible_network_os | default('') is search('eos')
+  juniper_junos: ansible_network_os | default('') is search('junos')
+  vyos: ansible_network_os | default('') is search('vyos')
+  paloalto: ansible_network_os | default('') is search('panos')
+
+  # Device type by model string (common patterns)
+  switches: net_model | default('') is search('(?i)(switch|catalyst|nexus|arista)')
+  routers: net_model | default('') is search('(?i)(router|ISR|ASR|CSR)')
+  firewalls: net_model | default('') is search('(?i)(firewall|ASA|Fortinet|PA-)')
+
+  # Connection type
+  conn_network_cli: net_api | default('') == "network_cli"
+  conn_httpapi: net_api | default('') == "httpapi"
+  conn_netconf: net_api | default('') == "netconf"
+
+keyed_groups:
+  - key: ansible_network_os | default('unknown')
+    prefix: net_os
+    separator: "_"
+
+  - key: net_version | default('unknown')
+    prefix: net_ver
+    separator: "_"
+
+  - key: net_model | default('unknown') | regex_replace(' ', '_') | lower
+    prefix: model
+    separator: "_"

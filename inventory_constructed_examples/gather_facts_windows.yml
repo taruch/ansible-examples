@@ -1,0 +1,31 @@
+---
+# Run this playbook first to populate the fact cache for Windows hosts.
+# Enable "Use Fact Cache" on the job template in AAP.
+
+- name: Gather and cache facts from Windows hosts
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Set additional cacheable facts for constructed groups
+      ansible.builtin.set_fact:
+        cacheable: true
+        host_os_build: "{{ ansible_os_product_type }}"
+        host_os_version: "{{ ansible_distribution_version }}"
+        host_vcpus: "{{ ansible_processor_vcpus }}"
+        host_memory_gb: "{{ (ansible_memtotal_mb / 1024) | round(0, 'ceil') | int }}"
+        host_domain: "{{ ansible_windows_domain | default('WORKGROUP') }}"
+        host_domain_role: "{{ ansible_windows_domain_role | default('Stand-alone') }}"
+        host_is_domain_joined: "{{ (ansible_windows_domain | default('WORKGROUP')) != 'WORKGROUP' }}"
+        host_architecture: "{{ ansible_architecture | default('64-bit') }}"
+        host_timezone: "{{ ansible_date_time.tz }}"
+        host_powershell_version: "{{ ansible_powershell_version | default('unknown') }}"
+      when: ansible_os_family == "Windows"
+
+    - name: Display cached fact summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          ({{ ansible_os_name | default(ansible_distribution) }}),
+          {{ host_vcpus }} vCPUs, {{ host_memory_gb }}GB RAM,
+          domain={{ host_domain }}, role={{ host_domain_role }}
+      when: ansible_os_family == "Windows"
