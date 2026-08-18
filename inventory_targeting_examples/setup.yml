@@ -31,6 +31,7 @@ project_scm_url: "https://github.com/taruch/ansible-examples.git"
 project_scm_branch: "master"
 target_organization: "Default"
 target_inventory: "Demo Inventory"
+controller_request_timeout: 10
 
 # ---------------------------------------------------------------------------
 # Project — git-synced from this repository.
