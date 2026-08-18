@@ -6,7 +6,6 @@
 # `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
 #
 # Creates:
-#   - Project synced from this git repo
 #   - Fact-gathering job templates (Linux, Windows, Network) with fact cache enabled
 #   - Constructed inventory sources for dynamic grouping
 #   - Multi-attribute targeting job templates with survey dropdowns
@@ -16,6 +15,7 @@
 #   - A Machine credential for Linux/Windows hosts
 #   - A Network credential for network devices (if using network targeting)
 #   - An inventory containing the hosts to target
+#   - A project that syncs this git repo (e.g. "Ansible Examples")
 #
 # Workflow:
 #   1. Run the fact-gathering templates to populate the fact cache
@@ -27,26 +27,9 @@
 # ---------------------------------------------------------------------------
 machine_credential: "Demo Credential"
 network_credential: "Network Credential"
-project_scm_url: "https://github.com/taruch/ansible-examples.git"
-project_scm_branch: "master"
 target_organization: "Default"
 target_inventory: "Demo Inventory"
-controller_request_timeout: 10
-
-# ---------------------------------------------------------------------------
-# Project — git-synced from this repository.
-# ---------------------------------------------------------------------------
-controller_projects:
-  - name: "Inventory Targeting"
-    description: "Constructed inventory sources, fact-gathering playbooks, and dynamic targeting examples."
-    organization: "{{ target_organization }}"
-    scm_type: "git"
-    scm_url: "{{ project_scm_url }}"
-    scm_branch: "{{ project_scm_branch }}"
-    scm_clean: false
-    scm_delete_on_update: false
-    scm_update_on_launch: true
-    allow_override: false
+target_project: "Ansible Examples"
 
 # ---------------------------------------------------------------------------
 # Constructed inventory sources — add to the target inventory.
@@ -57,7 +40,7 @@ controller_inventory_sources:
     description: "Builds OS, distribution, network vendor, and sizing groups from cached facts."
     inventory: "{{ target_inventory }}"
     source: scm
-    source_project: "Inventory Targeting"
+    source_project: "{{ target_project }}"
     source_path: "inventory_constructed_examples/constructed_combined.yml"
     update_on_launch: true
     overwrite: true
@@ -66,7 +49,7 @@ controller_inventory_sources:
     description: "Builds vendor, model, function, site, and building groups from host variables."
     inventory: "{{ target_inventory }}"
     source: scm
-    source_project: "Inventory Targeting"
+    source_project: "{{ target_project }}"
     source_path: "inventory_constructed_examples/network_device_grouping/constructed_network_devices.yml"
     update_on_launch: true
     overwrite: true
@@ -78,7 +61,7 @@ controller_templates:
   - name: "CONSTRUCTED / Gather Facts - Linux"
     description: "Gathers and caches facts from Linux hosts. Run before syncing constructed inventory sources."
     organization: "{{ target_organization }}"
-    project: "Inventory Targeting"
+    project: "{{ target_project }}"
     inventory: "{{ target_inventory }}"
     playbook: "inventory_constructed_examples/gather_facts_linux.yml"
     credentials:
@@ -95,7 +78,7 @@ controller_templates:
   - name: "CONSTRUCTED / Gather Facts - Windows"
     description: "Gathers and caches facts from Windows hosts. Run before syncing constructed inventory sources."
     organization: "{{ target_organization }}"
-    project: "Inventory Targeting"
+    project: "{{ target_project }}"
     inventory: "{{ target_inventory }}"
     playbook: "inventory_constructed_examples/gather_facts_windows.yml"
     credentials:
@@ -112,7 +95,7 @@ controller_templates:
   - name: "CONSTRUCTED / Gather Facts - Network"
     description: "Gathers and caches facts from network devices. Run before syncing constructed inventory sources."
     organization: "{{ target_organization }}"
-    project: "Inventory Targeting"
+    project: "{{ target_project }}"
     inventory: "{{ target_inventory }}"
     playbook: "inventory_constructed_examples/gather_facts_network.yml"
     credentials:
@@ -132,7 +115,7 @@ controller_templates:
   - name: "TARGETING / Multi-Attribute Network"
     description: "Target network devices by vendor, role, site, and building. Survey dropdowns build the host pattern at runtime via Jinja2."
     organization: "{{ target_organization }}"
-    project: "Inventory Targeting"
+    project: "{{ target_project }}"
     inventory: "{{ target_inventory }}"
     playbook: "inventory_targeting_examples/multi_attribute_targeting.yml"
     credentials:
@@ -192,7 +175,7 @@ controller_templates:
   - name: "TARGETING / Multi-Attribute OS"
     description: "Target hosts by OS, distribution, version, environment, and size. Survey dropdowns build the host pattern at runtime via Jinja2."
     organization: "{{ target_organization }}"
-    project: "Inventory Targeting"
+    project: "{{ target_project }}"
     inventory: "{{ target_inventory }}"
     playbook: "inventory_targeting_examples/multi_attribute_targeting_os.yml"
     credentials:
@@ -265,7 +248,7 @@ controller_templates:
   - name: "TARGETING / Rolling Update"
     description: "Runs tasks against a target group in rolling batches. Survey controls the target group and batch size for controlled rollouts."
     organization: "{{ target_organization }}"
-    project: "Inventory Targeting"
+    project: "{{ target_project }}"
     inventory: "{{ target_inventory }}"
     playbook: "inventory_targeting_examples/rolling_update.yml"
     credentials:

@@ -31,7 +31,7 @@ Use **dynamic targeting** — the `hosts:` field is evaluated at runtime using J
 
 | File | Description |
 |------|-------------|
-| `setup.yml` | **Configuration as Code** — creates the project, constructed inventory sources, fact-gathering templates, targeting job templates (with surveys), and a workflow in AAP via `infra.aap_configuration.dispatch` |
+| `setup.yml` | **Configuration as Code** — creates constructed inventory sources, fact-gathering templates, targeting job templates (with surveys), and a workflow in AAP via `infra.aap_configuration.dispatch` (uses an existing project) |
 | `multi_attribute_targeting.yml` | Jinja2 dynamic `hosts:` with 4-attribute intersection (vendor, role, site, building) |
 | `multi_attribute_targeting_os.yml` | Same pattern for OS-based targeting (os, distro, version, env, size) |
 | `rolling_update.yml` | Survey-driven rolling update with selectable strategy (fixed, canary, percentage), batch size, and failure threshold |
@@ -84,16 +84,16 @@ Patterns chain left to right: `os_linux:&env_production:!large_linux` means "Lin
 
 ### Option A: Configuration as Code (Recommended)
 
-`setup.yml` defines everything as data for `infra.aap_configuration.dispatch`. One command creates the project, inventory sources, job templates, surveys, and workflow.
+`setup.yml` defines everything as data for `infra.aap_configuration.dispatch`. One command creates the inventory sources, job templates, surveys, and workflow.
 
 **1. Edit tunables** at the top of `setup.yml`:
 
 ```yaml
 machine_credential: "Demo Credential"      # must already exist in AAP
 network_credential: "Network Credential"    # must already exist in AAP
-project_scm_url: "https://github.com/taruch/ansible-examples.git"
 target_organization: "Default"
 target_inventory: "Demo Inventory"          # must already exist in AAP
+target_project: "Ansible Examples"          # must already exist in AAP
 ```
 
 **2. Apply** using the shared dispatcher playbook:
@@ -115,7 +115,6 @@ Or include it from any wrapper that calls `infra.aap_configuration.dispatch`:
 
 | Type | Name | Purpose |
 |------|------|---------|
-| Project | `Inventory Targeting` | Git-synced from this repo |
 | Inventory Source | `Constructed / Combined Groups` | OS, distro, sizing groups from facts |
 | Inventory Source | `Constructed / Network Device Groups` | Vendor, model, site, building groups |
 | Job Template | `CONSTRUCTED / Gather Facts - Linux` | Populates fact cache (fact cache enabled) |
