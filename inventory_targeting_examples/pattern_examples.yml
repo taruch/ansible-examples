@@ -1,0 +1,131 @@
+---
+# Host Pattern Targeting Examples
+#
+# Demonstrates Ansible's host pattern syntax for combining groups.
+# These patterns work in playbook hosts: fields, --limit, and AAP surveys.
+#
+# Pattern Syntax:
+#   group1:group2       Union (hosts in group1 OR group2)
+#   group1:&group2      Intersection (hosts in group1 AND group2)
+#   group1:!group2      Exclusion (hosts in group1 but NOT group2)
+#   ~regex              Regex match on hostname
+#   *                   All hosts
+#
+# Patterns can be chained: group1:&group2:!group3
+
+# --- Intersection: hosts that are in ALL specified groups ---
+
+- name: "Intersection - RHEL 9 hosts in production"
+  hosts: rhel_9:&env_production
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "RHEL 9 production host: {{ inventory_hostname }}"
+
+- name: "Intersection - Large Linux VMs in production"
+  hosts: large_linux:&virtual:&env_production
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Large production VM: {{ inventory_hostname }}"
+
+- name: "Intersection - Cisco IOS switches at Rose Hill"
+  hosts: cisco_ios:&all_switches:&site_rose_hill
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Cisco switch at Rose Hill: {{ inventory_hostname }}"
+
+# --- Union: hosts in ANY of the specified groups ---
+
+- name: "Union - All RHEL and Ubuntu hosts"
+  hosts: distro_rhel:distro_ubuntu
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "RHEL or Ubuntu: {{ inventory_hostname }}"
+
+- name: "Union - All routers and firewalls"
+  hosts: all_routers:firewalls
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Router or firewall: {{ inventory_hostname }}"
+
+# --- Exclusion: hosts in group1 but NOT in group2 ---
+
+- name: "Exclusion - All Linux hosts except production"
+  hosts: os_linux:!env_production
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Non-production Linux: {{ inventory_hostname }}"
+
+- name: "Exclusion - All switches except data center"
+  hosts: all_switches:!datacenter
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Non-DC switch: {{ inventory_hostname }}"
+
+- name: "Exclusion - All hosts except domain controllers"
+  hosts: os_windows:!domain_controller
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Windows non-DC: {{ inventory_hostname }}"
+
+# --- Combined patterns: intersection + exclusion ---
+
+- name: "Combined - Production RHEL hosts excluding large instances"
+  hosts: distro_rhel:&env_production:!large_linux
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Small/medium prod RHEL: {{ inventory_hostname }}"
+
+- name: "Combined - All Rose Hill devices except firewalls"
+  hosts: site_rose_hill:!firewalls
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Non-firewall at Rose Hill: {{ inventory_hostname }}"
+
+- name: "Combined - Edge switches at Rose Hill except Building C"
+  hosts: edge_switches:&site_rose_hill:!bldg_building_c
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Edge switch (not Bldg C): {{ inventory_hostname }}"
+
+# --- Regex: match hostnames by pattern ---
+
+- name: "Regex - All hosts starting with rh- (Rose Hill naming convention)"
+  hosts: ~rh-.*
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Rose Hill host: {{ inventory_hostname }}"
+
+- name: "Regex - All MDR (building router) hosts"
+  hosts: ~.*-mdr-.*
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Building router: {{ inventory_hostname }}"
+
+- name: "Regex - Hosts with numeric suffix 01-05"
+  hosts: ~.*-0[1-5]$
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Host 01-05: {{ inventory_hostname }}"
+
+# --- Wildcard ---
+
+- name: "Wildcard - All hosts in the rh-a (Rose Hill Bldg A) prefix"
+  hosts: rh-a-*
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Rose Hill Bldg A: {{ inventory_hostname }}"

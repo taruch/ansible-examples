@@ -1,0 +1,38 @@
+---
+# Multi-Attribute Dynamic Targeting for Mixed OS Environments
+#
+# Same Jinja2 pattern as multi_attribute_targeting.yml but for Linux/Windows
+# hosts using OS-based constructed groups.
+#
+# Requires constructed inventory groups from:
+#   inventory_constructed_examples/constructed_combined.yml
+#
+# AAP Survey Variables:
+#   target_os       - "all", "linux", or "windows"
+#   target_distro   - "all" or a distro (rhel, ubuntu, amazon, rocky)
+#   target_version  - "all" or a major version (8, 9, 22, 24)
+#   target_env      - "all" or an environment (production, staging, development)
+#   target_size     - "all", "small", "medium", or "large"
+
+- name: Multi-Attribute Dynamic Target - OS Patching
+  hosts: >-
+    {%- set pattern = [] -%}
+    {%- if target_os != 'all' %}{% set _ = pattern.append('os_' ~ target_os) %}{% endif -%}
+    {%- if target_distro != 'all' %}{% set _ = pattern.append('distro_' ~ target_distro) %}{% endif -%}
+    {%- if target_version != 'all' %}
+    {%-   if target_distro != 'all' %}{% set _ = pattern.append(target_distro ~ '_' ~ target_version) %}
+    {%-   else %}{% set _ = pattern.append('ver_' ~ target_version) %}{% endif -%}
+    {%- endif -%}
+    {%- if target_env != 'all' %}{% set _ = pattern.append('env_' ~ target_env) %}{% endif -%}
+    {%- if target_size != 'all' %}{% set _ = pattern.append(target_size) %}{% endif -%}
+    {{ pattern | join(':&') if pattern else 'all' }}
+  gather_facts: false
+
+  tasks:
+    - name: Show resolved target
+      ansible.builtin.debug:
+        msg: >-
+          Host: {{ inventory_hostname }}
+          (os={{ ansible_os_family | default('n/a') }},
+           distro={{ ansible_distribution | default('n/a') }},
+           version={{ ansible_distribution_major_version | default('n/a') }})

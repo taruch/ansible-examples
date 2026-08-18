@@ -1,0 +1,88 @@
+---
+# Constructed inventory source for dynamic network device grouping.
+#
+# Creates combinable groups from host variables:
+#   device_vendor    → vendor_alcatel, vendor_extreme
+#   device_model     → model_OS6900_X20, model_OS6860E_P48
+#   device_function  → func_edge_switch, func_mdr, func_mds
+#   device_site      → site_rose_hill, site_lincoln_center
+#   device_building  → bldg_building_a, bldg_building_b
+#   device_campus    → campus_rose_hill_building_a (site + building combined)
+#
+# Combine groups using Ansible host patterns:
+#   vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_rose_hill:&bldg_building_a
+#
+# AAP Setup:
+#   1. Set device_vendor, device_model, device_function, device_site,
+#      device_building variables on each host in your AAP inventory
+#   2. Add this file as an inventory source (Sourced from a Project)
+#   3. Sync the source — groups appear automatically
+
+plugin: ansible.builtin.constructed
+strict: false
+use_vars_plugins: true
+
+# ---------- Static boolean groups ----------
+groups:
+  # All network devices with our custom variables
+  managed_network: device_vendor is defined
+
+  # --- Vendor groups ---
+  alcatel: device_vendor | default('') == 'alcatel'
+  extreme: device_vendor | default('') == 'extreme'
+  paloalto: device_vendor | default('') == 'paloalto'
+
+  # --- Function groups ---
+  building_routers: device_function | default('') == 'mdr'
+  main_agg_switches: device_function | default('') == 'mds'
+  secondary_agg_switches: device_function | default('') == 'mas'
+  edge_switches: device_function | default('') in ['edge_switch', 'dc_edge_switch']
+  firewalls: device_function | default('') == 'firewall'
+  all_switches: device_function | default('') in ['mds', 'mas', 'edge_switch', 'dc_mds', 'dc_edge_switch']
+  all_routers: device_function | default('') in ['mdr', 'dc_mdr']
+
+  # --- Data center specific ---
+  datacenter: device_site | default('') == 'data_center'
+  dc_routers: device_function | default('') == 'dc_mdr'
+  dc_agg_switches: device_function | default('') == 'dc_mds'
+  dc_edge_switches: device_function | default('') == 'dc_edge_switch'
+
+  # --- Campus (non-datacenter) ---
+  campus_devices: device_site | default('') not in ['data_center', '']
+
+# ---------- Keyed groups (one group per unique value) ----------
+keyed_groups:
+  # vendor_alcatel, vendor_extreme, vendor_paloalto
+  - key: device_vendor | default('unknown')
+    prefix: vendor
+    separator: "_"
+
+  # model_OS6900_X20, model_OS6860E_P48, model_OS6850_P24, model_PA_850
+  - key: device_model | default('unknown') | regex_replace('-', '_')
+    prefix: model
+    separator: "_"
+
+  # func_mdr, func_mds, func_mas, func_edge_switch, func_firewall
+  - key: device_function | default('unknown')
+    prefix: func
+    separator: "_"
+
+  # site_rose_hill, site_lincoln_center, site_data_center
+  - key: device_site | default('unknown')
+    prefix: site
+    separator: "_"
+
+  # bldg_building_a, bldg_building_b, bldg_building_c
+  - key: device_building | default('unknown')
+    prefix: bldg
+    separator: "_"
+
+  # campus_rose_hill_building_a, campus_lincoln_center_building_a
+  - key: device_campus | default('unknown')
+    prefix: campus
+    separator: "_"
+
+  # Vendor + model combined: alcatel_OS6900_X20, extreme_X460_G2_48p
+  - key: (device_vendor | default('unknown')) + '_' + (device_model | default('unknown') | regex_replace('-', '_'))
+    prefix: ""
+    separator: ""

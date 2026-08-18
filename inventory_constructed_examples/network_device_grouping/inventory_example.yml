@@ -1,0 +1,186 @@
+---
+# Example static inventory showing how to define device attributes as host variables.
+# In AAP, these variables would be set on each host in the inventory UI,
+# imported via an inventory source, or populated by a CMDB sync.
+#
+# The constructed inventory source (constructed_network_devices.yml) reads
+# these variables and builds dynamic, combinable groups automatically.
+
+all:
+  children:
+    # --- Rose Hill - Building A ---
+    rose_hill_bldg_a_devices:
+      hosts:
+        rh-a-mdr-01:
+          ansible_host: 10.1.1.1
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6900-X20
+          device_function: mdr
+          device_function_name: Building Router
+          device_site: rose_hill
+          device_building: building_a
+          device_campus: rose_hill_building_a
+
+        rh-a-mds-01:
+          ansible_host: 10.1.1.2
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6860E-P48
+          device_function: mds
+          device_function_name: Main Aggregation Switch
+          device_site: rose_hill
+          device_building: building_a
+          device_campus: rose_hill_building_a
+
+        rh-a-mas-01:
+          ansible_host: 10.1.1.3
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6860-P48
+          device_function: mas
+          device_function_name: Secondary Aggregation Switch
+          device_site: rose_hill
+          device_building: building_a
+          device_campus: rose_hill_building_a
+
+        rh-a-edge-01:
+          ansible_host: 10.1.1.10
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6860E-P48
+          device_function: edge_switch
+          device_function_name: Edge Switch
+          device_site: rose_hill
+          device_building: building_a
+          device_campus: rose_hill_building_a
+
+        rh-a-edge-02:
+          ansible_host: 10.1.1.11
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6850-P24
+          device_function: edge_switch
+          device_function_name: Edge Switch
+          device_site: rose_hill
+          device_building: building_a
+          device_campus: rose_hill_building_a
+
+    # --- Rose Hill - Building B ---
+    rose_hill_bldg_b_devices:
+      hosts:
+        rh-b-mdr-01:
+          ansible_host: 10.1.2.1
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6900-X20
+          device_function: mdr
+          device_function_name: Building Router
+          device_site: rose_hill
+          device_building: building_b
+          device_campus: rose_hill_building_b
+
+        rh-b-mds-01:
+          ansible_host: 10.1.2.2
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6860E-P48
+          device_function: mds
+          device_function_name: Main Aggregation Switch
+          device_site: rose_hill
+          device_building: building_b
+          device_campus: rose_hill_building_b
+
+        rh-b-edge-01:
+          ansible_host: 10.1.2.10
+          ansible_network_os: extreme.exos.exos
+          device_vendor: extreme
+          device_model: X460-G2-48p
+          device_function: edge_switch
+          device_function_name: Edge Switch
+          device_site: rose_hill
+          device_building: building_b
+          device_campus: rose_hill_building_b
+
+    # --- Lincoln Center - Building A ---
+    lincoln_bldg_a_devices:
+      hosts:
+        lc-a-mdr-01:
+          ansible_host: 10.2.1.1
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6900-X20
+          device_function: mdr
+          device_function_name: Building Router
+          device_site: lincoln_center
+          device_building: building_a
+          device_campus: lincoln_center_building_a
+
+        lc-a-mds-01:
+          ansible_host: 10.2.1.2
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6860E-P48
+          device_function: mds
+          device_function_name: Main Aggregation Switch
+          device_site: lincoln_center
+          device_building: building_a
+          device_campus: lincoln_center_building_a
+
+        lc-a-edge-01:
+          ansible_host: 10.2.1.10
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6860E-P48
+          device_function: edge_switch
+          device_function_name: Edge Switch
+          device_site: lincoln_center
+          device_building: building_a
+          device_campus: lincoln_center_building_a
+
+        lc-a-fw-01:
+          ansible_host: 10.2.1.254
+          ansible_network_os: paloaltonetworks.panos.panos
+          device_vendor: paloalto
+          device_model: PA-850
+          device_function: firewall
+          device_function_name: Firewall
+          device_site: lincoln_center
+          device_building: building_a
+          device_campus: lincoln_center_building_a
+
+    # --- Data Center ---
+    datacenter_devices:
+      hosts:
+        dc-mdr-01:
+          ansible_host: 10.100.1.1
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6900-X20
+          device_function: dc_mdr
+          device_function_name: Data Center MDR
+          device_site: data_center
+          device_building: dc_main
+          device_campus: data_center_dc_main
+
+        dc-mds-01:
+          ansible_host: 10.100.1.2
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6900-X20
+          device_function: dc_mds
+          device_function_name: Data Center MDS
+          device_site: data_center
+          device_building: dc_main
+          device_campus: data_center_dc_main
+
+        dc-edge-01:
+          ansible_host: 10.100.1.10
+          ansible_network_os: alcatel.aos.aos
+          device_vendor: alcatel
+          device_model: OS6860E-P48
+          device_function: dc_edge_switch
+          device_function_name: Data Center Edge Switch
+          device_site: data_center
+          device_building: dc_main
+          device_campus: data_center_dc_main

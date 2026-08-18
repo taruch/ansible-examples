@@ -1,0 +1,97 @@
+---
+# Survey-Driven Targeting Patterns for AAP
+#
+# These playbooks are designed to be paired with AAP surveys that let
+# operators select targets at launch time. Each demonstrates a different
+# survey pattern.
+
+# --- Pattern 1: Free-text host pattern ---
+# Survey variable: target_hosts (text input)
+# Operator enters any valid host pattern: "edge_switches:&site_rose_hill"
+#
+# AAP Job Template config:
+#   Limit: {{ target_hosts }}
+
+- name: "Free-Text Pattern - Operator enters any host pattern"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Targeted: {{ inventory_hostname }}"
+
+
+# --- Pattern 2: Single-select group from dropdown ---
+# Survey variable: target_group (multiple choice)
+# Options: all, os_linux, os_windows, network_devices, rhel_9, etc.
+
+- name: "Single-Select Group Targeting"
+  hosts: "{{ target_group | default('all') }}"
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} is in group {{ target_group }}"
+
+
+# --- Pattern 3: Two-dropdown intersection ---
+# Survey variables:
+#   target_platform (multiple choice): all, os_linux, os_windows, network_devices
+#   target_environment (multiple choice): all, env_production, env_staging, env_development
+
+- name: "Two-Dropdown Intersection"
+  hosts: >-
+    {%- if target_platform == 'all' and target_environment == 'all' -%}
+      all
+    {%- elif target_platform == 'all' -%}
+      {{ target_environment }}
+    {%- elif target_environment == 'all' -%}
+      {{ target_platform }}
+    {%- else -%}
+      {{ target_platform }}:&{{ target_environment }}
+    {%- endif -%}
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: platform={{ target_platform }}, env={{ target_environment }}"
+
+
+# --- Pattern 4: Comma-separated host list ---
+# Survey variable: target_host_list (text input)
+# Operator enters: "host1.example.com,host2.example.com,host3.example.com"
+
+- name: "Comma-Separated Host List"
+  hosts: "{{ target_host_list | default('all') }}"
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Targeted host: {{ inventory_hostname }}"
+
+
+# --- Pattern 5: Group with exclusion dropdown ---
+# Survey variables:
+#   target_base_group (multiple choice): all, os_linux, os_windows
+#   exclude_group (text input, optional): env_production, domain_controller, etc.
+
+- name: "Group with Exclusion"
+  hosts: >-
+    {%- if exclude_group | default('none') != 'none' -%}
+      {{ target_base_group | default('all') }}:!{{ exclude_group }}
+    {%- else -%}
+      {{ target_base_group | default('all') }}
+    {%- endif -%}
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: base={{ target_base_group }}, excluded={{ exclude_group | default('none') }}"
+
+
+# --- Pattern 6: Multi-select groups (checkboxes → union) ---
+# Survey variable: target_sites (text input)
+# Operator enters comma-separated site groups: "site_rose_hill,site_lincoln_center"
+# The playbook converts commas to Ansible union syntax (colon-separated)
+
+- name: "Multi-Select Sites (Union)"
+  hosts: "{{ target_sites | default('all') | replace(',', ':') }}"
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: selected sites={{ target_sites }}"

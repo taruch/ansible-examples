@@ -1,0 +1,106 @@
+---
+# Conditional Targeting Examples
+#
+# Sometimes targeting needs to be data-driven rather than pattern-driven.
+# These examples use when conditions, group_by, and dynamic includes
+# to route tasks based on host attributes at runtime.
+
+# --- group_by: create temporary runtime groups from host facts ---
+
+- name: "Runtime Grouping by Gathered Facts"
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Group hosts by OS family at runtime
+      ansible.builtin.group_by:
+        key: "runtime_os_{{ ansible_os_family | lower }}"
+
+    - name: Group hosts by virtualization type
+      ansible.builtin.group_by:
+        key: "runtime_virt_{{ ansible_virtualization_type | default('bare_metal') }}"
+
+- name: "Run tasks against runtime-created RedHat group"
+  hosts: runtime_os_redhat
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "RedHat family host: {{ inventory_hostname }}"
+
+- name: "Run tasks against runtime-created Windows group"
+  hosts: runtime_os_windows
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Windows family host: {{ inventory_hostname }}"
+
+
+# --- when conditions for task-level filtering ---
+
+- name: "Task-Level Conditional Targeting"
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Linux-only task
+      ansible.builtin.debug:
+        msg: "Running Linux task on {{ inventory_hostname }}"
+      when: ansible_os_family != "Windows"
+
+    - name: Windows-only task
+      ansible.builtin.debug:
+        msg: "Running Windows task on {{ inventory_hostname }}"
+      when: ansible_os_family == "Windows"
+
+    - name: Only on RHEL 9+
+      ansible.builtin.debug:
+        msg: "RHEL 9+ host: {{ inventory_hostname }}"
+      when:
+        - ansible_distribution == "RedHat"
+        - ansible_distribution_major_version | int >= 9
+
+    - name: Only on hosts with more than 8 CPUs
+      ansible.builtin.debug:
+        msg: "Large host {{ inventory_hostname }}: {{ ansible_processor_vcpus }} vCPUs"
+      when: ansible_processor_vcpus | default(0) | int > 8
+
+    - name: Only on domain-joined Windows hosts
+      ansible.builtin.debug:
+        msg: "Domain-joined: {{ inventory_hostname }}"
+      when:
+        - ansible_os_family | default('') == "Windows"
+        - ansible_windows_domain_member | default(false) | bool
+
+
+# --- Dynamic include based on survey variable ---
+
+- name: "Include Tasks by Survey Selection"
+  hosts: "{{ target_group | default('all') }}"
+  gather_facts: false
+
+  tasks:
+    - name: Include OS-specific tasks
+      ansible.builtin.include_tasks: "tasks/{{ target_task_type | default('common') }}.yml"
+
+    - name: Include role based on survey
+      ansible.builtin.include_role:
+        name: "{{ target_role_name }}"
+      when: target_role_name is defined
+
+
+# --- Delegate to specific host types ---
+
+- name: "Delegation-Based Targeting"
+  hosts: all_routers
+  gather_facts: false
+
+  tasks:
+    - name: Collect route tables from routers
+      ansible.builtin.debug:
+        msg: "Collecting routes from {{ inventory_hostname }}"
+
+    - name: Report results to monitoring server
+      ansible.builtin.debug:
+        msg: "Sending {{ inventory_hostname }} routes to monitoring"
+      delegate_to: monitoring-server
+      run_once: true

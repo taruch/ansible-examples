@@ -1,0 +1,100 @@
+---
+# Rolling and Batch Targeting Examples
+#
+# Demonstrates serial execution strategies for controlled rollouts.
+# These patterns limit how many hosts run simultaneously to reduce
+# blast radius during changes.
+
+# --- Simple serial: N hosts at a time ---
+
+- name: "Rolling Update - 5 hosts at a time"
+  hosts: os_linux
+  serial: 5
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Updating batch member: {{ inventory_hostname }}"
+
+# --- Percentage-based serial ---
+
+- name: "Rolling Update - 25% at a time"
+  hosts: os_linux
+  serial: "25%"
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Updating 25% batch: {{ inventory_hostname }}"
+
+# --- Canary deployment: 1, then 5, then all ---
+
+- name: "Canary Deployment - Escalating batch sizes"
+  hosts: os_linux
+  serial:
+    - 1
+    - 5
+    - "100%"
+  gather_facts: false
+
+  tasks:
+    - name: Deploy application
+      ansible.builtin.debug:
+        msg: "Deploying to: {{ inventory_hostname }}"
+
+    - name: Run smoke tests
+      ansible.builtin.debug:
+        msg: "Smoke testing: {{ inventory_hostname }}"
+
+# --- Rolling with max_fail_percentage ---
+
+- name: "Rolling Update with Failure Threshold"
+  hosts: os_linux
+  serial: 5
+  max_fail_percentage: 20
+  gather_facts: false
+  tasks:
+    - name: Apply update
+      ansible.builtin.debug:
+        msg: "Updating: {{ inventory_hostname }}"
+
+# --- Site-by-site rollout using serial + survey ---
+# Survey variables:
+#   target_role: "all" or a role group
+#   rollout_serial: number of hosts per batch (default: 1)
+
+- name: "Survey-Controlled Rolling Update"
+  hosts: "{{ target_role | default('all') }}"
+  serial: "{{ rollout_serial | default(1) | int }}"
+  gather_facts: false
+  tasks:
+    - name: Apply configuration change
+      ansible.builtin.debug:
+        msg: "Batch update: {{ inventory_hostname }}"
+
+# --- Run order control with order keyword ---
+
+- name: "Sorted Host Order - Alphabetical"
+  hosts: all_switches
+  order: sorted
+  serial: 3
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Processing (sorted): {{ inventory_hostname }}"
+
+- name: "Reverse Sorted Host Order"
+  hosts: all_switches
+  order: reverse_sorted
+  serial: 3
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Processing (reverse): {{ inventory_hostname }}"
+
+- name: "Shuffle Host Order - Random"
+  hosts: all_switches
+  order: shuffle
+  serial: 3
+  gather_facts: false
+  tasks:
+    - ansible.builtin.debug:
+        msg: "Processing (shuffled): {{ inventory_hostname }}"

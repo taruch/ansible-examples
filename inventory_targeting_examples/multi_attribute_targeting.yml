@@ -1,0 +1,39 @@
+---
+# Multi-Attribute Dynamic Targeting
+#
+# Uses Jinja2 in the hosts field to build intersection patterns at runtime
+# from AAP survey variables. Operators select from dropdowns (vendor, role,
+# site, building) and the playbook targets only the matching hosts.
+#
+# Requires constructed inventory groups: vendor_*, role_*, site_*, building_*
+# See: inventory_constructed_examples/network_device_grouping/
+#
+# AAP Survey Variables:
+#   target_vendor   - "all" or a vendor name (alcatel, extreme, paloalto)
+#   target_role     - "all" or a device function (edge_switch, mdr, mds, firewall)
+#   target_site     - "all" or a site name (rose_hill, lincoln_center, data_center)
+#   target_building - "all" or a building name (building_a, building_b, dc_main)
+
+- name: Multi-Attribute Dynamic Target Playbook
+  hosts: >-
+    {%- set pattern = [] -%}
+    {%- if target_vendor != 'all' %}{% set _ = pattern.append('vendor_' ~ target_vendor) %}{% endif -%}
+    {%- if target_role != 'all' %}{% set _ = pattern.append('role_' ~ target_role) %}{% endif -%}
+    {%- if target_site != 'all' %}{% set _ = pattern.append('site_' ~ target_site) %}{% endif -%}
+    {%- if target_building != 'all' %}{% set _ = pattern.append('building_' ~ target_building) %}{% endif -%}
+    {{ pattern | join(':&') if pattern else 'all' }}
+  gather_facts: false
+
+  tasks:
+    - name: Show resolved target
+      ansible.builtin.debug:
+        msg: >-
+          Host: {{ inventory_hostname }}
+          (vendor={{ device_vendor | default('n/a') }},
+           role={{ device_function | default('n/a') }},
+           site={{ device_site | default('n/a') }},
+           building={{ device_building | default('n/a') }})
+
+    - name: Run operational tasks against dynamic target set
+      ansible.builtin.include_role:
+        name: network_ops_task

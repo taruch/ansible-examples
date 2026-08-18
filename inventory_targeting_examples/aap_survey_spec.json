@@ -1,0 +1,71 @@
+{
+  "name": "Multi-Attribute Network Device Targeting",
+  "description": "Select target devices by vendor, role, site, and building. Set any field to 'All' to skip that filter.",
+  "spec": [
+    {
+      "question_name": "Target Vendor",
+      "question_description": "Filter by device vendor",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "target_vendor",
+      "default": "all",
+      "choices": [
+        "all",
+        "alcatel",
+        "extreme",
+        "paloalto",
+        "cisco",
+        "arista",
+        "juniper"
+      ]
+    },
+    {
+      "question_name": "Target Role",
+      "question_description": "Filter by device function/role",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "target_role",
+      "default": "all",
+      "choices": [
+        "all",
+        "edge_switch",
+        "mdr",
+        "mds",
+        "mas",
+        "firewall",
+        "dc_mdr",
+        "dc_mds",
+        "dc_edge_switch"
+      ]
+    },
+    {
+      "question_name": "Target Site",
+      "question_description": "Filter by physical site",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "target_site",
+      "default": "all",
+      "choices": [
+        "all",
+        "rose_hill",
+        "lincoln_center",
+        "data_center"
+      ]
+    },
+    {
+      "question_name": "Target Building",
+      "question_description": "Filter by building within the selected site",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "target_building",
+      "default": "all",
+      "choices": [
+        "all",
+        "building_a",
+        "building_b",
+        "building_c",
+        "dc_main"
+      ]
+    }
+  ]
+}
