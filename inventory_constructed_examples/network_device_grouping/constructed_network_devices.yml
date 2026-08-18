@@ -5,12 +5,12 @@
 #   device_vendor    → vendor_alcatel, vendor_extreme
 #   device_model     → model_OS6900_X20, model_OS6860E_P48
 #   device_function  → func_edge_switch, func_mdr, func_mds
-#   device_site      → site_rose_hill, site_lincoln_center
+#   device_site      → site_westpark, site_eastbridge
 #   device_building  → bldg_building_a, bldg_building_b
-#   device_campus    → campus_rose_hill_building_a (site + building combined)
+#   device_campus    → campus_westpark_building_a (site + building combined)
 #
 # Combine groups using Ansible host patterns:
-#   vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_rose_hill:&bldg_building_a
+#   vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_westpark:&bldg_building_a
 #
 # AAP Setup:
 #   1. Set device_vendor, device_model, device_function, device_site,
@@ -67,7 +67,7 @@ keyed_groups:
     prefix: func
     separator: "_"
 
-  # site_rose_hill, site_lincoln_center, site_data_center
+  # site_westpark, site_eastbridge, site_data_center
   - key: device_site | default('unknown')
     prefix: site
     separator: "_"
@@ -77,7 +77,7 @@ keyed_groups:
     prefix: bldg
     separator: "_"
 
-  # campus_rose_hill_building_a, campus_lincoln_center_building_a
+  # campus_westpark_building_a, campus_eastbridge_building_a
   - key: device_campus | default('unknown')
     prefix: campus
     separator: "_"

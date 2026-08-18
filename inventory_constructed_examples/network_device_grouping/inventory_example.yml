@@ -8,146 +8,146 @@
 
 all:
   children:
-    # --- Rose Hill - Building A ---
-    rose_hill_bldg_a_devices:
+    # --- Westpark - Building A ---
+    westpark_bldg_a_devices:
       hosts:
-        rh-a-mdr-01:
+        wp-a-mdr-01:
           ansible_host: 10.1.1.1
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6900-X20
           device_function: mdr
           device_function_name: Building Router
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_a
-          device_campus: rose_hill_building_a
+          device_campus: westpark_building_a
 
-        rh-a-mds-01:
+        wp-a-mds-01:
           ansible_host: 10.1.1.2
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6860E-P48
           device_function: mds
           device_function_name: Main Aggregation Switch
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_a
-          device_campus: rose_hill_building_a
+          device_campus: westpark_building_a
 
-        rh-a-mas-01:
+        wp-a-mas-01:
           ansible_host: 10.1.1.3
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6860-P48
           device_function: mas
           device_function_name: Secondary Aggregation Switch
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_a
-          device_campus: rose_hill_building_a
+          device_campus: westpark_building_a
 
-        rh-a-edge-01:
+        wp-a-edge-01:
           ansible_host: 10.1.1.10
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6860E-P48
           device_function: edge_switch
           device_function_name: Edge Switch
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_a
-          device_campus: rose_hill_building_a
+          device_campus: westpark_building_a
 
-        rh-a-edge-02:
+        wp-a-edge-02:
           ansible_host: 10.1.1.11
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6850-P24
           device_function: edge_switch
           device_function_name: Edge Switch
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_a
-          device_campus: rose_hill_building_a
+          device_campus: westpark_building_a
 
-    # --- Rose Hill - Building B ---
-    rose_hill_bldg_b_devices:
+    # --- Westpark - Building B ---
+    westpark_bldg_b_devices:
       hosts:
-        rh-b-mdr-01:
+        wp-b-mdr-01:
           ansible_host: 10.1.2.1
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6900-X20
           device_function: mdr
           device_function_name: Building Router
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_b
-          device_campus: rose_hill_building_b
+          device_campus: westpark_building_b
 
-        rh-b-mds-01:
+        wp-b-mds-01:
           ansible_host: 10.1.2.2
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6860E-P48
           device_function: mds
           device_function_name: Main Aggregation Switch
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_b
-          device_campus: rose_hill_building_b
+          device_campus: westpark_building_b
 
-        rh-b-edge-01:
+        wp-b-edge-01:
           ansible_host: 10.1.2.10
           ansible_network_os: extreme.exos.exos
           device_vendor: extreme
           device_model: X460-G2-48p
           device_function: edge_switch
           device_function_name: Edge Switch
-          device_site: rose_hill
+          device_site: westpark
           device_building: building_b
-          device_campus: rose_hill_building_b
+          device_campus: westpark_building_b
 
-    # --- Lincoln Center - Building A ---
-    lincoln_bldg_a_devices:
+    # --- Eastbridge - Building A ---
+    eastbridge_bldg_a_devices:
       hosts:
-        lc-a-mdr-01:
+        eb-a-mdr-01:
           ansible_host: 10.2.1.1
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6900-X20
           device_function: mdr
           device_function_name: Building Router
-          device_site: lincoln_center
+          device_site: eastbridge
           device_building: building_a
-          device_campus: lincoln_center_building_a
+          device_campus: eastbridge_building_a
 
-        lc-a-mds-01:
+        eb-a-mds-01:
           ansible_host: 10.2.1.2
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6860E-P48
           device_function: mds
           device_function_name: Main Aggregation Switch
-          device_site: lincoln_center
+          device_site: eastbridge
           device_building: building_a
-          device_campus: lincoln_center_building_a
+          device_campus: eastbridge_building_a
 
-        lc-a-edge-01:
+        eb-a-edge-01:
           ansible_host: 10.2.1.10
           ansible_network_os: alcatel.aos.aos
           device_vendor: alcatel
           device_model: OS6860E-P48
           device_function: edge_switch
           device_function_name: Edge Switch
-          device_site: lincoln_center
+          device_site: eastbridge
           device_building: building_a
-          device_campus: lincoln_center_building_a
+          device_campus: eastbridge_building_a
 
-        lc-a-fw-01:
+        eb-a-fw-01:
           ansible_host: 10.2.1.254
           ansible_network_os: paloaltonetworks.panos.panos
           device_vendor: paloalto
           device_model: PA-850
           device_function: firewall
           device_function_name: Firewall
-          device_site: lincoln_center
+          device_site: eastbridge
           device_building: building_a
-          device_campus: lincoln_center_building_a
+          device_campus: eastbridge_building_a
 
     # --- Data Center ---
     datacenter_devices:

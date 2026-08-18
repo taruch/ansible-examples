@@ -3,23 +3,23 @@
 # These patterns work with both ansible-playbook --limit and AAP job template limits.
 
 # Example 1: Target a very specific set of devices
-# Alcatel OS6860E-P48 edge switches in Rose Hill Building A
+# Alcatel OS6860E-P48 edge switches in Westpark Building A
 - name: Target specific vendor + model + function + site + building
-  hosts: vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_rose_hill:&bldg_building_a
+  hosts: vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_westpark:&bldg_building_a
   gather_facts: false
   tasks:
     - name: Show targeted device
       ansible.builtin.debug:
         msg: "Targeted: {{ inventory_hostname }} ({{ device_model }} - {{ device_function_name }} at {{ device_site }}/{{ device_building }})"
 
-# Example 2: All edge switches at Rose Hill (any vendor, any building)
+# Example 2: All edge switches at Westpark (any vendor, any building)
 - name: All edge switches at one site
-  hosts: edge_switches:&site_rose_hill
+  hosts: edge_switches:&site_westpark
   gather_facts: false
   tasks:
     - name: Show targeted device
       ansible.builtin.debug:
-        msg: "Edge switch at Rose Hill: {{ inventory_hostname }} ({{ device_vendor }} {{ device_model }})"
+        msg: "Edge switch at Westpark: {{ inventory_hostname }} ({{ device_vendor }} {{ device_model }})"
 
 # Example 3: All Alcatel switches across all sites
 - name: All Alcatel switches everywhere
@@ -40,8 +40,8 @@
         msg: "Router: {{ inventory_hostname }} ({{ device_model }} at {{ device_site }}/{{ device_building }})"
 
 # Example 5: Everything in a single building
-- name: All devices in Rose Hill Building B
-  hosts: campus_rose_hill_building_b
+- name: All devices in Westpark Building B
+  hosts: campus_westpark_building_b
   gather_facts: false
   tasks:
     - name: Show targeted device
@@ -75,23 +75,23 @@
       ansible.builtin.debug:
         msg: "OS6900-X20: {{ inventory_hostname }} ({{ device_function_name }} at {{ device_site }})"
 
-# Example 9: Combine vendor + site (all Extreme devices at Rose Hill)
-- name: Extreme devices at Rose Hill
-  hosts: vendor_extreme:&site_rose_hill
+# Example 9: Combine vendor + site (all Extreme devices at Westpark)
+- name: Extreme devices at Westpark
+  hosts: vendor_extreme:&site_westpark
   gather_facts: false
   tasks:
     - name: Show targeted device
       ansible.builtin.debug:
-        msg: "Extreme at Rose Hill: {{ inventory_hostname }} ({{ device_model }})"
+        msg: "Extreme at Westpark: {{ inventory_hostname }} ({{ device_model }})"
 
 # Example 10: Using --limit or AAP survey to make playbooks reusable
 # This single playbook works for ANY combination when you pass the limit
 # via AAP survey or command line:
 #
-#   ansible-playbook example_playbooks.yml --limit "edge_switches:&site_rose_hill"
+#   ansible-playbook example_playbooks.yml --limit "edge_switches:&site_westpark"
 #   ansible-playbook example_playbooks.yml --limit "alcatel:&all_switches"
-#   ansible-playbook example_playbooks.yml --limit "campus_lincoln_center_building_a"
-#   ansible-playbook example_playbooks.yml --limit "model_OS6860E_P48:&site_rose_hill:&bldg_building_a"
+#   ansible-playbook example_playbooks.yml --limit "campus_eastbridge_building_a"
+#   ansible-playbook example_playbooks.yml --limit "model_OS6860E_P48:&site_westpark:&bldg_building_a"
 #
 # In AAP, create a job template with a survey that prompts for _hosts,
 # then set the Limit field to {{ _hosts }}. Users pick the group

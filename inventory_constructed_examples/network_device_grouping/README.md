@@ -5,8 +5,8 @@ This example demonstrates how to use constructed inventories to create dynamic, 
 ## The Problem
 
 Without dynamic grouping, you end up maintaining separate playbooks or static groups for every combination:
-- "Alcatel edge switches in Rose Hill Building A"
-- "All switches at Lincoln Center"
+- "Alcatel edge switches in Westpark Building A"
+- "All switches at Eastbridge"
 - "All OS6900 routers everywhere"
 
 This doesn't scale. Every new site, model, or function multiplies the number of groups to maintain.
@@ -20,13 +20,13 @@ Define five host variables on each device, and let a constructed inventory sourc
 | `device_vendor` | `alcatel` | `vendor_alcatel`, `alcatel` |
 | `device_model` | `OS6860E-P48` | `model_OS6860E_P48`, `alcatel_OS6860E_P48` |
 | `device_function` | `edge_switch` | `func_edge_switch`, `edge_switches`, `all_switches` |
-| `device_site` | `rose_hill` | `site_rose_hill`, `campus_devices` |
-| `device_building` | `building_a` | `bldg_building_a`, `campus_rose_hill_building_a` |
+| `device_site` | `westpark` | `site_westpark`, `campus_devices` |
+| `device_building` | `building_a` | `bldg_building_a`, `campus_westpark_building_a` |
 
 Then combine groups using Ansible's intersection pattern (`:&`) to target exactly what you need:
 
 ```
-vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_rose_hill:&bldg_building_a
+vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_westpark:&bldg_building_a
 ```
 
 ## Files
@@ -41,15 +41,15 @@ vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_rose_hill:&bldg_buildi
 
 | Target | Host Pattern |
 |--------|-------------|
-| Alcatel OS6860E-P48 edge switches in Rose Hill Bldg A | `vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_rose_hill:&bldg_building_a` |
-| All edge switches at Rose Hill (any vendor) | `edge_switches:&site_rose_hill` |
+| Alcatel OS6860E-P48 edge switches in Westpark Bldg A | `vendor_alcatel:&model_OS6860E_P48:&func_edge_switch:&site_westpark:&bldg_building_a` |
+| All edge switches at Westpark (any vendor) | `edge_switches:&site_westpark` |
 | All Alcatel switches across all sites | `alcatel:&all_switches` |
 | All building routers everywhere | `all_routers` |
-| Everything in Rose Hill Building B | `campus_rose_hill_building_b` |
+| Everything in Westpark Building B | `campus_westpark_building_b` |
 | All data center devices | `datacenter` |
 | All OS6900-X20 devices everywhere | `model_OS6900_X20` |
 | All firewalls | `firewalls` |
-| Extreme devices at Rose Hill | `vendor_extreme:&site_rose_hill` |
+| Extreme devices at Westpark | `vendor_extreme:&site_westpark` |
 | All campus (non-DC) devices | `campus_devices` |
 
 ## Host Variable Reference
@@ -96,8 +96,8 @@ The physical site in lowercase with underscores.
 
 | Value | Description |
 |-------|-------------|
-| `rose_hill` | Rose Hill campus |
-| `lincoln_center` | Lincoln Center campus |
+| `westpark` | Westpark campus |
+| `eastbridge` | Eastbridge campus |
 | `data_center` | Data center facility |
 
 ### `device_building` (required)
@@ -113,7 +113,7 @@ The building within a site.
 ### `device_campus` (optional)
 Combined site + building key for single-group targeting. Format: `{site}_{building}`.
 
-Example: `rose_hill_building_a`
+Example: `westpark_building_a`
 
 ## AAP Setup
 
@@ -146,7 +146,7 @@ Create a single job template per automation task (e.g. "Network / Firmware Upgra
 | **Limit** | `{{ _hosts }}` |
 | **Survey Variable** | `_hosts` — text field where the operator enters the group pattern |
 
-The operator enters patterns like `edge_switches:&site_rose_hill` at launch time, and the same playbook works for any combination.
+The operator enters patterns like `edge_switches:&site_westpark` at launch time, and the same playbook works for any combination.
 
 ## Adding New Sites, Vendors, or Models
 
