@@ -7,7 +7,7 @@ Complex host targeting patterns for Ansible and AAP. These examples build on the
 Constructed inventories solve the **grouping** problem — automatically organizing hosts by OS, vendor, site, role, etc. But you still need to **combine** those groups at launch time:
 
 - "Patch all RHEL 9 hosts in production, excluding domain controllers"
-- "Upgrade firmware on Alcatel edge switches at Rose Hill Building A"
+- "Upgrade firmware on Alcatel edge switches at Westpark Building A"
 - "Roll out a config change to 25% of switches at a time, canary-style"
 
 Static playbooks with hardcoded `hosts:` lines don't scale. You'd need a separate playbook for every combination.
@@ -22,7 +22,7 @@ Use **dynamic targeting** — the `hosts:` field is evaluated at runtime using J
 │                     │     │                      │     │                  │
 │  vendor: alcatel    │     │  {% set pattern %}   │     │  vendor_alcatel  │
 │  role: edge_switch  │     │  pattern.append()    │     │  :&role_edge_sw  │
-│  site: rose_hill    │     │  join(':&')          │     │  :&site_rose_h   │
+│  site: westpark     │     │  join(':&')          │     │  :&site_westpk   │
 │  building: all      │     │  {% endset %}        │     │                  │
 └─────────────────────┘     └─────────────────────┘     └──────────────────┘
 ```
@@ -31,11 +31,13 @@ Use **dynamic targeting** — the `hosts:` field is evaluated at runtime using J
 
 | File | Description |
 |------|-------------|
+| `setup.yml` | **Configuration as Code** — creates the project, constructed inventory sources, fact-gathering templates, targeting job templates (with surveys), and a workflow in AAP via `infra.aap_configuration.dispatch` |
 | `multi_attribute_targeting.yml` | Jinja2 dynamic `hosts:` with 4-attribute intersection (vendor, role, site, building) |
 | `multi_attribute_targeting_os.yml` | Same pattern for OS-based targeting (os, distro, version, env, size) |
+| `rolling_update.yml` | Survey-driven rolling update with selectable strategy (fixed, canary, percentage), batch size, and failure threshold |
 | `pattern_examples.yml` | Reference for all host pattern syntax: intersection (`&`), union (`:`), exclusion (`!`), regex (`~`), wildcard (`*`) |
 | `survey_driven_targeting.yml` | Six AAP survey patterns: free-text, single-select, two-dropdown, comma list, exclusion, multi-select |
-| `rolling_and_batch_targeting.yml` | Rolling updates with `serial`, canary deployments, failure thresholds, host ordering |
+| `rolling_and_batch_targeting.yml` | Rolling update reference examples with `serial`, canary deployments, failure thresholds, host ordering |
 | `conditional_targeting.yml` | Runtime `group_by`, `when` conditions, dynamic includes, delegation |
 | `aap_survey_spec.json` | AAP survey definition for `multi_attribute_targeting.yml` — import directly into a job template |
 
@@ -59,8 +61,8 @@ Each survey variable maps to a constructed inventory group. When set to `all`, t
 
 | Survey Selections | Resolved Pattern |
 |-------------------|-----------------|
-| vendor=alcatel, role=edge_switch, site=rose_hill, building=building_a | `vendor_alcatel:&role_edge_switch:&site_rose_hill:&building_building_a` |
-| vendor=alcatel, role=all, site=rose_hill, building=all | `vendor_alcatel:&site_rose_hill` |
+| vendor=alcatel, role=edge_switch, site=westpark, building=building_a | `vendor_alcatel:&role_edge_switch:&site_westpark:&building_building_a` |
+| vendor=alcatel, role=all, site=westpark, building=all | `vendor_alcatel:&site_westpark` |
 | vendor=all, role=all, site=all, building=all | `all` |
 | vendor=all, role=firewall, site=all, building=all | `role_firewall` |
 
@@ -72,36 +74,76 @@ Each survey variable maps to a constructed inventory group. When set to `all`, t
 | `group1:group2` | Union — hosts in group1 OR group2 | `distro_rhel:distro_ubuntu` |
 | `group1:&group2` | Intersection — hosts in group1 AND group2 | `rhel_9:&env_production` |
 | `group1:!group2` | Exclusion — hosts in group1 but NOT group2 | `os_linux:!env_production` |
-| `~regex` | Regex match on hostname | `~rh-a-.*` |
-| `host*` | Wildcard match | `rh-a-*` |
+| `~regex` | Regex match on hostname | `~wp-a-.*` |
+| `host*` | Wildcard match | `wp-a-*` |
 | `host1,host2` | Explicit host list | `web01,web02,web03` |
 
 Patterns chain left to right: `os_linux:&env_production:!large_linux` means "Linux AND production, excluding large instances."
 
 ## AAP Setup
 
-### Step 1: Create Constructed Groups
+### Option A: Configuration as Code (Recommended)
 
-Set up the constructed inventory sources from `inventory_constructed_examples/` first. The targeting playbooks rely on groups like `vendor_*`, `site_*`, `role_*`, `os_*`, `distro_*`, `env_*`.
+`setup.yml` defines everything as data for `infra.aap_configuration.dispatch`. One command creates the project, inventory sources, job templates, surveys, and workflow.
 
-### Step 2: Import the Survey
+**1. Edit tunables** at the top of `setup.yml`:
 
-On your job template:
+```yaml
+machine_credential: "Demo Credential"      # must already exist in AAP
+network_credential: "Network Credential"    # must already exist in AAP
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+target_organization: "Default"
+target_inventory: "Demo Inventory"          # must already exist in AAP
+```
 
-1. Go to the **Survey** tab
-2. Import the survey from `aap_survey_spec.json`, or create the four dropdown fields manually
-3. Each field maps to a survey variable (`target_vendor`, `target_role`, `target_site`, `target_building`)
+**2. Apply** using the shared dispatcher playbook:
 
-### Step 3: Set the Playbook
+```bash
+ansible-navigator run -mstdout ../controller_setup/configure_aap.yml \
+  -e @inventory_targeting_examples/setup.yml \
+  --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST
+```
 
-| Field | Value |
-|-------|-------|
-| **Playbook** | `inventory_targeting_examples/multi_attribute_targeting.yml` |
-| **Inventory** | Your inventory with constructed sources configured |
+Or include it from any wrapper that calls `infra.aap_configuration.dispatch`:
 
-### Step 4: Launch and Select
+```yaml
+- name: Include targeting configuration
+  ansible.builtin.include_vars: inventory_targeting_examples/setup.yml
+```
 
-When operators launch the job template, they select from the survey dropdowns. The Jinja2 in `hosts:` builds the correct intersection pattern automatically.
+**3. What gets created:**
+
+| Type | Name | Purpose |
+|------|------|---------|
+| Project | `Inventory Targeting` | Git-synced from this repo |
+| Inventory Source | `Constructed / Combined Groups` | OS, distro, sizing groups from facts |
+| Inventory Source | `Constructed / Network Device Groups` | Vendor, model, site, building groups |
+| Job Template | `CONSTRUCTED / Gather Facts - Linux` | Populates fact cache (fact cache enabled) |
+| Job Template | `CONSTRUCTED / Gather Facts - Windows` | Populates fact cache (fact cache enabled) |
+| Job Template | `CONSTRUCTED / Gather Facts - Network` | Populates fact cache (fact cache enabled) |
+| Job Template | `TARGETING / Multi-Attribute Network` | 4 dropdown survey (vendor, role, site, building) |
+| Job Template | `TARGETING / Multi-Attribute OS` | 5 dropdown survey (os, distro, version, env, size) |
+| Job Template | `TARGETING / Rolling Update` | 4 dropdown survey (target group, batch size, strategy, max fail %) |
+| Workflow | `TARGETING / Refresh Dynamic Groups` | Runs all 3 fact-gathering templates in parallel |
+
+All survey fields use single-select dropdowns (`multiplechoice`) — operators select from predefined values, no free-text input required.
+
+**4. Initial run:**
+
+1. Launch the **TARGETING / Refresh Dynamic Groups** workflow to populate the fact cache and build groups
+2. Launch any **TARGETING/** job template — the survey dropdowns drive the host pattern
+
+Schedule the workflow to run periodically (daily or weekly) to keep groups current.
+
+### Option B: Manual Setup
+
+If you prefer to create the job templates manually in the AAP UI:
+
+1. Set up the constructed inventory sources from `inventory_constructed_examples/` first
+2. Create a job template pointing to `multi_attribute_targeting.yml`
+3. Import the survey from `aap_survey_spec.json` (or create the four dropdown fields manually)
+4. Each field maps to a survey variable (`target_vendor`, `target_role`, `target_site`, `target_building`)
+5. Launch — operators select from the survey dropdowns and the Jinja2 in `hosts:` builds the correct intersection pattern automatically
 
 ## Rolling Update Strategies
 
@@ -123,13 +165,15 @@ max_fail_percentage: 20   # Abort if >20% of a batch fails
 
 | Need | Approach | File |
 |------|----------|------|
+| Deploy all templates and surveys to AAP automatically | Configuration as Code | `setup.yml` |
 | Operator selects from dropdowns, each dimension is optional | Multi-attribute Jinja2 | `multi_attribute_targeting.yml` |
 | Operator types any host pattern | Free-text survey | `survey_driven_targeting.yml` (Pattern 1) |
 | Two-level filtering (platform + environment) | Two-dropdown intersection | `survey_driven_targeting.yml` (Pattern 3) |
 | Target a group but exclude a subset | Group with exclusion | `survey_driven_targeting.yml` (Pattern 5) |
-| Controlled rollout with batch sizes | Serial execution | `rolling_and_batch_targeting.yml` |
+| Controlled rollout with selectable strategy and batch size | Survey-driven rolling update | `rolling_update.yml` |
 | Filter by facts gathered at runtime | group_by / when conditions | `conditional_targeting.yml` |
 | Static, well-known group combinations | Direct host patterns | `pattern_examples.yml` |
+| Reference for serial, canary, ordering options | Rolling update examples | `rolling_and_batch_targeting.yml` |
 
 ## Prerequisites
 

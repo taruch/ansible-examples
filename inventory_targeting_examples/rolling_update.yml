@@ -1,0 +1,42 @@
+---
+# Rolling Update with Survey-Controlled Batch Size
+#
+# Single-play playbook designed for an AAP job template with a survey.
+# Supports three rollout strategies:
+#   fixed      - process rollout_serial hosts at a time
+#   canary     - 1 host first, then rollout_serial, then all remaining
+#   percentage - process rollout_serial% of hosts at a time
+#
+# AAP Survey Variables:
+#   target_hosts      - host pattern (group, intersection, host list)
+#   rollout_serial    - batch size (integer) or percentage
+#   rollout_strategy  - "fixed", "canary", or "percentage"
+#   max_fail_pct      - abort if this % of a batch fails (0 = any failure)
+
+- name: Rolling Update
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: false
+  serial: >-
+    {%- if rollout_strategy | default('fixed') == 'canary' -%}
+      {{ [1, rollout_serial | default(5) | int, '100%'] }}
+    {%- elif rollout_strategy | default('fixed') == 'percentage' -%}
+      {{ (rollout_serial | default(25) | string) + '%' }}
+    {%- else -%}
+      {{ rollout_serial | default(1) | int }}
+    {%- endif -%}
+  max_fail_percentage: "{{ max_fail_pct | default(0) | int }}"
+
+  tasks:
+    - name: Show rollout info
+      ansible.builtin.debug:
+        msg: >-
+          Rolling update on {{ inventory_hostname }}
+          (strategy={{ rollout_strategy | default('fixed') }},
+           batch={{ rollout_serial | default(1) }},
+           max_fail={{ max_fail_pct | default(0) }}%)
+      run_once: true
+
+    - name: Run operational tasks
+      ansible.builtin.include_role:
+        name: "{{ target_role_name | default('common') }}"
+      when: target_role_name is defined

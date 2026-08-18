@@ -7,7 +7,7 @@
 
 # --- Pattern 1: Free-text host pattern ---
 # Survey variable: target_hosts (text input)
-# Operator enters any valid host pattern: "edge_switches:&site_rose_hill"
+# Operator enters any valid host pattern: "edge_switches:&site_westpark"
 #
 # AAP Job Template config:
 #   Limit: {{ target_hosts }}
@@ -86,7 +86,7 @@
 
 # --- Pattern 6: Multi-select groups (checkboxes → union) ---
 # Survey variable: target_sites (text input)
-# Operator enters comma-separated site groups: "site_rose_hill,site_lincoln_center"
+# Operator enters comma-separated site groups: "site_westpark,site_eastbridge"
 # The playbook converts commas to Ansible union syntax (colon-separated)
 
 - name: "Multi-Select Sites (Union)"

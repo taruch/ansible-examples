@@ -29,12 +29,12 @@
     - ansible.builtin.debug:
         msg: "Large production VM: {{ inventory_hostname }}"
 
-- name: "Intersection - Cisco IOS switches at Rose Hill"
-  hosts: cisco_ios:&all_switches:&site_rose_hill
+- name: "Intersection - Cisco IOS switches at Westpark"
+  hosts: cisco_ios:&all_switches:&site_westpark
   gather_facts: false
   tasks:
     - ansible.builtin.debug:
-        msg: "Cisco switch at Rose Hill: {{ inventory_hostname }}"
+        msg: "Cisco switch at Westpark: {{ inventory_hostname }}"
 
 # --- Union: hosts in ANY of the specified groups ---
 
@@ -84,15 +84,15 @@
     - ansible.builtin.debug:
         msg: "Small/medium prod RHEL: {{ inventory_hostname }}"
 
-- name: "Combined - All Rose Hill devices except firewalls"
-  hosts: site_rose_hill:!firewalls
+- name: "Combined - All Westpark devices except firewalls"
+  hosts: site_westpark:!firewalls
   gather_facts: false
   tasks:
     - ansible.builtin.debug:
-        msg: "Non-firewall at Rose Hill: {{ inventory_hostname }}"
+        msg: "Non-firewall at Westpark: {{ inventory_hostname }}"
 
-- name: "Combined - Edge switches at Rose Hill except Building C"
-  hosts: edge_switches:&site_rose_hill:!bldg_building_c
+- name: "Combined - Edge switches at Westpark except Building C"
+  hosts: edge_switches:&site_westpark:!bldg_building_c
   gather_facts: false
   tasks:
     - ansible.builtin.debug:
@@ -100,12 +100,12 @@
 
 # --- Regex: match hostnames by pattern ---
 
-- name: "Regex - All hosts starting with rh- (Rose Hill naming convention)"
-  hosts: ~rh-.*
+- name: "Regex - All hosts starting with wp- (Westpark naming convention)"
+  hosts: ~wp-.*
   gather_facts: false
   tasks:
     - ansible.builtin.debug:
-        msg: "Rose Hill host: {{ inventory_hostname }}"
+        msg: "Westpark host: {{ inventory_hostname }}"
 
 - name: "Regex - All MDR (building router) hosts"
   hosts: ~.*-mdr-.*
@@ -123,9 +123,9 @@
 
 # --- Wildcard ---
 
-- name: "Wildcard - All hosts in the rh-a (Rose Hill Bldg A) prefix"
-  hosts: rh-a-*
+- name: "Wildcard - All hosts in the wp-a (Westpark Bldg A) prefix"
+  hosts: wp-a-*
   gather_facts: false
   tasks:
     - ansible.builtin.debug:
-        msg: "Rose Hill Bldg A: {{ inventory_hostname }}"
+        msg: "Westpark Bldg A: {{ inventory_hostname }}"

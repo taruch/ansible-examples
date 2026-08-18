@@ -1,0 +1,360 @@
+---
+# Configuration-as-code for deploying Inventory Targeting job templates
+# to Ansible Automation Platform 2.6.
+#
+# Apply with ../controller_setup/configure_aap.yml (or any wrapper that
+# `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
+#
+# Creates:
+#   - Project synced from this git repo
+#   - Fact-gathering job templates (Linux, Windows, Network) with fact cache enabled
+#   - Constructed inventory sources for dynamic grouping
+#   - Multi-attribute targeting job templates with survey dropdowns
+#   - Rolling update job template with survey-controlled batch size
+#
+# Required pre-existing artifacts in AAP:
+#   - A Machine credential for Linux/Windows hosts
+#   - A Network credential for network devices (if using network targeting)
+#   - An inventory containing the hosts to target
+#
+# Workflow:
+#   1. Run the fact-gathering templates to populate the fact cache
+#   2. Sync the constructed inventory sources to build dynamic groups
+#   3. Launch targeting templates — surveys build the host pattern at runtime
+
+# ---------------------------------------------------------------------------
+# Tunables — change these without touching the rest of this file.
+# ---------------------------------------------------------------------------
+machine_credential: "Demo Credential"
+network_credential: "Network Credential"
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+project_scm_branch: "master"
+target_organization: "Default"
+target_inventory: "Demo Inventory"
+
+# ---------------------------------------------------------------------------
+# Project — git-synced from this repository.
+# ---------------------------------------------------------------------------
+controller_projects:
+  - name: "Inventory Targeting"
+    description: "Constructed inventory sources, fact-gathering playbooks, and dynamic targeting examples."
+    organization: "{{ target_organization }}"
+    scm_type: "git"
+    scm_url: "{{ project_scm_url }}"
+    scm_branch: "{{ project_scm_branch }}"
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: true
+    scm_update_cache_timeout: 120
+    allow_override: false
+
+# ---------------------------------------------------------------------------
+# Constructed inventory sources — add to the target inventory.
+# These read the fact cache and build dynamic groups automatically.
+# ---------------------------------------------------------------------------
+controller_inventory_sources:
+  - name: "Constructed / Combined Groups"
+    description: "Builds OS, distribution, network vendor, and sizing groups from cached facts."
+    inventory: "{{ target_inventory }}"
+    source: scm
+    source_project: "Inventory Targeting"
+    source_path: "inventory_constructed_examples/constructed_combined.yml"
+    update_on_launch: true
+    overwrite: true
+
+  - name: "Constructed / Network Device Groups"
+    description: "Builds vendor, model, function, site, and building groups from host variables."
+    inventory: "{{ target_inventory }}"
+    source: scm
+    source_project: "Inventory Targeting"
+    source_path: "inventory_constructed_examples/network_device_grouping/constructed_network_devices.yml"
+    update_on_launch: true
+    overwrite: true
+
+# ---------------------------------------------------------------------------
+# Job templates — fact gathering (prerequisites for constructed groups).
+# ---------------------------------------------------------------------------
+controller_templates:
+  - name: "CONSTRUCTED / Gather Facts - Linux"
+    description: "Gathers and caches facts from Linux hosts. Run before syncing constructed inventory sources."
+    organization: "{{ target_organization }}"
+    project: "Inventory Targeting"
+    inventory: "{{ target_inventory }}"
+    playbook: "inventory_constructed_examples/gather_facts_linux.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    use_fact_cache: true
+    allow_simultaneous: false
+    survey_enabled: false
+
+  - name: "CONSTRUCTED / Gather Facts - Windows"
+    description: "Gathers and caches facts from Windows hosts. Run before syncing constructed inventory sources."
+    organization: "{{ target_organization }}"
+    project: "Inventory Targeting"
+    inventory: "{{ target_inventory }}"
+    playbook: "inventory_constructed_examples/gather_facts_windows.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: false
+    use_fact_cache: true
+    allow_simultaneous: false
+    survey_enabled: false
+
+  - name: "CONSTRUCTED / Gather Facts - Network"
+    description: "Gathers and caches facts from network devices. Run before syncing constructed inventory sources."
+    organization: "{{ target_organization }}"
+    project: "Inventory Targeting"
+    inventory: "{{ target_inventory }}"
+    playbook: "inventory_constructed_examples/gather_facts_network.yml"
+    credentials:
+      - "{{ network_credential }}"
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: false
+    use_fact_cache: true
+    allow_simultaneous: false
+    survey_enabled: false
+
+  # -------------------------------------------------------------------------
+  # Job templates — multi-attribute dynamic targeting.
+  # -------------------------------------------------------------------------
+  - name: "TARGETING / Multi-Attribute Network"
+    description: "Target network devices by vendor, role, site, and building. Survey dropdowns build the host pattern at runtime via Jinja2."
+    organization: "{{ target_organization }}"
+    project: "Inventory Targeting"
+    inventory: "{{ target_inventory }}"
+    playbook: "inventory_targeting_examples/multi_attribute_targeting.yml"
+    credentials:
+      - "{{ network_credential }}"
+    ask_variables_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: false
+    allow_simultaneous: false
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: target_vendor
+          question_name: !unsafe "Target Vendor"
+          question_description: !unsafe "Filter by device vendor. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nalcatel\nextreme\npaloalto\ncisco\narista\njuniper"
+          min: 0
+          max: 64
+          new_question: true
+        - variable: target_role
+          question_name: !unsafe "Target Role"
+          question_description: !unsafe "Filter by device function/role. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nedge_switch\nmdr\nmds\nmas\nfirewall\ndc_mdr\ndc_mds\ndc_edge_switch"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: target_site
+          question_name: !unsafe "Target Site"
+          question_description: !unsafe "Filter by physical site. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nwestpark\neastbridge\ndata_center"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: target_building
+          question_name: !unsafe "Target Building"
+          question_description: !unsafe "Filter by building within the selected site. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nbuilding_a\nbuilding_b\nbuilding_c\ndc_main"
+          min: 0
+          max: 64
+          new_question: false
+
+  - name: "TARGETING / Multi-Attribute OS"
+    description: "Target hosts by OS, distribution, version, environment, and size. Survey dropdowns build the host pattern at runtime via Jinja2."
+    organization: "{{ target_organization }}"
+    project: "Inventory Targeting"
+    inventory: "{{ target_inventory }}"
+    playbook: "inventory_targeting_examples/multi_attribute_targeting_os.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: target_os
+          question_name: !unsafe "Target OS"
+          question_description: !unsafe "Filter by operating system family. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nlinux\nwindows"
+          min: 0
+          max: 64
+          new_question: true
+        - variable: target_distro
+          question_name: !unsafe "Target Distribution"
+          question_description: !unsafe "Filter by Linux distribution. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nrhel\nubuntu\namazon\nrocky\ncentos"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: target_version
+          question_name: !unsafe "Target Major Version"
+          question_description: !unsafe "Filter by major OS version (e.g. 8, 9, 22, 24). Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\n7\n8\n9\n22\n24"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: target_env
+          question_name: !unsafe "Target Environment"
+          question_description: !unsafe "Filter by environment. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nproduction\nstaging\ndevelopment"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: target_size
+          question_name: !unsafe "Target Size"
+          question_description: !unsafe "Filter by host sizing tier. Select 'all' to skip this filter."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nsmall\nmedium\nlarge"
+          min: 0
+          max: 64
+          new_question: false
+
+  # -------------------------------------------------------------------------
+  # Job template — rolling update with survey-controlled batch size.
+  # -------------------------------------------------------------------------
+  - name: "TARGETING / Rolling Update"
+    description: "Runs tasks against a target group in rolling batches. Survey controls the target group and batch size for controlled rollouts."
+    organization: "{{ target_organization }}"
+    project: "Inventory Targeting"
+    inventory: "{{ target_inventory }}"
+    playbook: "inventory_targeting_examples/rolling_update.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 0
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      description: ""
+      spec:
+        - variable: target_hosts
+          question_name: !unsafe "Target group"
+          question_description: !unsafe "Select the host group to roll out changes to."
+          type: multiplechoice
+          required: true
+          default: "all"
+          choices: "all\nos_linux\nos_windows\nnetwork_devices\ndistro_rhel\ndistro_ubuntu\nrhel_8\nrhel_9\nall_switches\nall_routers\nedge_switches\nfirewalls\nenv_production\nenv_staging\nenv_development\nsmall\nmedium\nlarge"
+          min: 0
+          max: 64
+          new_question: true
+        - variable: rollout_serial
+          question_name: !unsafe "Batch size"
+          question_description: !unsafe "Number of hosts to process at a time (serial execution)."
+          type: multiplechoice
+          required: true
+          default: "1"
+          choices: "1\n2\n5\n10\n25\n50"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: rollout_strategy
+          question_name: !unsafe "Rollout strategy"
+          question_description: !unsafe "How to roll out changes across the target hosts."
+          type: multiplechoice
+          required: true
+          default: "fixed"
+          choices: "fixed\ncanary\npercentage"
+          min: 0
+          max: 64
+          new_question: false
+        - variable: max_fail_pct
+          question_name: !unsafe "Max failure percentage"
+          question_description: !unsafe "Abort the rollout if this percentage of a batch fails. Select 0 to abort on any failure."
+          type: multiplechoice
+          required: true
+          default: "0"
+          choices: "0\n10\n20\n30\n50"
+          min: 0
+          max: 64
+          new_question: false
+
+# ---------------------------------------------------------------------------
+# Workflow — fact gathering → constructed sync → ready for targeting.
+# Run this once (or on a schedule) to keep dynamic groups current.
+# ---------------------------------------------------------------------------
+controller_workflows:
+  - name: "TARGETING / Refresh Dynamic Groups"
+    description: "Gathers facts from all device types and syncs constructed inventory sources so dynamic groups are up to date."
+    organization: "{{ target_organization }}"
+    simplified_workflow_nodes:
+      - identifier: "Gather Linux Facts"
+        unified_job_template: "CONSTRUCTED / Gather Facts - Linux"
+        organization: "{{ target_organization }}"
+        all_parents_must_converge: false
+        success_nodes:
+          - "Sync Complete"
+      - identifier: "Gather Windows Facts"
+        unified_job_template: "CONSTRUCTED / Gather Facts - Windows"
+        organization: "{{ target_organization }}"
+        all_parents_must_converge: false
+        success_nodes:
+          - "Sync Complete"
+      - identifier: "Gather Network Facts"
+        unified_job_template: "CONSTRUCTED / Gather Facts - Network"
+        organization: "{{ target_organization }}"
+        all_parents_must_converge: false
+        success_nodes:
+          - "Sync Complete"
+      - identifier: "Sync Complete"
+        unified_job_template: ""
+        organization: "{{ target_organization }}"
+        all_parents_must_converge: true
+    allow_simultaneous: false
+    survey_enabled: false
+
+...

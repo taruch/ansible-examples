@@ -47,8 +47,8 @@
       "default": "all",
       "choices": [
         "all",
-        "rose_hill",
-        "lincoln_center",
+        "westpark",
+        "eastbridge",
         "data_center"
       ]
     },

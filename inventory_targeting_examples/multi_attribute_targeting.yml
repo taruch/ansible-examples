@@ -11,7 +11,7 @@
 # AAP Survey Variables:
 #   target_vendor   - "all" or a vendor name (alcatel, extreme, paloalto)
 #   target_role     - "all" or a device function (edge_switch, mdr, mds, firewall)
-#   target_site     - "all" or a site name (rose_hill, lincoln_center, data_center)
+#   target_site     - "all" or a site name (westpark, eastbridge, data_center)
 #   target_building - "all" or a building name (building_a, building_b, dc_main)
 
 - name: Multi-Attribute Dynamic Target Playbook
