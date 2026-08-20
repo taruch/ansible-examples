@@ -1,0 +1,117 @@
+---
+# ----------------------------------------------------------------------
+# Search for a VM across every vCenter/datacenter pair known to this
+# environment. Useful when you don't know (or don't trust) which
+# datacenter a VM currently lives in.
+#
+# Credentials come from the AAP VMware credential attached to the job
+# template. AAP injects VMWARE_HOST/VMWARE_USER/VMWARE_PASSWORD/
+# VMWARE_VALIDATE_CERTS into the job's environment for that credential
+# type. This playbook only overrides VMWARE_HOST per loop iteration,
+# since it talks to multiple vCenters - VMWARE_USER/VMWARE_PASSWORD/
+# VMWARE_VALIDATE_CERTS pass through unchanged from the credential
+# (this assumes the same service account is valid on all of them).
+#
+# vmware.vmware.guest_info looks up VMs with fail_on_missing=False, so a
+# VM simply not existing on a given vCenter is a normal success with an
+# empty 'guests' list - it does NOT fail the task. That means any task
+# that DOES fail here is a real problem (bad auth, unreachable vCenter,
+# etc.) and must not be misread as "VM not found".
+# ----------------------------------------------------------------------
+- name: Hunt for a VM across all known vCenters/datacenters
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # vm_name: "vmhost"   # normally passed in with -e vm_name=...
+
+    # Every vCenter/datacenter pair to search. Customize this list for
+    # your environment (or source it from a vars file / lookup).
+    vsphere_it:
+      - data_center: DS1
+        vc_host: vchost1.example.org
+      - data_center: DS2
+        vc_host: vchost2.example.org
+
+
+  tasks:
+    - name: Fail fast if no VM name was supplied
+      ansible.builtin.assert:
+        that:
+          - vm_name is defined
+          - vm_name | length > 0
+        fail_msg: "Pass the VM to search for with -e vm_name=<name>"
+
+    - name: "Search every vCenter/datacenter for VM: {{ vm_name }}"
+      vmware.vmware.guest_info:
+        datacenter: "{{ vsphere_target.data_center }}"
+        name: "{{ vm_name }}"
+        name_match: first
+        validate_certs: false
+      register: vm_hunt_results
+      ignore_errors: true
+      loop: "{{ vsphere_it }}"
+      loop_control:
+        loop_var: vsphere_target
+        label: "{{ vsphere_target.data_center }} ({{ vsphere_target.vc_host }})"
+      environment:
+        VMWARE_HOST: "{{ vsphere_target.vc_host }}"
+
+    # vm_hunt_results.results is a list with one entry per vsphere_it item, e.g.:
+    #   - ansible_loop_var: vsphere_target
+    #     vsphere_target: {data_center: DS1, vc_host: vchost1.example.org}
+    #     failed: false
+    #     guests: [{moid: "vm-1234", hw_power_status: "poweredOn", hw_folder: "DC0/vm", ...}]   # found
+    #   - ansible_loop_var: vsphere_target
+    #     vsphere_target: {data_center: DS2, vc_host: vchost2.example.org}
+    #     failed: false
+    #     guests: []                                                                            # confirmed not present
+    #   - ansible_loop_var: vsphere_target
+    #     vsphere_target: {data_center: CNSE, vc_host: ent2196px5vc.example.org}
+    #     failed: true
+    #     msg: "User ... does not have the required permissions ..."                             # search error, no 'guests' key
+    - name: Sort search results into found / confirmed-not-found / search errors
+      ansible.builtin.set_fact:
+        vm_found_on: "{{ vm_hunt_results.results | rejectattr('failed') | selectattr('guests') | list }}"
+        vm_not_found_on: "{{ vm_hunt_results.results | rejectattr('failed') | rejectattr('guests') | list }}"
+        vm_search_errors: "{{ vm_hunt_results.results | selectattr('failed') | list }}"
+
+    - name: Report where the VM was found
+      ansible.builtin.debug:
+        msg: >-
+          {{ vm_name }} found in datacenter '{{ item.vsphere_target.data_center }}'
+          via {{ item.vsphere_target.vc_host }} (moid: {{ item.guests[0].moid | default('n/a') }},
+          powerState: {{ item.guests[0].hw_power_status | default('n/a') }},
+          folder: {{ item.guests[0].hw_folder | default('n/a') }})
+      loop: "{{ vm_found_on }}"
+      when: vm_found_on | length > 0
+
+    - name: Warn about vCenters that could NOT be searched (do not treat as "not found")
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: could not search {{ item.vsphere_target.data_center }}
+          ({{ item.vsphere_target.vc_host }}) - {{ item.msg }}
+      loop: "{{ vm_search_errors }}"
+      when: vm_search_errors | length > 0
+
+    - name: Confirm datacenters where the VM genuinely does not exist
+      ansible.builtin.debug:
+        msg: "Confirmed not present in {{ item.vsphere_target.data_center }} ({{ item.vsphere_target.vc_host }})"
+      loop: "{{ vm_not_found_on }}"
+      when: vm_not_found_on | length > 0
+
+    - name: Fail if the VM was not found anywhere AND every vCenter was actually searched
+      ansible.builtin.fail:
+        msg: "{{ vm_name }} was not found in any of the {{ vsphere_it | length }} datacenters searched."
+      when:
+        - vm_found_on | length == 0
+        - vm_search_errors | length == 0
+
+    - name: Flag an incomplete search
+      ansible.builtin.fail:
+        msg: >-
+          {{ vm_name }} was not found, but {{ vm_search_errors | length }} vCenter(s) could not
+          be searched due to errors above. Fix those errors and re-run before concluding the VM doesn't exist.
+      when:
+        - vm_found_on | length == 0
+        - vm_search_errors | length > 0
