@@ -17,6 +17,22 @@
       private: true
 
   tasks:
+    # vars_prompt is only interactive when run with a TTY (ansible-playbook /
+    # ansible-navigator on a terminal). In AAP (or any non-interactive run)
+    # with no survey/extra_vars value supplied, ansible-core silently skips
+    # the prompt and leaves vcenter_password defined but set to the literal
+    # string "None" (not real None - "is none"/default() won't catch it) -
+    # this assert turns that into a clear failure instead of a confusing
+    # vCenter auth error later.
+    - name: Fail fast if vcenter_password wasn't supplied
+      ansible.builtin.assert:
+        that:
+          - vcenter_password is defined
+          - (vcenter_password | string) not in ["None", ""]
+        fail_msg: >-
+          vcenter_password was not supplied. vars_prompt only works for interactive
+          runs - if this is an AAP job template, pass vcenter_password via a
+          survey question or extra_vars instead.
 
 
     - name: "Extend the disk '{{ disk_label }}' on VM '{{ vm_name }}'"

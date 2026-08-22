@@ -65,8 +65,7 @@ controller_inventory_sources:
     overwrite: "True"
     credential: "VMware Credentials"
 
-
-
+controller_templates:
   - name: "VMWare / Create VM"
     description: !unsafe ''
     organization: "Default"
@@ -418,23 +417,157 @@ controller_inventory_sources:
     webhook_service: ""
     prevent_instance_group_fallback: false
 
+  - name: "VMWare / VM Search Across Datacenters"
+    description: !unsafe ''
+    organization: "Default"
+    project: "Ansible Examples"
+    inventory: "VMWare Inventory Example"
+    playbook: "vmware_examples/vmware_vcenter_vm_search.yml"
+    scm_branch: ""
+    forks: 0
+    limit: ""
+    verbosity: 1
+    job_type: "run"
+    job_slice_count: 1
+    use_fact_cache: false
+    credentials:
+      - "VMWARE vCenter Demo Credential"
+    allow_simultaneous: false
+    ask_scm_branch_on_launch: false
+    ask_diff_mode_on_launch: false
+    ask_tags_on_launch: false
+    ask_skip_tags_on_launch: false
+    ask_job_type_on_launch: false
+    ask_verbosity_on_launch: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_credential_on_launch: false
+    ask_execution_environment_on_launch: false
+    ask_labels_on_launch: false
+    ask_forks_on_launch: false
+    ask_job_slice_count_on_launch: false
+    ask_timeout_on_launch: false
+    ask_instance_groups_on_launch: false
+    extra_vars: ""
+    job_tags: ""
+    force_handlers: false
+    skip_tags: ""
+    start_at_task: ""
+    timeout: 0
+    custom_virtualenv: ""
+    host_config_key: ""
+    labels:
+      - "VMWare"
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      spec:
+        - max: 1024
+          min: 0
+          type: text
+          required: True
+          variable: vm_name
+          new_question: True
+          question_name: !unsafe "What VM name should be searched for?"
+          question_description: !unsafe "Searches every vCenter/datacenter pair defined in the playbook's vsphere_it list"
+      description: ""
+    become_enabled: false
+    diff_mode: false
+    webhook_service: ""
+    prevent_instance_group_fallback: false
+
+  - name: "VMWare / Dump VMs in Datacenter"
+    description: !unsafe ''
+    organization: "Default"
+    project: "Ansible Examples"
+    inventory: "VMWare Inventory Example"
+    playbook: "vmware_examples/vmware_vcenter_vm_dump.yml"
+    scm_branch: ""
+    forks: 0
+    limit: ""
+    verbosity: 1
+    job_type: "run"
+    job_slice_count: 1
+    use_fact_cache: false
+    credentials:
+      - "VMWARE vCenter Demo Credential"
+    allow_simultaneous: false
+    ask_scm_branch_on_launch: false
+    ask_diff_mode_on_launch: false
+    ask_tags_on_launch: false
+    ask_skip_tags_on_launch: false
+    ask_job_type_on_launch: false
+    ask_verbosity_on_launch: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_credential_on_launch: false
+    ask_execution_environment_on_launch: false
+    ask_labels_on_launch: false
+    ask_forks_on_launch: false
+    ask_job_slice_count_on_launch: false
+    ask_timeout_on_launch: false
+    ask_instance_groups_on_launch: false
+    extra_vars: ""
+    job_tags: ""
+    force_handlers: false
+    skip_tags: ""
+    start_at_task: ""
+    timeout: 0
+    custom_virtualenv: ""
+    host_config_key: ""
+    labels:
+      - "VMWare"
+    survey_enabled: true
+    survey_spec:
+      name: ""
+      spec:
+        - max: 1024
+          min: 0
+          type: text
+          required: True
+          variable: datacenter
+          new_question: True
+          question_name: !unsafe "Which datacenter should be dumped?"
+        - max: 1024
+          min: 0
+          type: text
+          required: True
+          variable: vc_host
+          new_question: True
+          question_name: !unsafe "Which vCenter FQDN owns that datacenter?"
+        - max: 1024
+          min: 0
+          type: text
+          default: !unsafe ""
+          required: False
+          variable: vm_name_filter
+          new_question: True
+          question_name: !unsafe "Optional: only show VM names containing (case-insensitive)"
+      description: ""
+    become_enabled: false
+    diff_mode: false
+    webhook_service: ""
+    prevent_instance_group_fallback: false
+
 controller_workflows:
   - name: "VMWare / Update VM OS"
     description: !unsafe ''
-    organization: "ToDo: The WF 'VMWare / Update VM OS' must belong to an organization"
+    organization: "Default"
     simplified_workflow_nodes:
       - identifier: "Delete Snapshot"
         workflow_job_template: "VMWare / Update VM OS"
         unified_job_template: "VMWare / Snapshot / Delete"
         limit: ""
-        organization: "ToDo: The WF 'VMWare / Update VM OS' must belong to an organization"
+        organization: "Default"
         all_parents_must_converge: "False"
       - identifier: "1ebcd854-8b56-42e6-9af6-357b2fbb0a47"
         workflow_job_template: "VMWare / Update VM OS"
         unified_job_template: "LINUX / coolstuff"
         limit: ""
         job_type: "check"
-        organization: "ToDo: The WF 'VMWare / Update VM OS' must belong to an organization"
+        organization: "Default"
         all_parents_must_converge: "False"
         extra_data:
           _hosts: localhost
@@ -444,7 +577,7 @@ controller_workflows:
         workflow_job_template: "VMWare / Update VM OS"
         unified_job_template: "VMWare / Snapshot / Create"
         limit: ""
-        organization: "ToDo: The WF 'VMWare / Update VM OS' must belong to an organization"
+        organization: "Default"
         all_parents_must_converge: "False"
         success_nodes:
           - "1ebcd854-8b56-42e6-9af6-357b2fbb0a47"

@@ -4,9 +4,16 @@
   gather_facts: false
   environment:
     ANSIBLE_HOST_KEY_CHECKING: false
-    VMWARE_HOST: "{{ vmware_host | default(vcenter_hostname) }}"
-    VMWARE_USER: "{{ vmware_user | default(vcenter_username) }}"
-    VMWARE_PASSWORD: "{{ vmware_password | default(vcenter_password) }}"
+    # Only overrides VMWARE_HOST/USER/PASSWORD when vmware_host/vcenter_hostname
+    # (etc.) are explicitly set. Otherwise these keys are omitted entirely, so
+    # the VMWARE_HOST/VMWARE_USER/VMWARE_PASSWORD already injected into the
+    # job's environment by an AAP VMware credential pass through unchanged -
+    # without the default(omit) fallback, rendering these with neither var
+    # defined raises "vcenter_hostname is undefined" and fails the play before
+    # any task runs.
+    VMWARE_HOST: "{{ vmware_host | default(vcenter_hostname | default(omit)) }}"
+    VMWARE_USER: "{{ vmware_user | default(vcenter_username | default(omit)) }}"
+    VMWARE_PASSWORD: "{{ vmware_password | default(vcenter_password | default(omit)) }}"
   # vars:
   #   vm_name: "rhel9test2"
   #   vmpowerstate: "on"

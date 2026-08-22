@@ -318,25 +318,12 @@ controller_workflows:
       - identifier: "Gather Linux Facts"
         unified_job_template: "CONSTRUCTED / Gather Facts - Linux"
         organization: "{{ target_organization }}"
-        all_parents_must_converge: false
-        success_nodes:
-          - "Sync Complete"
       - identifier: "Gather Windows Facts"
         unified_job_template: "CONSTRUCTED / Gather Facts - Windows"
         organization: "{{ target_organization }}"
-        all_parents_must_converge: false
-        success_nodes:
-          - "Sync Complete"
       - identifier: "Gather Network Facts"
         unified_job_template: "CONSTRUCTED / Gather Facts - Network"
         organization: "{{ target_organization }}"
-        all_parents_must_converge: false
-        success_nodes:
-          - "Sync Complete"
-      - identifier: "Sync Complete"
-        unified_job_template: ""
-        organization: "{{ target_organization }}"
-        all_parents_must_converge: true
     allow_simultaneous: false
     survey_enabled: false
 

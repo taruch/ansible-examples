@@ -1,0 +1,82 @@
+---
+# ----------------------------------------------------------------------
+# Dump every VM registered in a single vCenter/datacenter. Useful when
+# vmware_vcenter_vm_search.yml (exact-name search) reports a VM as
+# "not found" but you believe it's actually there - list everything in
+# the datacenter and eyeball/grep it for near-matches (case, trailing
+# characters, extra whitespace, wrong datacenter, etc.).
+#
+# Credentials come from the AAP VMware credential attached to the job
+# template (VMWARE_USER/VMWARE_PASSWORD/VMWARE_VALIDATE_CERTS). This
+# playbook only overrides VMWARE_HOST, since -e vc_host lets you target
+# whichever vCenter owns the datacenter you're troubleshooting.
+#
+# community.vmware.vmware_vm_info has no datacenter filter of its own,
+# so it's queried for every VM in the vCenter and the results are
+# filtered locally on the 'datacenter' field it returns per VM. This
+# avoids relying on inventory-path folder strings (e.g. "/DC1/vm"),
+# which silently fail if the datacenter name/casing doesn't match
+# exactly.
+# ----------------------------------------------------------------------
+- name: Dump all VMs in a specific vCenter/datacenter
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # datacenter: DS1                      # required, e.g. -e datacenter=DS1
+    # vc_host: vchost1.example.org          # required, e.g. -e vc_host=...
+    # vm_name_filter: ""                   # optional, case-insensitive substring match, e.g. -e vm_name_filter=my-vm
+
+    vm_name_filter: ""
+
+  tasks:
+    - name: Fail fast if datacenter or vc_host was not supplied
+      ansible.builtin.assert:
+        that:
+          - datacenter is defined
+          - datacenter | length > 0
+          - vc_host is defined
+          - vc_host | length > 0
+        fail_msg: "Pass both -e datacenter=<name> and -e vc_host=<vcenter fqdn>"
+
+    - name: "Retrieve all VMs known to {{ vc_host }}"
+      community.vmware.vmware_vm_info:
+        validate_certs: false
+      register: vm_info_raw
+      environment:
+        VMWARE_HOST: "{{ vc_host }}"
+
+    - name: Filter results down to the requested datacenter (and optional name filter)
+      ansible.builtin.set_fact:
+        datacenter_vms: >-
+          {{
+            vm_info_raw.virtual_machines
+            | selectattr('datacenter', 'defined')
+            | selectattr('datacenter', 'equalto', datacenter)
+            | selectattr('guest_name', 'search', vm_name_filter, ignorecase=True)
+            | list
+          }}
+
+    - name: "VM count in {{ datacenter }} ({{ vc_host }})"
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ datacenter_vms | length }} VM(s) in datacenter '{{ datacenter }}'
+          {{ '(filtered on name containing: ' + vm_name_filter + ')' if vm_name_filter | length > 0 else '(no name filter applied)' }}
+          out of {{ vm_info_raw.virtual_machines | length }} total VM(s) visible on {{ vc_host }}.
+
+    - name: List of distinct datacenters actually seen on this vCenter
+      ansible.builtin.debug:
+        msg: >-
+          Datacenters visible on {{ vc_host }}:
+          {{ vm_info_raw.virtual_machines | map(attribute='datacenter') | unique | list }}
+      when: datacenter_vms | length == 0
+
+    - name: Dump each VM found in the datacenter
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.guest_name }} (uuid: {{ item.uuid }}, moid: {{ item.moid }},
+          power_state: {{ item.power_state }}, folder: {{ item.folder }},
+          cluster: {{ item.cluster | default('n/a') }})
+      loop: "{{ datacenter_vms }}"
+      loop_control:
+        label: "{{ item.guest_name }}"
