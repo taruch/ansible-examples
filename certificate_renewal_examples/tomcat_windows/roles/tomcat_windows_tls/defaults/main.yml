@@ -17,3 +17,6 @@ keystore_password: "{{ vault_keystore_password | default('changeit') }}"
 # inside Tomcat's conf/ dir on the Windows host.
 p12_local_path: "{{ acme_work_dir }}/{{ cert_name }}.p12"
 p12_remote_path: '{{ tomcat_home }}\conf\{{ cert_name }}.p12'
+
+# server.xml lives directly in Tomcat's conf/ dir alongside the keystore.
+server_xml: '{{ tomcat_home }}\conf\server.xml'
