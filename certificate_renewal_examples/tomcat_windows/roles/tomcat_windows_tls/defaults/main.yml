@@ -1,0 +1,19 @@
+---
+# These match tomcat_windows_install's defaults so the role also works
+# standalone (per the README example), not just chained after that role.
+tomcat_home: 'C:\Program Files\Apache Software Foundation\Tomcat 10.1'
+tomcat_service: "Tomcat10"
+
+tomcat_user: 'NT SERVICE\Tomcat10'
+http_port: 8080
+
+# Matches tomcat_windows_install's connector_port default - that role opens
+# the Windows firewall for this port, so the two must stay in sync.
+connector_port: 8443
+
+keystore_password: "{{ vault_keystore_password | default('changeit') }}"
+
+# Where the PKCS12 keystore is built on the control node, and where it lands
+# inside Tomcat's conf/ dir on the Windows host.
+p12_local_path: "{{ acme_work_dir }}/{{ cert_name }}.p12"
+p12_remote_path: '{{ tomcat_home }}\conf\{{ cert_name }}.p12'
