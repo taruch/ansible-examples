@@ -1,0 +1,67 @@
+---
+# Runnable example of Approach 2 from dnf_example_tasks.md: pre-check each
+# package with plain `dnf list {{ item }}` (NOT `dnf list available`), then
+# install everything that exists in a single bulk transaction, silently
+# skipping names that don't exist anywhere.
+#
+# Run it as-is against localhost:
+#   ansible-playbook dnf_bulk_install_example.yml -K
+#
+# Or against real hosts:
+#   ansible-playbook -i <inventory> dnf_bulk_install_example.yml -K -l <group>
+#
+# `package_list` below deliberately includes one bogus name
+# (this-package-does-not-exist-xyz) so you can see it get filtered out
+# before the install task ever runs, instead of failing the whole task.
+#
+# Do NOT swap the check task to `dnf list available {{ item }}` - that
+# excludes packages that are already installed (see dnf_example_tasks.md),
+# and do NOT try to replace this whole pattern with a single
+# `skip_broken: true` bulk install - that was tried and verified broken:
+# a single nonexistent package name aborts the ENTIRE transaction
+# (changed: false) even with skip_broken set, because the Ansible dnf
+# module calls DNF's Base.install() directly instead of going through the
+# dnf CLI's own error-tolerant command layer. See dnf_example_tasks.md for
+# the full writeup.
+
+- name: DNF bulk install example (skip packages that don't exist)
+  hosts: "{{ target_hosts | default('localhost') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    package_list:
+      - tree
+      - htop
+      - this-package-does-not-exist-xyz
+
+  tasks:
+    - name: Check package existence (installed or available)
+      ansible.builtin.command: "dnf list {{ item }}"
+      loop: "{{ package_list }}"
+      register: pkg_check
+      failed_when: false
+      changed_when: false
+
+    - name: Build list of packages that actually exist
+      ansible.builtin.set_fact:
+        valid_packages: "{{ pkg_check.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+
+    - name: Show which packages were kept vs. skipped
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item }}:
+          {{ 'exists - keeping' if item.rc == 0 else 'not found in repos - skipping' }}
+      loop: "{{ pkg_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Install the valid packages in a single bulk transaction
+      ansible.builtin.dnf:
+        name: "{{ valid_packages }}"
+        state: present
+      register: dnf_result
+
+    - name: Show what dnf actually did
+      ansible.builtin.debug:
+        var: dnf_result
