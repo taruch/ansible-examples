@@ -1,0 +1,23 @@
+---
+# Apply System Patches — role-based, OS-aware (Linux dnf + Windows Update)
+#
+# AAP Workflow position: SECOND (after pre_patching_role_playbook.yml succeeds)
+# On success: proceed to post_patching_role_playbook.yml
+# On failure: proceed to rollback_playbook.yml (failure branch)
+#
+# Delegates all work to roles/apply_patches, which dispatches to linux.yml
+# (dnf, with a rescue block that re-raises failures for workflow routing) or
+# windows.yml (win_updates), then runs shared.yml (summary).
+#
+# Tunable variables and their defaults live in roles/apply_patches/defaults/main.yml
+# — override via survey/extra_vars, not by editing this playbook.
+#
+# Survey variables to expose in AAP:
+#   target_hosts, patch_type (all|security|bugfix), exclude_packages,
+#   dnf_update_timeout, dry_run
+
+- name: Apply System Patches
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: true
+  roles:
+    - apply_patches

@@ -120,11 +120,21 @@ yourself — `demo_host_init.yml` does that.
 
 1. **AMI:** Windows Server 2022 (or 2019), `t3.medium` or larger.
 2. **Security group inbound:**
-   - `443/tcp` from anywhere (or your IP) — HTTPS to the demo app
+   - **`8443/tcp` from anywhere (or your IP) — HTTPS to the demo app.**
+     This is the `connector_port` default (see
+     [`tomcat_windows_tls`](roles/tomcat_windows_tls/README.md)) — the app
+     is **not** on bare `:443`. `tomcat_windows_install` opens this port in
+     the Windows Firewall automatically, but that only helps once the cloud
+     security group also allows it in. Forgetting this rule is the #1 cause
+     of `demo_host_init.yml` timing out on the "Fetch the live certificate"
+     / "Confirm the hello app is served over HTTPS" tasks at the very end of
+     the run — Tomcat is already up and listening, the control node just
+     can't reach it from outside.
    - `5986/tcp` from your IP — WinRM over HTTPS
    - `3389/tcp` from your IP — RDP (optional)
    - `8080/tcp` from your IP — optional, Tomcat HTTP (only if you want it)
-   - **No port 80 required** — DNS-01 doesn't use HTTP.
+   - **No port 80 or 443 required** — DNS-01 doesn't use HTTP, and the app
+     doesn't listen on 443.
 3. **WinRM:** enable WinRM-over-HTTPS at launch with the standard bootstrap
    script as user data:
    <https://github.com/ansible/ansible-documentation/blob/devel/examples/scripts/ConfigureRemotingForAnsible.ps1>
@@ -186,11 +196,7 @@ sets `roles_path = ./roles`):
 | [`demo_prep`](roles/demo_prep/README.md) | localhost (delegated, per-host) | Builds `hello.war` once at `files/hello.war`; upserts each host's Cloudflare A record `<cert_fqdn>` → `<ansible_host>`. |
 | [`tomcat_windows_install`](roles/tomcat_windows_install/README.md) | Windows host | Installs Temurin JDK (sets `JAVA_HOME`); silent-installs Tomcat `10.1.x` (service `Tomcat10`); replaces `webapps/ROOT` with `hello.war`. |
 | [`letsencrypt_cloudflare`](roles/letsencrypt_cloudflare/README.md) | delegated to localhost | Runs the ACME order; writes `_acme-challenge` TXT records via Cloudflare; pauses for DNS propagation; tells ACME to validate; retrieves cert/chain/fullchain to `.acme/`. TXT records are cleaned up in an `always` block. |
-<<<<<<< HEAD
-| [`tomcat_windows_tls`](roles/tomcat_windows_tls/README.md) | Windows host (cert build delegated to localhost) | Builds `<fqdn>.p12`; ships it to `conf/`; opens the Windows firewall on the connector port; templates `server.xml` (HTTP `:8080`, TLS `:443` → the keystore); restarts Tomcat (gated on actual change); verifies the cert on `:443` and that the hello app responds. |
-=======
 | [`tomcat_windows_tls`](roles/tomcat_windows_tls/README.md) | Windows host (cert build delegated to localhost) | Builds `<fqdn>.p12`; ships it to `conf/`; templates `server.xml` (HTTP `:8080`, TLS `:8443` → the keystore); restarts Tomcat (gated on actual change); verifies the cert on `:8443` and that the hello app responds. |
->>>>>>> 9672aabdf404cea37c72eccf0bd7d5d0540d2f4d
 
 Each role has its own README documenting its variables and assumptions.
 
@@ -237,6 +243,19 @@ rm -rf .acme files/*.p12 files/hello.war
 
 ## Notes / gotchas
 
+- **The app is on `:8443`, not bare `:443`** — browsing to
+  `https://<fqdn>/` will fail even when everything is working, because
+  nothing listens on 443. Always go to `https://<fqdn>:8443/`.
+- **Cloud security group vs. Windows Firewall** — `tomcat_windows_install`
+  opens 8443 in the Windows Firewall, but that's host-local. The instance's
+  cloud security group (AWS/Azure/etc.) also needs an inbound rule for
+  `8443/tcp`, or the app is unreachable from outside even though Tomcat is
+  listening fine. Symptom: `demo_host_init.yml` gets all the way through
+  installing Tomcat, issuing the cert, and restarting the service, then
+  times out on the final `tomcat_windows_tls` verification tasks
+  ("Fetch the live certificate" / "Confirm the hello app is served over
+  HTTPS") with a `timed out` error, since those run from the control node
+  over the public network.
 - **Cloudflare token scope** — give the token only `Zone:Zone:Read` +
   `Zone:DNS:Edit` for the one zone you're using. A broader token would still
   work but breaks least-privilege.

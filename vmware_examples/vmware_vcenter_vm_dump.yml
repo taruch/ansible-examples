@@ -42,6 +42,44 @@
           - vc_host | length > 0
         fail_msg: "Pass -e vc_host=<vcenter fqdn> (optionally -e datacenter=<name> to scope the dump)"
 
+    - name: Capture the current environment (for VMWARE_ debugging below)
+      ansible.builtin.command: env
+      register: env_dump
+      changed_when: false
+      # Reflects the same VMWARE_HOST override the next task uses, so this
+      # shows exactly what vmware_vm_info will see.
+      environment:
+        VMWARE_HOST: "{{ vc_host }}"
+
+    - name: Dump all VMWARE_ environment variables (VMWARE_PASSWORD redacted)
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            env_dump.stdout_lines
+            | select('match', '^VMWARE_')
+            | map('regex_replace', '^(VMWARE_PASSWORD)=.*$', '\1=********')
+            | list
+          }}
+
+    # If this fails with pyVmomi.VmomiSupport.vim.fault.NoPermission on a
+    # specific vim.HostSystem (privilegeId 'System.Read'), it's not a bug
+    # here - it's a vCenter RBAC gap. vmware_vm_info defaults show_cluster
+    # and show_esxi_hostname to true, and populating either one requires
+    # reading summary.runtime.host.summary.config.name for every VM, which
+    # needs System.Read on that VM's host.
+    #
+    # If OTHER hosts in the same cluster work fine and only this one host
+    # fails, the cluster-level role is not the problem - look for an
+    # explicit (non-propagated) permission entry assigned directly on that
+    # HostSystem in vSphere Client (Hosts and Clusters > host > Permissions
+    # tab). A direct assignment on an object always wins over one inherited
+    # from a parent, even if it grants fewer privileges, so a leftover
+    # narrower role on just this host silently shadows the broader
+    # cluster-level Read-only role. Fix: remove the direct entry (let the
+    # cluster-level role apply) or add System.Read to it. Also worth
+    # checking if the host was recently removed/re-added to vCenter, which
+    # assigns it a new MoRef and drops any permissions that weren't set to
+    # propagate from a parent.
     - name: "Retrieve all VMs known to {{ vc_host }}"
       community.vmware.vmware_vm_info:
         validate_certs: false

@@ -1,0 +1,24 @@
+---
+# Post-Patching Validation and Cleanup — role-based, OS-aware (Linux + Windows)
+#
+# AAP Workflow position: THIRD (after patching_role_playbook.yml succeeds)
+# On success: workflow complete
+# On failure: optionally trigger rollback_playbook.yml (failure branch)
+#
+# Delegates all work to roles/post_patching, which dispatches to linux.yml or
+# windows.yml (reboot detection, package baseline, log/journal scan) then runs
+# shared.yml (reboot, service restoration, health checks, monitoring exit,
+# final report).
+#
+# Tunable variables and their defaults live in roles/post_patching/defaults/main.yml
+# — override via survey/extra_vars, not by editing this playbook.
+#
+# Survey variables to expose in AAP:
+#   target_hosts, services_to_start, health_check_urls, monitoring_provider,
+#   datadog_downtime_id (passed from pre_patching via set_stats)
+
+- name: Post-Patching Validation and Cleanup
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: true
+  roles:
+    - post_patching

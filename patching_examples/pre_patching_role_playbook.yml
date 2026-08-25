@@ -1,0 +1,23 @@
+---
+# Pre-Patching Checks and Preparation — role-based, OS-aware (Linux + Windows)
+#
+# AAP Workflow position: FIRST
+# On success: proceed to patching_role_playbook.yml
+# On failure: stop workflow (do not patch)
+#
+# Delegates all work to roles/pre_patching, which dispatches to linux.yml or
+# windows.yml based on ansible_facts.os_family, then runs shared.yml
+# (VM snapshot, monitoring maintenance mode, readiness summary).
+#
+# Tunable variables and their defaults live in roles/pre_patching/defaults/main.yml
+# — override via survey/extra_vars, not by editing this playbook.
+#
+# Survey variables to expose in AAP:
+#   target_hosts, min_disk_space_gb, services_to_stop (multiline),
+#   create_vm_snapshot, monitoring_provider, abort_on_pending_reboot
+
+- name: Pre-Patching Checks and Preparation
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: true
+  roles:
+    - pre_patching

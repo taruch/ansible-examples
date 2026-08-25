@@ -117,7 +117,7 @@ unlimited issuances for development.
 | `acme_env` | `staging` | Set to `production` for a real trusted cert. |
 | `cert_remaining_days` | `30` | Skip renewal when live cert has more than this many days left. Set to `999` to force re-issue (the semantics are "cert must have at least N days left"; `0` means "never renew"). |
 | `vault_keystore_password` | `changeit` | Keystore passphrase. Override via AAP Vault credential. |
-| `connector_port` | `443` | Tomcat TLS connector. |
+| `connector_port` | `8443` | Tomcat TLS connector. The app is reachable at `https://<fqdn>:8443/` — not bare `:443`. Must be open inbound in the host's cloud security group (not just the Windows Firewall, which `tomcat_windows_install` opens automatically). |
 | `tomcat_home` | `C:\Program Files\Apache Software Foundation\Tomcat 10.1` | Install path. |
 | `tomcat_service` | `Tomcat10` | Windows service name. |
 
