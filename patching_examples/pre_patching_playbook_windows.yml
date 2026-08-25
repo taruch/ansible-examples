@@ -1,0 +1,286 @@
+---
+# Pre-Patching Checks and Preparation (Windows)
+#
+# AAP Workflow position: FIRST
+# On success: proceed to a Windows patching playbook (e.g. win_updates)
+# On failure: stop workflow (do not patch)
+#
+# No `become` is required — the WinRM admin credential assigned to the
+# job template is used directly.
+#
+# Survey variables to expose in AAP:
+#   target_hosts, min_disk_space_gb, services_to_stop (multiline),
+#   create_vm_snapshot, monitoring_provider, abort_on_pending_reboot
+
+- name: Pre-Patching Checks and Preparation (Windows)
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: true
+  vars:
+    # Minimum free space required on C:\, in GB
+    min_disk_space_gb: 5
+
+    # Abort if the system already has a pending reboot (recommended: true for prod)
+    abort_on_pending_reboot: false
+
+    # Services to stop gracefully before patching (list them in patching_vars.yml or survey)
+    services_to_stop: []
+
+    # File/directory paths to archive as a configuration backup
+    backup_configs: []
+
+    # VMware snapshot before patching (requires community.vmware collection)
+    create_vm_snapshot: false
+    vcenter_hostname: ""
+    vcenter_username: ""
+    vcenter_password: ""
+    vcenter_datacenter: ""
+    vcenter_validate_certs: false
+
+    # Monitoring maintenance mode provider: "datadog", "zabbix", or "" to skip
+    monitoring_provider: ""
+    monitoring_url: ""
+    monitoring_api_key: ""
+    downtime_duration_seconds: 7200   # 2 hours; extend if patching is slow
+
+    patch_report_dir: 'C:\ProgramData\patch_reports'
+
+  tasks:
+
+    # =========================================================================
+    # 1. SYSTEM READINESS CHECKS
+    # =========================================================================
+    - name: System readiness checks
+      tags: [checks, pre_patch]
+      block:
+        - name: Get free disk space on C drive
+          ansible.windows.win_shell: |
+            $drive = Get-PSDrive C
+            [math]::Round($drive.Free / 1GB, 2)
+          register: c_drive_free_gb
+          changed_when: false
+
+        - name: Assert sufficient disk space on C drive
+          ansible.builtin.assert:
+            that:
+              - (c_drive_free_gb.stdout | trim | float) >= (min_disk_space_gb | int)
+            fail_msg: >-
+              ABORT: C:\ has only {{ c_drive_free_gb.stdout | trim }}GB free;
+              {{ min_disk_space_gb }}GB required. Clear space before patching.
+
+        - name: Check for pending reboot (Windows Update)
+          ansible.windows.win_reg_stat:
+            path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired
+          register: wu_reboot_required
+
+        - name: Check for pending reboot (Component-Based Servicing)
+          ansible.windows.win_reg_stat:
+            path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending
+          register: cbs_reboot_required
+
+        - name: Set windows_reboot_pending fact
+          ansible.builtin.set_fact:
+            windows_reboot_pending: "{{ wu_reboot_required.exists or cbs_reboot_required.exists }}"
+
+        - name: Abort if pending reboot detected and strict mode is enabled
+          ansible.builtin.fail:
+            msg: >-
+              ABORT: {{ inventory_hostname }} has a pending reboot from a prior operation.
+              Patching over a pending reboot risks boot failures.
+              Reboot the host first, or set abort_on_pending_reboot=false to override.
+          when:
+            - windows_reboot_pending | bool
+            - abort_on_pending_reboot | bool
+
+        - name: Warn if pending reboot detected (non-strict mode)
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: {{ inventory_hostname }} has a pending Windows reboot. Patching will
+              continue, but rebooting first is strongly recommended.
+          when:
+            - windows_reboot_pending | bool
+            - not (abort_on_pending_reboot | bool)
+
+    # =========================================================================
+    # 2. RECORD PRE-PATCH BASELINE
+    # =========================================================================
+    - name: Record pre-patch system baseline
+      tags: [baseline, pre_patch]
+      block:
+        - name: Create patch report directory
+          ansible.windows.win_file:
+            path: "{{ patch_report_dir }}"
+            state: directory
+
+        - name: Gather installed Windows software
+          ansible.windows.win_shell: |
+            $apps = Get-ItemProperty `
+              HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*,
+              HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* |
+              Where-Object { $_.DisplayName } |
+              Select-Object DisplayName, DisplayVersion, Publisher
+            $apps | ConvertTo-Json -Depth 2
+          register: win_packages_before
+          changed_when: false
+          failed_when: false
+
+        - name: Save pre-patch Windows package list (diff against post-patch to see what changed)
+          ansible.windows.win_copy:
+            content: "{{ win_packages_before.stdout | default('[]') }}"
+            dest: "{{ patch_report_dir }}\\packages_before.json"
+
+        - name: Get Windows OS version info
+          ansible.windows.win_shell: |
+            $os = Get-WmiObject Win32_OperatingSystem
+            "$($os.Caption) Build $($os.BuildNumber) ($($os.Version))"
+          register: win_os_version
+          changed_when: false
+
+        - name: Save pre-patch Windows system state summary
+          ansible.windows.win_copy:
+            content: |
+              Pre-Patch System State (Windows)
+              =================================
+              Timestamp:      {{ ansible_date_time.iso8601 }}
+              Hostname:       {{ inventory_hostname }}
+              OS:             {{ win_os_version.stdout | trim }}
+              C:\ Free (GB):  {{ c_drive_free_gb.stdout | trim }}
+              Pending Reboot: {{ 'YES - caution' if windows_reboot_pending | bool else 'No' }}
+            dest: "{{ patch_report_dir }}\\pre_patch_state.txt"
+
+    # =========================================================================
+    # 3. DATA PROTECTION — BACKUPS AND VM SNAPSHOT
+    # =========================================================================
+    - name: Data protection
+      tags: [protection, pre_patch]
+      block:
+        - name: Archive critical configuration files
+          ansible.windows.win_shell: |
+            $dest = "{{ patch_report_dir }}\config_backup_{{ ansible_date_time.epoch }}.zip"
+            $paths = @({{ backup_configs | map('regex_replace', '(.*)', '"\\1"') | join(', ') }})
+            Compress-Archive -Path $paths -DestinationPath $dest -Force
+          when: backup_configs | length > 0
+
+        - name: Create VM snapshot before patching
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ vcenter_hostname }}"
+            username: "{{ vcenter_username }}"
+            password: "{{ vcenter_password }}"
+            validate_certs: "{{ vcenter_validate_certs }}"
+            datacenter: "{{ vcenter_datacenter }}"
+            name: "{{ inventory_hostname }}"
+            state: present
+            snapshot_name: "pre-patch-{{ ansible_date_time.date }}"
+            description: "Automated pre-patch snapshot - {{ ansible_date_time.iso8601 }}"
+          delegate_to: localhost
+          when:
+            - create_vm_snapshot | bool
+            - ansible_facts.virtualization_type | default('') == 'VMware'
+          register: snapshot_result
+          ignore_errors: true  # Don't block patching if snapshot fails
+
+        - name: Warn if VM snapshot creation failed
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: VM snapshot creation failed for {{ inventory_hostname }}.
+              The rollback_playbook.yml will not be able to revert. Proceed with caution.
+          when:
+            - create_vm_snapshot | bool
+            - snapshot_result is defined
+            - snapshot_result.failed | default(false)
+
+    # =========================================================================
+    # 4. MONITORING MAINTENANCE MODE
+    # =========================================================================
+    - name: Enter monitoring maintenance mode
+      tags: [monitoring, pre_patch]
+      block:
+        - name: Create Datadog scheduled downtime
+          ansible.builtin.uri:
+            url: "{{ monitoring_url }}/api/v1/downtime"
+            method: POST
+            headers:
+              DD-API-KEY: "{{ monitoring_api_key }}"
+              Content-Type: application/json
+            body_format: json
+            body:
+              scope: "host:{{ inventory_hostname }}"
+              start: "{{ ansible_date_time.epoch | int }}"
+              end: "{{ ansible_date_time.epoch | int + downtime_duration_seconds | int }}"
+              message: "Scheduled patching maintenance - managed by Ansible"
+            status_code: [200, 201]
+          delegate_to: localhost
+          register: dd_downtime
+          when: monitoring_provider == 'datadog'
+          ignore_errors: true
+
+        - name: Persist downtime ID for post-patching removal via workflow artifact
+          ansible.builtin.set_stats:
+            data:
+              datadog_downtime_id: "{{ dd_downtime.json.id }}"
+            per_host: false
+          when:
+            - monitoring_provider == 'datadog'
+            - dd_downtime is defined
+            - not (dd_downtime.failed | default(false))
+
+        - name: Place host in Zabbix maintenance mode
+          community.zabbix.zabbix_maintenance:
+            name: "Patching - {{ inventory_hostname }}"
+            host_name: "{{ inventory_hostname }}"
+            state: present
+            collect_data: false
+            minutes: "{{ (downtime_duration_seconds | int / 60) | int }}"
+          delegate_to: localhost
+          when: monitoring_provider == 'zabbix'
+          ignore_errors: true
+
+    # =========================================================================
+    # 5. SERVICE SUSPENSION
+    # =========================================================================
+    - name: Gracefully stop dependent application services
+      ansible.windows.win_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ services_to_stop }}"
+      when: services_to_stop | length > 0
+      tags: [services, pre_patch]
+
+    # =========================================================================
+    # 6. USER NOTIFICATION
+    # =========================================================================
+    - name: Notify active users of upcoming maintenance
+      tags: [notify, pre_patch]
+      block:
+        - name: Check for active login sessions
+          ansible.windows.win_shell: query session
+          register: active_sessions_win
+          changed_when: false
+          failed_when: false
+
+        - name: Broadcast maintenance notice to all logged-in users
+          ansible.windows.win_shell: >
+            msg * /time:60
+            "MAINTENANCE NOTICE: {{ inventory_hostname }} is entering a scheduled
+            patching window. Services will be interrupted. Please save your work now."
+          changed_when: false
+          failed_when: false
+          when: active_sessions_win.stdout | length > 0
+
+    # =========================================================================
+    # 7. READINESS SUMMARY
+    # =========================================================================
+    - name: Pre-patch readiness summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - " Pre-Patch Readiness: {{ inventory_hostname }}"
+          - "=============================================="
+          - "OS:             {{ win_os_version.stdout | trim }}"
+          - "Pending reboot: {{ 'YES - caution' if windows_reboot_pending | bool else 'No' }}"
+          - "Services stopped: {{ services_to_stop | join(', ') or 'None' }}"
+          - "Config backup:  {{ 'Yes (' + backup_configs | length | string + ' paths)' if backup_configs | length > 0 else 'Skipped' }}"
+          - "VM snapshot:    {{ 'Yes' if (create_vm_snapshot | bool and not (snapshot_result.failed | default(true))) else 'Skipped or failed' }}"
+          - "Maintenance mode: {{ monitoring_provider or 'Skipped' }}"
+          - "Status:         READY FOR PATCHING"
+          - "=============================================="
+      tags: always
