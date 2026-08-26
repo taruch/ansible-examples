@@ -71,7 +71,7 @@
 
     - name: Call an MCP Tool via HTTP
       ansible.builtin.uri:
-        url: "https://{{ host }}:{{ mcp_port }}/job_management/mcp"
+        url: "https://{{ host }}:{{ mcp_port }}/mcp"
         headers:
           Authorization: "Bearer {{ token }}"
           Accept: "application/json, text/event-stream"
