@@ -173,6 +173,31 @@ that joins `main_hostmetric` to `main_host` (by hostname) and filters on
 dashboard data described in use case 6, not a separate counting model.
 (Source: [collectors-and-partitions.md](https://github.com/ansible/metrics-utility/blob/devel/docs/collectors-and-partitions.md))
 
+### 8. Hardware-identity-based deduplication (`ansible_product_serial` / `ansible_machine_id`)
+For `RENEWAL_GUIDANCE` specifically, the default `renewal` deduplicator
+doesn't only match on `hostname`/`ansible_host_variable` — it also
+transitively matches on two hardware-identity facts pulled from
+`main_host.ansible_facts`: `ansible_product_serial` (DMI/SMBIOS serial,
+read from `/sys/devices/virtual/dmi/id/product_serial` or `dmidecode`)
+and `ansible_machine_id` (systemd's `/etc/machine-id`, which survives
+hostname renames but regenerates on reimage). This is what lets `renewal`
+correctly merge a **renamed host** or a host reached via **IP, shortname,
+and FQDN with no common `ansible_host_variable`** — cases that
+`renewal-hostname` and CCSP-style matching (use case #2) cannot catch on
+their own — confirmed empirically via `test_renewal_dedup.py`.
+
+**This has a hard, undocumented prerequisite**: these facts are only
+ever written to `main_host.ansible_facts` if a job template with
+`use_fact_cache=True` (default: `False`) has actually automated that
+host — otherwise the field stays `{}` forever and this entire dedup path
+has nothing to match on, regardless of which `RENEWAL_GUIDANCE`
+deduplicator you select. It's also **case-sensitive** end to end, same as
+every other key metrics-utility matches on. See "Where the Dedup Keys
+Actually Come From (and a Prerequisite Nobody Documents)" below for the
+full traced mechanism, the confirmed `renewal-experimental`
+double-counting bug on multi-hop chains, and a ready-to-run check for
+whether fact caching is even in use in your environment.
+
 ## Summary
 
 | Scenario | Without Deduplication | With Deduplication / Mitigation |
@@ -180,6 +205,7 @@ dashboard data described in use case 6, not a separate counting model.
 | Host automated many times in a cycle | Counted once per job run | Counted once per billing cycle (`main_jobhostsummary` rollup) |
 | Host reached via IP, hostname, and FQDN | Counted as 3 separate hosts | Counted as 1, if inventory is cleaned up or `ansible_host` is standardized |
 | Same host, inconsistent hostname casing (`WEB05` vs `web05`) | Counted as 2 separate hosts (confirmed, all matching is case-sensitive) | Counted as 1, only if casing is standardized in inventory (case-sensitive `ansible_host`/facts don't help either) |
+| Renamed host, or IP/shortname/FQDN with no shared `ansible_host_variable` (RENEWAL_GUIDANCE) | Counted as 2+ separate hosts under `renewal-hostname` | Counted as 1 under default `renewal`, but **only if** `ansible_product_serial`/`ansible_machine_id` were actually captured (requires `use_fact_cache=True` on some job template) |
 | Host in multiple inventories/orgs | Risk of inflated totals | Broken out via `inventory_scope` / per-org sheets |
 | Indirectly managed nodes | Merged into direct count | Tracked separately via `indirectly_managed_nodes` sheet |
 | API/control-plane calls | Counted per task/call | Collapsed to one host via consistent `localhost` connection |
