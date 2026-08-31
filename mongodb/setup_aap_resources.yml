@@ -1,0 +1,258 @@
+---
+# Provisions everything needed to run this MongoDB example from AAP: a
+# Project pointed at this repo, an Inventory sourced from mongodb/hosts, a
+# Vault credential (and optionally a Machine credential), and three job
+# templates (deploy / upgrade / test-sharding) with surveys where needed.
+#
+# Requires the awx.awx collection on whatever host runs this playbook:
+#   ansible-galaxy collection install awx.awx
+#
+# Usage:
+#   export CONTROLLER_HOST=your-aap-controller.example.com
+#   export CONTROLLER_USERNAME=admin
+#   export CONTROLLER_PASSWORD=your_password
+#   export MONGODB_VAULT_PASSWORD=the_password_group_vars_all_vault_yml_was_encrypted_with
+#   # optional - omit to skip creating a Machine credential and add one by hand:
+#   export MONGODB_SSH_PRIVATE_KEY_FILE=/path/to/private_key
+#   export MONGODB_SSH_USER=ec2-user
+#   # optional - only needed if the project's SCM remote requires auth:
+#   export MONGODB_SCM_CREDENTIAL="My GitHub SSH Key"
+#
+#   ansible-playbook mongodb/setup_aap_resources.yml
+
+- name: Set up MongoDB cluster resources in AAP
+  hosts: localhost
+  gather_facts: false
+  vars:
+    controller_hostname: "{{ lookup('env', 'CONTROLLER_HOST') | default('your-aap-controller.example.com', true) }}"
+    controller_username: "{{ lookup('env', 'CONTROLLER_USERNAME') | default('admin', true) }}"
+    controller_password: "{{ lookup('env', 'CONTROLLER_PASSWORD') }}"
+    controller_verify_ssl: false
+
+    organization_name: "Default"  # Change to your organization name
+
+    project_name: "MongoDB Cluster Example"
+    project_scm_url: "git@github.com:taruch/ansible-examples.git"  # Change to your fork/remote
+    project_scm_branch: "master"
+    project_scm_credential_name: "{{ lookup('env', 'MONGODB_SCM_CREDENTIAL') | default('', true) }}"
+
+    inventory_name: "MongoDB Cluster"
+    inventory_source_name: "MongoDB hosts (from project)"
+
+    machine_credential_name: "MongoDB Cluster - Machine"
+    machine_credential_username: "{{ lookup('env', 'MONGODB_SSH_USER') | default('ec2-user', true) }}"
+    machine_ssh_private_key_file: "{{ lookup('env', 'MONGODB_SSH_PRIVATE_KEY_FILE') | default('', true) }}"
+    machine_become_password: "{{ lookup('env', 'MONGODB_BECOME_PASSWORD') | default('', true) }}"
+
+    # Must match: ansible-vault encrypt group_vars/all/vault.yml
+    vault_credential_name: "MongoDB Cluster - Vault"
+    vault_password: "{{ lookup('env', 'MONGODB_VAULT_PASSWORD') }}"
+
+  tasks:
+    - name: Check required Controller connection variables
+      ansible.builtin.assert:
+        that:
+          - controller_password is defined
+          - controller_password | length > 0
+        fail_msg: |
+          Set these environment variables before running this playbook:
+            export CONTROLLER_HOST=your-aap-controller.example.com
+            export CONTROLLER_USERNAME=admin
+            export CONTROLLER_PASSWORD=your_password
+
+    - name: Check the vault password was provided
+      ansible.builtin.assert:
+        that:
+          - vault_password is defined
+          - vault_password | length > 0
+        fail_msg: >-
+          Set MONGODB_VAULT_PASSWORD to the password group_vars/all/vault.yml
+          was encrypted with: export MONGODB_VAULT_PASSWORD=...
+
+    - name: Create the project
+      awx.awx.project:
+        name: "{{ project_name }}"
+        organization: "{{ organization_name }}"
+        scm_type: git
+        scm_url: "{{ project_scm_url }}"
+        scm_branch: "{{ project_scm_branch }}"
+        scm_credential: "{{ project_scm_credential_name if project_scm_credential_name | length > 0 else omit }}"
+        scm_update_on_launch: true
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Create the inventory
+      awx.awx.inventory:
+        name: "{{ inventory_name }}"
+        organization: "{{ organization_name }}"
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Point the inventory at mongodb/hosts in the project
+      awx.awx.inventory_source:
+        name: "{{ inventory_source_name }}"
+        inventory: "{{ inventory_name }}"
+        organization: "{{ organization_name }}"
+        source: scm
+        source_project: "{{ project_name }}"
+        source_path: "mongodb/hosts"
+        overwrite: true
+        update_on_launch: true
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Sync the inventory source now so hosts are available immediately
+      awx.awx.inventory_source_update:
+        name: "{{ inventory_source_name }}"
+        inventory: "{{ inventory_name }}"
+        organization: "{{ organization_name }}"
+        wait: true
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Create the Machine credential for SSH access to the mongo hosts
+      awx.awx.credential:
+        name: "{{ machine_credential_name }}"
+        organization: "{{ organization_name }}"
+        credential_type: Machine
+        inputs:
+          username: "{{ machine_credential_username }}"
+          ssh_key_data: "{{ lookup('file', machine_ssh_private_key_file) }}"
+          become_password: "{{ machine_become_password if machine_become_password | length > 0 else omit }}"
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+      when: machine_ssh_private_key_file | length > 0
+
+    - name: Warn that the Machine credential was skipped
+      ansible.builtin.debug:
+        msg: >-
+          MONGODB_SSH_PRIVATE_KEY_FILE was not set, so no Machine credential
+          was created. Add one by hand (SSH key or password) and attach it to
+          the job templates below before launching them.
+      when: machine_ssh_private_key_file | length == 0
+
+    - name: Create the Vault credential
+      awx.awx.credential:
+        name: "{{ vault_credential_name }}"
+        organization: "{{ organization_name }}"
+        credential_type: Vault
+        inputs:
+          vault_password: "{{ vault_password }}"
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Determine the credential list for the job templates
+      ansible.builtin.set_fact:
+        mongodb_job_template_credentials: >-
+          {{
+            ([machine_credential_name] if machine_ssh_private_key_file | length > 0 else [])
+            + [vault_credential_name]
+          }}
+
+    - name: Load the survey for the upgrade job template
+      ansible.builtin.set_fact:
+        upgrade_survey_spec: "{{ lookup('file', 'aap_survey_spec_upgrade.json') | from_json }}"
+
+    - name: Load the survey for the test-sharding job template
+      ansible.builtin.set_fact:
+        testsharding_survey_spec: "{{ lookup('file', 'aap_survey_spec_testsharding.json') | from_json }}"
+
+    - name: Create the "Deploy Cluster" job template
+      awx.awx.job_template:
+        name: "MongoDB - Deploy Cluster"
+        description: "Deploys the sharded MongoDB cluster (mongodb/site.yml)"
+        organization: "{{ organization_name }}"
+        project: "{{ project_name }}"
+        inventory: "{{ inventory_name }}"
+        playbook: "mongodb/site.yml"
+        job_type: run
+        become_enabled: true
+        ask_variables_on_launch: false
+        ask_inventory_on_launch: false
+        ask_credential_on_launch: false
+        ask_limit_on_launch: true
+        credentials: "{{ mongodb_job_template_credentials }}"
+        survey_enabled: false
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Create the "Upgrade Cluster" job template
+      awx.awx.job_template:
+        name: "MongoDB - Upgrade Cluster"
+        description: "Rolling major-version upgrade of the cluster (mongodb/upgrade.yml)"
+        organization: "{{ organization_name }}"
+        project: "{{ project_name }}"
+        inventory: "{{ inventory_name }}"
+        playbook: "mongodb/upgrade.yml"
+        job_type: run
+        become_enabled: true
+        ask_variables_on_launch: false
+        ask_inventory_on_launch: false
+        ask_credential_on_launch: false
+        ask_limit_on_launch: true
+        credentials: "{{ mongodb_job_template_credentials }}"
+        survey_enabled: true
+        survey_spec: "{{ upgrade_survey_spec }}"
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Create the "Test Sharding" job template
+      awx.awx.job_template:
+        name: "MongoDB - Test Sharding"
+        description: "Populates a test collection and exercises sharding (mongodb/playbooks/testsharding.yml)"
+        organization: "{{ organization_name }}"
+        project: "{{ project_name }}"
+        inventory: "{{ inventory_name }}"
+        playbook: "mongodb/playbooks/testsharding.yml"
+        job_type: run
+        become_enabled: true
+        ask_variables_on_launch: false
+        ask_inventory_on_launch: false
+        ask_credential_on_launch: false
+        ask_limit_on_launch: true
+        credentials: "{{ mongodb_job_template_credentials }}"
+        survey_enabled: true
+        survey_spec: "{{ testsharding_survey_spec }}"
+        state: present
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+
+    - name: Display setup summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "MongoDB AAP resources created/updated"
+          - "=========================================="
+          - "Project:      {{ project_name }} ({{ project_scm_url }})"
+          - "Inventory:    {{ inventory_name }} (synced from mongodb/hosts)"
+          - "Credentials:  {{ mongodb_job_template_credentials | join(', ') }}"
+          - "Job templates:"
+          - "  - MongoDB - Deploy Cluster   -> mongodb/site.yml"
+          - "  - MongoDB - Upgrade Cluster  -> mongodb/upgrade.yml (survey: mongodb_upgrade_version)"
+          - "  - MongoDB - Test Sharding    -> mongodb/playbooks/testsharding.yml (survey: mongos_target)"
+          - "=========================================="

@@ -1,0 +1,19 @@
+---
+# Polls this host's own mongod until it reports one of the acceptable replica
+# set states, so the caller can safely move on to the next node.
+#
+# Expects: mongodb_upgrade_wait_port, mongodb_upgrade_wait_states (list of
+# rs.status().myState integers, e.g. [1, 2] for PRIMARY or SECONDARY).
+
+- name: "Wait for a healthy replica set state, host {{ inventory_hostname }}"
+  ansible.builtin.command: >-
+    mongosh --quiet localhost:{{ mongodb_upgrade_wait_port }}
+    -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+    --authenticationDatabase admin
+    --eval "print(rs.status().myState)"
+  register: mongodb_upgrade_member_state
+  until: (mongodb_upgrade_member_state.stdout | default('') | trim | int(-1)) in mongodb_upgrade_wait_states
+  retries: 30
+  delay: 10
+  changed_when: false
+  no_log: true

@@ -1,0 +1,16 @@
+---
+# Secrets for the MongoDB cluster. Encrypt this file before using it, or
+# before committing real values:
+#
+#   ansible-vault encrypt group_vars/all/vault.yml
+#
+# Generate a real cluster keyfile with:
+#
+#   openssl rand -base64 756
+#
+# The values below are placeholders for this example only - do not use them
+# as-is.
+
+vault_mongo_admin_password: CHANGE_ME_1234!
+vault_mongodb_keyfile_content: |
+  CHANGE_ME_REPLACE_WITH_THE_OUTPUT_OF_openssl_rand_-base64_756

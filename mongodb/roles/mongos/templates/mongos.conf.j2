@@ -1,23 +1,18 @@
-#where to log
-logpath=/var/log/mongo/mongos.log
+systemLog:
+  destination: file
+  path: {{ mongodb_log_dir }}/mongos.log
+  logAppend: true
 
-logappend=true
+net:
+  port: {{ mongos_port }}
+  bindIp: 0.0.0.0
 
-# fork and run in background
-fork = true
+processManagement:
+  fork: true
+  pidFilePath: /var/run/mongodb/mongos.pid
 
-port = {{ mongos_port }}
-{% set hosts = '' %}
- {% for host in groups['mongoc_servers'] %}
-   {% if loop.last %}
-      {% set hosts = hosts + host + ':' ~ mongoc_port  %}
-       configdb = {{ hosts }}
-      {% else %}
-        {% set hosts = hosts + host + ':' ~ mongoc_port + ','  %}
-   {% endif %}
- {% endfor %}
+security:
+  keyFile: {{ mongodb_keyfile_path }}
 
-# location of pidfile
-pidfilepath = /var/run/mongodb/mongos.pid
-keyFile={{ mongodb_datadir_prefix }}/secret
-chunkSize={{ mongos_chunk_size }}
+sharding:
+  configDB: "{{ mongoc_replica_set_name }}/{{ groups['mongoc_servers'] | map('regex_replace', '^(.*)$', '\\1:' + (mongoc_port | string)) | join(',') }}"

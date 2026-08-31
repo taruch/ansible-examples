@@ -1,22 +1,70 @@
 ---
-# This Playbook would deploy the whole mongodb cluster with replication and sharding.
+# Deploys a sharded MongoDB cluster: a config server replica set (mongoc),
+# one shard replica set (mongod), and mongos query routers.
+#
+# Prerequisites:
+#   ansible-galaxy collection install -r collections/requirements.yml
+#   ansible-vault encrypt group_vars/all/vault.yml   # after setting real secrets
+#
+# Usage:
+#   ansible-playbook -i hosts site.yml --ask-vault-pass
 
-- hosts: all
+- name: Common MongoDB host prerequisites
+  hosts: all
+  become: true
   roles:
-  - role: common
+    - role: common
 
-- hosts: mongo_servers
+- name: Deploy the config server replica set
+  hosts: mongoc_servers
+  become: true
   roles:
-  - role: mongod
+    - role: mongoc
 
-- hosts: mongoc_servers
+- name: Deploy the shard replica set
+  hosts: mongo_servers
+  become: true
   roles:
-  - role: mongoc
+    - role: mongod
 
-- hosts: mongos_servers
+- name: Deploy the mongos query routers
+  hosts: mongos_servers
+  become: true
   roles:
-  - role: mongos
+    - role: mongos
 
-- hosts: mongo_servers
+- name: Bootstrap cluster authentication and register the shard
+  hosts: mongos_servers[0]
+  become: true
   tasks:
-  - include: roles/mongod/tasks/shards.yml
+    - name: Wait for the mongos router to accept connections
+      ansible.builtin.wait_for:
+        host: "{{ inventory_hostname }}"
+        port: "{{ mongos_port }}"
+        timeout: 60
+
+    - name: Create the cluster admin user (uses the MongoDB localhost exception)
+      community.mongodb.mongodb_user:
+        login_host: localhost
+        login_port: "{{ mongos_port }}"
+        database: admin
+        name: "{{ mongo_admin_user }}"
+        password: "{{ mongo_admin_password }}"
+        roles:
+          - root
+        state: present
+      no_log: true
+
+    - name: Build the list of shard replica set members
+      ansible.builtin.set_fact:
+        mongod_shard_members: "{{ groups['mongo_servers'] | map('regex_replace', '^(.*)$', '\\1:' + (mongod_port | string)) | list }}"
+
+    - name: Add the shard replica set to the cluster
+      community.mongodb.mongodb_shard:
+        login_host: localhost
+        login_port: "{{ mongos_port }}"
+        login_user: "{{ mongo_admin_user }}"
+        login_password: "{{ mongo_admin_password }}"
+        shard: "{{ mongod_replica_set_name }}/{{ mongod_shard_members | join(',') }}"
+        state: present
+      no_log: true

@@ -1,23 +1,33 @@
 ---
-#This Playbook configures the mongos service of mongodb
+# Deploys a mongos query router that talks to the config server replica set.
 
-- name: Create the mongos startup file
-  template: src=mongos.j2 dest=/etc/init.d/mongos mode=0655
+- name: Deploy the mongos configuration file
+  ansible.builtin.template:
+    src: mongos.conf.j2
+    dest: /etc/mongos.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mongos
 
+- name: Deploy the systemd unit for mongos
+  ansible.builtin.template:
+    src: mongos.service.j2
+    dest: /etc/systemd/system/mongos.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mongos
 
-- name: Create the mongos configuration file
-  template: src=mongos.conf.j2 dest=/etc/mongos.conf
+- name: Start and enable the mongos service
+  ansible.builtin.systemd:
+    name: mongos
+    daemon_reload: true
+    state: started
+    enabled: true
 
-- name: Copy the keyfile for authentication
-  copy: src=roles/mongod/files/secret dest={{ mongodb_datadir_prefix }}/secret owner=mongod group=mongod mode=0400
-
-- name: Start the mongos service
-  command: creates=/var/lock/subsys/mongos /etc/init.d/mongos start
-- name: pause
-  pause: seconds=20
-
-- name: copy the file for shard test
-  template: src=testsharding.j2 dest=/tmp/testsharding.js
-
-- name: copy the file enable  sharding
-  template: src=enablesharding.j2 dest=/tmp/enablesharding.js
+- name: Wait for mongos to accept connections
+  ansible.builtin.wait_for:
+    host: "{{ inventory_hostname }}"
+    port: "{{ mongos_port }}"
+    timeout: 60

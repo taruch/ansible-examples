@@ -1,0 +1,6 @@
+---
+- name: Restart mongod-configsvr
+  ansible.builtin.systemd:
+    name: mongod-configsvr
+    daemon_reload: true
+    state: restarted

@@ -1,0 +1,33 @@
+---
+# Upgrades the MongoDB packages on a single node from mongodb_version to
+# mongodb_upgrade_version. Does not restart any service - the caller decides
+# when it's safe to bounce this node (secondary first, primary last, etc.).
+#
+# Expects: mongodb_version (current), mongodb_upgrade_version (target).
+
+- name: "Point the MongoDB package repo at version {{ mongodb_upgrade_version }}"
+  ansible.builtin.yum_repository:
+    name: "mongodb-org-{{ mongodb_upgrade_version }}"
+    description: "MongoDB {{ mongodb_upgrade_version }} Repository"
+    baseurl: "https://repo.mongodb.org/yum/redhat/{{ ansible_distribution_major_version }}/mongodb-org/{{ mongodb_upgrade_version }}/x86_64/"
+    gpgcheck: true
+    enabled: true
+    gpgkey: "https://pgp.mongodb.com/server-{{ mongodb_upgrade_version }}.asc"
+
+- name: "Disable the previous mongodb-org repo, version {{ mongodb_version }}"
+  ansible.builtin.yum_repository:
+    name: "mongodb-org-{{ mongodb_version }}"
+    description: "MongoDB {{ mongodb_version }} Repository"
+    baseurl: "https://repo.mongodb.org/yum/redhat/{{ ansible_distribution_major_version }}/mongodb-org/{{ mongodb_version }}/x86_64/"
+    gpgcheck: true
+    enabled: false
+    gpgkey: "https://pgp.mongodb.com/server-{{ mongodb_version }}.asc"
+
+# The target repo only ever contains one major.minor stream, so "latest"
+# here means "latest patch of mongodb_upgrade_version" - exactly what an
+# upgrade needs, not an unpinned/floating install.
+- name: "Upgrade the MongoDB packages, target version {{ mongodb_upgrade_version }}"  # noqa: package-latest
+  ansible.builtin.dnf:
+    name: mongodb-org
+    state: latest
+    update_cache: true

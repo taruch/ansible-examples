@@ -1,42 +1,57 @@
 ---
-# This role deploys the mongod processes and sets up the replication set.
+# Deploys one member of the shard replica set (mongod_replica_set_name).
 
-- name: create data directory for mongodb
-  file: path={{ mongodb_datadir_prefix }}/mongo-{{ inventory_hostname }} state=directory owner=mongod group=mongod
-  delegate_to: '{{ item }}'
-  with_items: groups.replication_servers
+- name: Create the data directory for this shard member
+  ansible.builtin.file:
+    path: "{{ mongodb_data_dir }}/{{ mongod_replica_set_name }}"
+    state: directory
+    owner: mongod
+    group: mongod
+    mode: "0755"
 
-- name: create log directory for mongodb
-  file: path=/var/log/mongo state=directory owner=mongod group=mongod
+- name: Deploy the mongod configuration file for the shard member
+  ansible.builtin.template:
+    src: mongod-shard.conf.j2
+    dest: /etc/mongod-shard.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mongod-shard
 
-- name: create run directory for mongodb
-  file: path=/var/run/mongo state=directory owner=mongod group=mongod
+- name: Deploy the systemd unit for the shard mongod instance
+  ansible.builtin.template:
+    src: mongod-shard.service.j2
+    dest: /etc/systemd/system/mongod-shard.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mongod-shard
 
-- name: Create the mongodb startup file
-  template: src=mongod.j2 dest=/etc/init.d/mongod-{{ inventory_hostname }} mode=0655
-  delegate_to: '{{ item }}'
-  with_items: groups.replication_servers
+- name: Start and enable the shard mongod service
+  ansible.builtin.systemd:
+    name: mongod-shard
+    daemon_reload: true
+    state: started
+    enabled: true
 
+- name: Wait for the shard mongod instance to accept connections
+  ansible.builtin.wait_for:
+    host: "{{ inventory_hostname }}"
+    port: "{{ mongod_port }}"
+    timeout: 60
 
-- name: Create the mongodb configuration file
-  template: src=mongod.conf.j2 dest=/etc/mongod-{{ inventory_hostname }}.conf
-  delegate_to: '{{ item }}'
-  with_items: groups.replication_servers
+- name: Build the list of shard replica set members
+  ansible.builtin.set_fact:
+    mongod_replicaset_members: "{{ groups['mongo_servers'] | map('regex_replace', '^(.*)$', '\\1:' + (mongod_port | string)) | list }}"
+  delegate_to: "{{ groups['mongo_servers'][0] }}"
+  delegate_facts: true
+  run_once: true
 
-- name: Copy the keyfile for authentication
-  copy: src=secret dest={{ mongodb_datadir_prefix }}/secret owner=mongod group=mongod mode=0400
-
-
-- name: Start the mongodb service
-  command: creates=/var/lock/subsys/mongod-{{ inventory_hostname }} /etc/init.d/mongod-{{ inventory_hostname }} start
-  delegate_to: '{{ item }}'
-  with_items: groups.replication_servers
-
-- name: Create the file to initialize the mongod replica set
-  template: src=repset_init.j2 dest=/tmp/repset_init.js
-
-- name: Pause for a while
-  pause: seconds=20
-
-- name: Initialize the replication set
-  shell: /usr/bin/mongo --port "{{ mongod_port }}" /tmp/repset_init.js
+- name: Initiate the shard replica set
+  community.mongodb.mongodb_replicaset:
+    login_host: "{{ groups['mongo_servers'][0] }}"
+    login_port: "{{ mongod_port }}"
+    replica_set: "{{ mongod_replica_set_name }}"
+    members: "{{ hostvars[groups['mongo_servers'][0]].mongod_replicaset_members }}"
+  delegate_to: "{{ groups['mongo_servers'][0] }}"
+  run_once: true

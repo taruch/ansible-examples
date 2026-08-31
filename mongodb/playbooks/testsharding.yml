@@ -1,17 +1,57 @@
 ---
-# The playbook creates a new database test and populates data in the database to test the sharding.
+# Creates a test database/collection via a mongos router, populates it with
+# sample data, and enables sharding so you can verify the cluster works.
+#
+# Usage:
+#   ansible-playbook -i hosts playbooks/testsharding.yml -e mongos_target=mongo1 --ask-vault-pass
 
-- hosts: $servername
-  remote_user: root
+- name: Exercise sharding on the MongoDB cluster
+  hosts: "{{ mongos_target }}"
+  become: true
   tasks:
-   - name: Create a new database and user
-     mongodb_user: login_user=admin login_password=${mongo_admin_pass} login_port=${mongos_port} database=test user=admin password=${mongo_admin_pass} state=present
+    - name: Create the test database user
+      community.mongodb.mongodb_user:
+        login_host: localhost
+        login_port: "{{ mongos_port }}"
+        login_user: "{{ mongo_admin_user }}"
+        login_password: "{{ mongo_admin_password }}"
+        database: "{{ mongo_test_database }}"
+        name: "{{ mongo_admin_user }}"
+        password: "{{ mongo_admin_password }}"
+        roles:
+          - readWrite
+        state: present
+      no_log: true
 
-   - name: Pause for the user to get created and replicated
-     pause: minutes=3
+    - name: Deploy the collection population script
+      ansible.builtin.template:
+        src: ../roles/mongos/templates/testsharding.j2
+        dest: /tmp/testsharding.js
+        mode: "0600"
 
-   - name: Execute the collection creation script
-     command: /usr/bin/mongo localhost:${mongos_port}/test -u admin -p ${mongo_admin_pass} /tmp/testsharding.js
+    - name: Deploy the enable-sharding script
+      ansible.builtin.template:
+        src: ../roles/mongos/templates/enablesharding.j2
+        dest: /tmp/enablesharding.js
+        mode: "0600"
 
-   - name: Enable sharding on the database and collection
-     command: /usr/bin/mongo localhost:${mongos_port}/admin -u admin -p ${mongo_admin_pass} /tmp/enablesharding.js
+    # mongosh only accepts the password on argv; it will be visible in the
+    # process list for the (brief) life of the command. Fine for this example,
+    # not recommended for a real production cluster.
+    - name: Populate the test collection with sample data
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongos_port }}/{{ mongo_test_database }}
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase {{ mongo_test_database }}
+        /tmp/testsharding.js
+      changed_when: true
+      no_log: true
+
+    - name: Enable sharding on the test database and collection
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongos_port }}/admin
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        /tmp/enablesharding.js
+      changed_when: true
+      no_log: true

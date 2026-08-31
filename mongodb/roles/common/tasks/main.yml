@@ -1,36 +1,94 @@
 ---
-# This Playbook runs all the common plays in the deployment
+# Shared prerequisites for every MongoDB cluster node: package repo,
+# packages, service account, directories, cluster keyfile, and firewall.
 
 - name: Create the hosts file for all machines
-  template: src=hosts.j2 dest=/etc/hosts
+  ansible.builtin.template:
+    src: hosts.j2
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: "0644"
 
-- name: Create the repository for 10Gen
-  copy: src=10gen.repo.j2 dest=/etc/yum.repos.d/10gen.repo
+- name: Add the MongoDB package repository, version {{ mongodb_version }}
+  ansible.builtin.yum_repository:
+    name: "mongodb-org-{{ mongodb_version }}"
+    description: "MongoDB {{ mongodb_version }} Repository"
+    baseurl: "https://repo.mongodb.org/yum/redhat/{{ ansible_distribution_major_version }}/mongodb-org/{{ mongodb_version }}/x86_64/"
+    gpgcheck: true
+    enabled: true
+    gpgkey: "https://pgp.mongodb.com/server-{{ mongodb_version }}.asc"
 
-- name: Create the EPEL Repository.
-  copy: src=epel.repo.j2 dest=/etc/yum.repos.d/epel.repo
+- name: Install the MongoDB packages
+  ansible.builtin.dnf:
+    name: mongodb-org
+    state: present
 
-- name: Create the GPG key for EPEL
-  copy: src=RPM-GPG-KEY-EPEL-6 dest=/etc/pki/rpm-gpg
+- name: Install pymongo for the community.mongodb modules
+  ansible.builtin.pip:
+    name: pymongo
+    state: present
 
-- name: Create the mongod user
-  user: name=mongod comment="MongoD"
+- name: Create the mongod service account
+  ansible.builtin.user:
+    name: mongod
+    comment: MongoDB
+    system: true
+    shell: /sbin/nologin
+    create_home: false
 
-- name: Create the data directory for the namenode metadata
-  file: path={{ mongodb_datadir_prefix }} owner=mongod group=mongod state=directory
+- name: Create the MongoDB data directory
+  ansible.builtin.file:
+    path: "{{ mongodb_data_dir }}"
+    state: directory
+    owner: mongod
+    group: mongod
+    mode: "0755"
 
-- name: Install the mongodb package
-  yum: name={{ item }} state=installed
-  with_items:
-   - libselinux-python
-   - mongo-10gen
-   - mongo-10gen-server
-   - bc
-   - python-pip
+- name: Create the MongoDB log directory
+  ansible.builtin.file:
+    path: "{{ mongodb_log_dir }}"
+    state: directory
+    owner: mongod
+    group: mongod
+    mode: "0755"
 
-- name: Install the latest pymongo package
-  pip: name=pymongo state=latest use_mirrors=no
+- name: Deploy the cluster keyfile for internal authentication
+  ansible.builtin.copy:
+    content: "{{ mongodb_keyfile_content }}"
+    dest: "{{ mongodb_keyfile_path }}"
+    owner: mongod
+    group: mongod
+    mode: "0400"
+  no_log: true
 
-- name: Create the iptables file
-  template: src=iptables.j2 dest=/etc/sysconfig/iptables
-  notify: restart iptables
+- name: Restore SELinux context on the MongoDB data directory
+  ansible.builtin.command: "restorecon -R {{ mongodb_data_dir }}"
+  when: ansible_selinux is defined and ansible_selinux.status == "enabled"
+  changed_when: false
+
+- name: Ensure firewalld is running
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  when: mongodb_manage_firewall | bool
+
+- name: Determine the firewall ports required by this host's role(s)
+  ansible.builtin.set_fact:
+    mongodb_host_ports: >-
+      {{
+        ([mongod_port] if 'mongo_servers' in group_names else [])
+        + ([mongoc_port] if 'mongoc_servers' in group_names else [])
+        + ([mongos_port] if 'mongos_servers' in group_names else [])
+      }}
+  when: mongodb_manage_firewall | bool
+
+- name: Open the required firewalld ports
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ mongodb_host_ports }}"
+  when: mongodb_manage_firewall | bool

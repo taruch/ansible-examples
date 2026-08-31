@@ -1,0 +1,24 @@
+storage:
+  dbPath: {{ mongodb_data_dir }}/{{ mongod_replica_set_name }}
+  journal:
+    enabled: true
+
+systemLog:
+  destination: file
+  path: {{ mongodb_log_dir }}/mongod-shard.log
+  logAppend: true
+
+net:
+  port: {{ mongod_port }}
+  bindIp: 0.0.0.0
+
+processManagement:
+  fork: true
+  pidFilePath: /var/run/mongodb/mongod-shard.pid
+
+security:
+  keyFile: {{ mongodb_keyfile_path }}
+  authorization: enabled
+
+replication:
+  replSetName: {{ mongod_replica_set_name }}

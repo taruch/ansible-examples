@@ -1,0 +1,27 @@
+storage:
+  dbPath: {{ mongodb_data_dir }}/configdb
+  journal:
+    enabled: true
+
+systemLog:
+  destination: file
+  path: {{ mongodb_log_dir }}/mongod-configsvr.log
+  logAppend: true
+
+net:
+  port: {{ mongoc_port }}
+  bindIp: 0.0.0.0
+
+processManagement:
+  fork: true
+  pidFilePath: /var/run/mongodb/mongod-configsvr.pid
+
+security:
+  keyFile: {{ mongodb_keyfile_path }}
+  authorization: enabled
+
+replication:
+  replSetName: {{ mongoc_replica_set_name }}
+
+sharding:
+  clusterRole: configsvr

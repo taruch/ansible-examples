@@ -1,0 +1,25 @@
+[Unit]
+Description=MongoDB shard cluster query router (mongos)
+Documentation=https://www.mongodb.com/docs/manual/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mongod
+Group=mongod
+RuntimeDirectory=mongodb
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/mongos --config /etc/mongos.conf
+Type=forking
+PIDFile=/var/run/mongodb/mongos.pid
+LimitFSIZE=infinity
+LimitCPU=infinity
+LimitAS=infinity
+LimitNOFILE=64000
+LimitNPROC=64000
+LimitMEMLOCK=infinity
+TasksMax=infinity
+TasksAccounting=false
+
+[Install]
+WantedBy=multi-user.target

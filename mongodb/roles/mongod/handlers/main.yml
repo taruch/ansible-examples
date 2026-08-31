@@ -1,0 +1,6 @@
+---
+- name: Restart mongod-shard
+  ansible.builtin.systemd:
+    name: mongod-shard
+    daemon_reload: true
+    state: restarted

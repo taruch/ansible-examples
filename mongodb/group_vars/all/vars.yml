@@ -1,0 +1,28 @@
+---
+# Global variables for the MongoDB sharded cluster example.
+# Secrets (admin password, cluster keyfile) live in vault.yml - see its header.
+
+mongodb_version: "7.0"
+mongodb_data_dir: /var/lib/mongo
+mongodb_log_dir: /var/log/mongodb
+mongodb_keyfile_path: /etc/mongodb-keyfile
+
+# Standard MongoDB sharded-cluster port conventions.
+mongod_port: 27018
+mongoc_port: 27019
+mongos_port: 27017
+
+mongod_replica_set_name: shard01
+mongoc_replica_set_name: configReplSet
+
+mongos_chunk_size: 1
+
+mongo_admin_user: admin
+mongo_test_database: test
+mongo_test_collection: test_collection
+
+# Set to false if firewalld isn't used/managed on your hosts.
+mongodb_manage_firewall: true
+
+mongo_admin_password: "{{ vault_mongo_admin_password }}"
+mongodb_keyfile_content: "{{ vault_mongodb_keyfile_content }}"

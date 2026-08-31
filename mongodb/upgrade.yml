@@ -1,0 +1,327 @@
+---
+# Performs a rolling major-version upgrade of the sharded MongoDB cluster
+# deployed by site.yml, keeping the cluster available throughout.
+#
+# Follows MongoDB's documented sharded-cluster upgrade order:
+#   1. Disable the balancer.
+#   2. Upgrade the config server replica set: secondaries first, then step
+#      down and upgrade the primary.
+#   3. Upgrade each shard replica set the same way (this example has one
+#      shard, mongo_servers; a multi-shard cluster would repeat this play
+#      per shard group).
+#   4. Upgrade the mongos routers one at a time.
+#   5. Bump featureCompatibilityVersion cluster-wide (via a single mongos;
+#      it propagates to the shards and config servers automatically).
+#   6. Re-enable the balancer.
+#
+# Only one major version at a time is supported (e.g. 7.0 -> 8.0), matching
+# MongoDB's own upgrade constraints - this playbook enforces that.
+#
+# Usage:
+#   ansible-playbook -i hosts upgrade.yml -e mongodb_upgrade_version=8.0 --ask-vault-pass
+#
+# Before running against a real cluster: read MongoDB's release notes for the
+# target version for breaking changes, and take a backup.
+
+- name: Preflight checks for the MongoDB major version upgrade
+  hosts: mongos_servers[0]
+  become: true
+  tasks:
+    - name: Ensure a target upgrade version was provided
+      ansible.builtin.assert:
+        that:
+          - mongodb_upgrade_version is defined
+        fail_msg: >-
+          Set -e mongodb_upgrade_version=<next major version> (e.g. 8.0) when
+          running this playbook.
+
+    - name: Ensure the upgrade path is exactly one major version ahead
+      ansible.builtin.assert:
+        that:
+          - (mongodb_upgrade_version.split('.')[0] | int) - (mongodb_version.split('.')[0] | int) == 1
+        fail_msg: >-
+          MongoDB only supports upgrading one major version at a time.
+          Cannot go from {{ mongodb_version }} directly to
+          {{ mongodb_upgrade_version }}.
+
+    - name: Check the cluster's current featureCompatibilityVersion
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongos_port }}/admin
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "print(db.adminCommand({ getParameter: 1, featureCompatibilityVersion: 1 }).featureCompatibilityVersion.version)"
+      register: mongodb_current_fcv
+      changed_when: false
+      no_log: true
+
+    - name: Confirm the cluster's FCV matches the currently deployed version
+      ansible.builtin.assert:
+        that:
+          - (mongodb_current_fcv.stdout | trim) == mongodb_version
+        fail_msg: >-
+          featureCompatibilityVersion is {{ mongodb_current_fcv.stdout | trim }},
+          expected {{ mongodb_version }}. Resolve this before upgrading further.
+
+- name: Disable the balancer before upgrading
+  hosts: mongos_servers[0]
+  become: true
+  tasks:
+    - name: Stop the balancer
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongos_port }}/admin
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "sh.stopBalancer()"
+      changed_when: true
+      no_log: true
+
+# ---------------------------------------------------------------------------
+# Config server replica set (CSRS)
+# ---------------------------------------------------------------------------
+
+- name: Determine the current config server replica set primary
+  hosts: mongoc_servers[0]
+  become: true
+  tasks:
+    - name: Query the current primary
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongoc_port }}
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "print(rs.hello().primary)"
+      register: mongoc_primary_result
+      changed_when: false
+      no_log: true
+
+    - name: Record the primary's inventory hostname
+      ansible.builtin.set_fact:
+        mongoc_primary_host: "{{ (mongoc_primary_result.stdout | trim).split(':')[0] }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+- name: Rolling upgrade of config server secondaries
+  hosts: mongoc_servers
+  become: true
+  serial: 1
+  tasks:
+    - name: Skip the current primary in this pass
+      ansible.builtin.meta: end_host
+      when: inventory_hostname == hostvars['localhost'].mongoc_primary_host
+
+    - name: Upgrade the MongoDB packages
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+
+    - name: Restart the config server mongod service
+      ansible.builtin.systemd:
+        name: mongod-configsvr
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for this member to rejoin as a healthy replica set member
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+        tasks_from: wait_for_member_state
+      vars:
+        mongodb_upgrade_wait_port: "{{ mongoc_port }}"
+        mongodb_upgrade_wait_states: [1, 2]
+
+- name: Step down and upgrade the config server primary
+  hosts: "{{ hostvars['localhost'].mongoc_primary_host }}"
+  become: true
+  tasks:
+    - name: Step down as primary so an already-upgraded secondary is elected
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongoc_port }}
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "rs.stepDown(120)"
+      changed_when: true
+      no_log: true
+      # rs.stepDown() drops the connection that issued it - a non-zero rc
+      # here is expected, not an error.
+      failed_when: false
+
+    - name: Pause for a new primary to be elected
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Upgrade the MongoDB packages on the former primary
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+
+    - name: Restart the config server mongod service
+      ansible.builtin.systemd:
+        name: mongod-configsvr
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for this member to rejoin as a healthy replica set member
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+        tasks_from: wait_for_member_state
+      vars:
+        mongodb_upgrade_wait_port: "{{ mongoc_port }}"
+        mongodb_upgrade_wait_states: [1, 2]
+
+# ---------------------------------------------------------------------------
+# Shard replica set (mongo_servers). A multi-shard cluster would repeat this
+# section once per shard replica set group.
+# ---------------------------------------------------------------------------
+
+- name: Determine the current shard replica set primary
+  hosts: mongo_servers[0]
+  become: true
+  tasks:
+    - name: Query the current primary
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongod_port }}
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "print(rs.hello().primary)"
+      register: mongod_primary_result
+      changed_when: false
+      no_log: true
+
+    - name: Record the primary's inventory hostname
+      ansible.builtin.set_fact:
+        mongod_primary_host: "{{ (mongod_primary_result.stdout | trim).split(':')[0] }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+- name: Rolling upgrade of shard replica set secondaries
+  hosts: mongo_servers
+  become: true
+  serial: 1
+  tasks:
+    - name: Skip the current primary in this pass
+      ansible.builtin.meta: end_host
+      when: inventory_hostname == hostvars['localhost'].mongod_primary_host
+
+    - name: Upgrade the MongoDB packages
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+
+    - name: Restart the shard mongod service
+      ansible.builtin.systemd:
+        name: mongod-shard
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for this member to rejoin as a healthy replica set member
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+        tasks_from: wait_for_member_state
+      vars:
+        mongodb_upgrade_wait_port: "{{ mongod_port }}"
+        mongodb_upgrade_wait_states: [1, 2]
+
+- name: Step down and upgrade the shard replica set primary
+  hosts: "{{ hostvars['localhost'].mongod_primary_host }}"
+  become: true
+  tasks:
+    - name: Step down as primary so an already-upgraded secondary is elected
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongod_port }}
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "rs.stepDown(120)"
+      changed_when: true
+      no_log: true
+      failed_when: false
+
+    - name: Pause for a new primary to be elected
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Upgrade the MongoDB packages on the former primary
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+
+    - name: Restart the shard mongod service
+      ansible.builtin.systemd:
+        name: mongod-shard
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for this member to rejoin as a healthy replica set member
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+        tasks_from: wait_for_member_state
+      vars:
+        mongodb_upgrade_wait_port: "{{ mongod_port }}"
+        mongodb_upgrade_wait_states: [1, 2]
+
+# ---------------------------------------------------------------------------
+# mongos query routers - stateless, so upgrade one at a time and just
+# verify each comes back before moving to the next.
+# ---------------------------------------------------------------------------
+
+- name: Rolling upgrade of the mongos query routers
+  hosts: mongos_servers
+  become: true
+  serial: 1
+  tasks:
+    - name: Upgrade the MongoDB packages
+      ansible.builtin.include_role:
+        name: mongodb_upgrade
+
+    - name: Restart the mongos service
+      ansible.builtin.systemd:
+        name: mongos
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for mongos to accept connections
+      ansible.builtin.wait_for:
+        host: "{{ inventory_hostname }}"
+        port: "{{ mongos_port }}"
+        timeout: 60
+
+    - name: Confirm mongos responds to a ping
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongos_port }}/admin
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "print(db.runCommand({ ping: 1 }).ok)"
+      register: mongos_ping_result
+      until: (mongos_ping_result.stdout | default('') | trim) == "1"
+      retries: 10
+      delay: 5
+      changed_when: false
+      no_log: true
+
+# ---------------------------------------------------------------------------
+# Finalize: bump FCV cluster-wide, then re-enable the balancer.
+# ---------------------------------------------------------------------------
+
+- name: Bump featureCompatibilityVersion and re-enable the balancer
+  hosts: mongos_servers[0]
+  become: true
+  tasks:
+    - name: Set featureCompatibilityVersion for the whole cluster
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongos_port }}/admin
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "db.adminCommand({ setFeatureCompatibilityVersion: '{{ mongodb_upgrade_version }}', confirm: true })"
+      changed_when: true
+      no_log: true
+
+    - name: Re-enable the balancer
+      ansible.builtin.command: >-
+        mongosh --quiet localhost:{{ mongos_port }}/admin
+        -u {{ mongo_admin_user }} -p {{ mongo_admin_password }}
+        --authenticationDatabase admin
+        --eval "sh.startBalancer()"
+      changed_when: true
+      no_log: true
+
+    - name: Remind the operator to update the baseline version variable
+      ansible.builtin.debug:
+        msg: >-
+          Cluster is now running MongoDB {{ mongodb_upgrade_version }} with
+          featureCompatibilityVersion {{ mongodb_upgrade_version }}. Update
+          mongodb_version in group_vars/all/vars.yml to
+          "{{ mongodb_upgrade_version }}" so future site.yml runs (e.g.
+          adding a new node) provision the correct version.

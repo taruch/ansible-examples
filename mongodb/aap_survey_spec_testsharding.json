@@ -1,0 +1,18 @@
+{
+  "name": "MongoDB Test Sharding Survey",
+  "description": "Choose which mongos router to run the sharding smoke test through",
+  "spec": [
+    {
+      "question_name": "Mongos Target Host",
+      "question_description": "Inventory hostname of a mongos_servers member to connect through. Edit the choices below to match your real inventory if it differs from mongo1/mongo2.",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "mongos_target",
+      "min": 0,
+      "max": 1024,
+      "default": "mongo1",
+      "choices": "mongo1\nmongo2",
+      "new_question": true
+    }
+  ]
+}
