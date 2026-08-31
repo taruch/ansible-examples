@@ -14,6 +14,37 @@ This document focuses on **host deduplication**: why it matters and the
 concrete scenarios `metrics-utility` (and the Controller data model it reads
 from) is designed to handle.
 
+## Table of Contents
+
+- [Why Host Deduplication Matters](#why-host-deduplication-matters)
+- [Does AAP Itself Deduplicate? (Native Compliance vs. `metrics-utility`)](#does-aap-itself-deduplicate-native-compliance-vs-metrics-utility)
+- [Core Deduplication Use Cases](#core-deduplication-use-cases)
+  - [1. Same host automated repeatedly within a billing cycle](#1-same-host-automated-repeatedly-within-a-billing-cycle)
+  - [2. Same host referenced by multiple values (IP vs. hostname vs. FQDN)](#2-same-host-referenced-by-multiple-values-ip-vs-hostname-vs-fqdn)
+  - [3. Same host present in multiple inventories or organizations](#3-same-host-present-in-multiple-inventories-or-organizations)
+  - [4. Directly vs. indirectly managed nodes](#4-directly-vs-indirectly-managed-nodes)
+  - [5. API / control-plane automation collapsing to `localhost`](#5-api--control-plane-automation-collapsing-to-localhost)
+  - [6. Soft-deleted and reinstated hosts (Host Metrics dashboard)](#6-soft-deleted-and-reinstated-hosts-host-metrics-dashboard)
+  - [7. Accurate CCSP / subscription compliance and renewal reporting](#7-accurate-ccsp--subscription-compliance-and-renewal-reporting)
+  - [8. Hardware-identity-based deduplication (`ansible_product_serial` / `ansible_machine_id`)](#8-hardware-identity-based-deduplication-ansible_product_serial--ansible_machine_id)
+    - [How to Populate Hardware Facts for Dedup (Without Touching Other Job Templates)](#how-to-populate-hardware-facts-for-dedup-without-touching-other-job-templates)
+- [Summary](#summary)
+- [How-To: Discrete Node Count Over Time for a Renewal Conversation](#how-to-discrete-node-count-over-time-for-a-renewal-conversation)
+  - [Variant: Containerized Deployment (podman/docker-compose install)](#variant-containerized-deployment-podmandocker-compose-install)
+  - [Variant: OpenShift / Operator-based Deployment](#variant-openshift--operator-based-deployment)
+- [What Exactly Gets Deduplicated for RENEWAL_GUIDANCE (and How to Test It)](#what-exactly-gets-deduplicated-for-renewal_guidance-and-how-to-test-it)
+  - [`renewal` (default)](#renewal-default)
+  - [`renewal-hostname`](#renewal-hostname)
+  - [`renewal-experimental` — confirmed bug on multi-hop mixed-key chains](#renewal-experimental--confirmed-bug-on-multi-hop-mixed-key-chains)
+  - [How to test this yourself (or re-test after an AAP upgrade)](#how-to-test-this-yourself-or-re-test-after-an-aap-upgrade)
+- [Where the Dedup Keys Actually Come From (and a Prerequisite Nobody Documents)](#where-the-dedup-keys-actually-come-from-and-a-prerequisite-nobody-documents)
+  - [The prerequisite: "Use Fact Cache" must be enabled somewhere](#the-prerequisite-use-fact-cache-must-be-enabled-somewhere)
+  - [Quick check: is fact caching even in use in your environment?](#quick-check-is-fact-caching-even-in-use-in-your-environment)
+  - [Direct SQL check for a specific host](#direct-sql-check-for-a-specific-host)
+- [Practical Guidance](#practical-guidance)
+- [Sources](#sources)
+- [Notes / Caveats](#notes--caveats)
+
 ## Why Host Deduplication Matters
 
 Red Hat's managed-node billing model counts **unique hosts automated during
@@ -30,6 +61,67 @@ host identity, `metrics-utility`'s reports and the Controller data it reads
 from (`main_host`, `main_jobhostsummary`, `main_indirectmanagednodeaudit`)
 need to collapse redundant references before numbers are trusted for
 billing or compliance.
+
+## Does AAP Itself Deduplicate? (Native Compliance vs. `metrics-utility`)
+
+Before treating anything below as "how AAP counts hosts," it's important
+to separate two things: what **AAP's own live subscription compliance
+number** does, versus what `metrics-utility`'s optional `RENEWAL_GUIDANCE`
+report does on top of that data. Traced directly from a full local
+checkout of the `ansible/awx` `devel` branch — not just individual file
+fetches — since this needed cross-referencing several files at once.
+
+**The actual number AAP uses to validate license compliance:**
+```python
+# awx/main/utils/licensing.py:503
+automated_instances = HostMetric.active_objects.count()
+```
+A flat `COUNT(*)` of non-deleted rows in `main_hostmetric`, compared
+directly against license capacity. This is the real, live "Hosts
+automated" figure — not a `metrics-utility` computation.
+
+**The only normalization applied before a hostname is ever written to
+that table:**
+```python
+# awx/main/models/events.py:583-584 -- inside per-job-event host processing
+if not bool(summary.dark):
+    updated_hosts_list.append(host.lower())
+```
+Confirmed: **AAP lowercases the hostname before writing to `HostMetric`.**
+If the same Controller automates `WEB05` in one run and `web05` in
+another, both collapse to a single `HostMetric` row (`hostname='web05'`)
+and count as **one** host natively. This is, notably, *more*
+case-handling than `metrics-utility`'s own `RENEWAL_GUIDANCE` dedup code
+performs (confirmed case-sensitive earlier in this document) — it just
+doesn't matter downstream, since metrics-utility only ever reads whatever
+string Controller already wrote.
+
+**Everything else is confirmed absent** at the native compliance layer:
+- **No IP/hostname/FQDN collapsing.** `10.0.0.5` and `web05.example.com`
+  for the same physical box create two separate `HostMetric` rows and
+  both count toward the license, permanently, unless someone manually
+  soft-deletes one via the Host Metrics dashboard.
+- **No `ansible_host` awareness** anywhere in this write path — it
+  operates purely on the literal `host` string from each job's per-host
+  event data.
+- **No hardware-identity matching at all.** `HostMetric` has no
+  `ansible_product_serial`/`ansible_machine_id` columns (confirmed
+  against the model). Those facts are used **exclusively** by
+  `metrics-utility`'s optional `RENEWAL_GUIDANCE` report — they play
+  **zero role** in AAP's actual subscription compliance number or its
+  native Host Metrics dashboard.
+
+**Bottom line:** every dedup use case documented below — IP/hostname/FQDN
+consolidation, hardware-identity matching, everything in use cases #2 and
+#8 — is something `metrics-utility` does (or attempts) *on top of* raw,
+largely undeduplicated AAP data. None of it feeds back into or changes
+what AAP itself reports as consumed against your license. If you want
+AAP's own number to go down, the only native lever is manually
+soft-deleting hosts via the Host Metrics dashboard (use case #6) —
+running `metrics-utility` reports has no effect on the platform's live
+compliance figure, only on the analysis you build from it.
+
+(Sources: [`awx/main/utils/licensing.py`](https://github.com/ansible/awx/blob/devel/awx/main/utils/licensing.py), [`awx/main/models/events.py`](https://github.com/ansible/awx/blob/devel/awx/main/models/events.py), [`awx/main/models/inventory.py`](https://github.com/ansible/awx/blob/devel/awx/main/models/inventory.py))
 
 ## Core Deduplication Use Cases
 
@@ -197,6 +289,92 @@ Actually Come From (and a Prerequisite Nobody Documents)" below for the
 full traced mechanism, the confirmed `renewal-experimental`
 double-counting bug on multi-hop chains, and a ready-to-run check for
 whether fact caching is even in use in your environment.
+
+**Platform-specific behavior — traced directly from each platform's fact
+source:**
+
+- **Windows: works the same way, out of the box.** The `ansible.windows`
+  collection's `setup.ps1` populates the *exact same fact key names*:
+  `ansible_product_serial` comes from `Win32_Bios.SerialNumber` (BIOS/SMBIOS
+  serial — same hardware concept as the Linux DMI serial). `ansible_machine_id`
+  is different in *kind*, though — it's not a `/etc/machine-id` equivalent,
+  it's derived from the local Administrators group SID with the well-known
+  `-500` RID suffix stripped (`$user.Sid.AccountDomainSid.Value`). It still
+  changes on OS reinstall, but has its own cloning gotcha: **Windows images
+  cloned without proper sysprep can share the same machine SID**, which
+  would cause metrics-utility to falsely merge two genuinely different
+  Windows hosts. Subject to the same `use_fact_cache=True` prerequisite as
+  Linux — no special handling needed.
+- **Network devices (Cisco IOS, Junos, EOS, etc.): no equivalent — this
+  silently does not work at all.** Network OS platforms don't run
+  `ansible.builtin.setup` (no general-purpose interpreter to run it
+  against); platform-specific `*_facts` modules are used instead, and they
+  populate an entirely different, incompatible key namespace. Confirmed
+  directly from `cisco.ios`'s facts source — it sets `self.facts["serialnum"]`,
+  which becomes `ansible_net_serialnum` once merged into `ansible_facts`
+  (the standard `ansible.netcommon` `ansible_net_*` prefix: `ansible_net_serialnum`,
+  `ansible_net_model`, `ansible_net_hostname`, `ansible_net_version`, etc.).
+  Since metrics-utility's SQL does a literal
+  `ansible_facts->>'ansible_product_serial'` / `->>'ansible_machine_id'`
+  lookup, this returns `NULL` for **every** network device unconditionally
+  — not a fact-caching configuration gap, but a structural blind spot:
+  there is no fallback anywhere in metrics-utility that reads
+  `ansible_net_serialnum` as a substitute. Network inventory dedup falls
+  back entirely to case-sensitive `hostname`/`ansible_host_variable`
+  matching, with zero hardware-identity safety net.
+  (Sources: [`ansible.windows` `setup.ps1`](https://github.com/ansible-collections/ansible.windows/blob/main/plugins/modules/setup.ps1), [`cisco.ios` legacy facts](https://github.com/ansible-collections/cisco.ios/blob/main/plugins/module_utils/network/ios/facts/legacy/base.py))
+
+### How to Populate Hardware Facts for Dedup (Without Touching Other Job Templates)
+
+Given the `use_fact_cache` prerequisite above, the practical fix is a
+**single, dedicated job template** for fact gathering — you do not need
+to enable `use_fact_cache` on any of your actual automation job
+templates. Confirmed from source: `start_fact_cache()`/`finish_fact_cache()`
+only run `if self.should_use_fact_cache()` **for that specific job** —
+a job template with `use_fact_cache=False` never reads from or writes
+to `main_host.ansible_facts`, so it's fully decoupled from every other
+job template's behavior.
+
+**Job template setup:**
+1. A minimal playbook is enough — the default `gather_facts: true` (or
+   an explicit `ansible.builtin.setup` task) is all that's needed:
+   ```yaml
+   - hosts: all
+     gather_facts: true
+     tasks: []
+   ```
+2. On the job template, enable **"Use Fact Cache."**
+3. On Linux targets, reading `/sys/devices/virtual/dmi/id/product_serial`
+   often requires root — set `become: true`, or ensure `dmidecode` is
+   installed as a fallback. Without this, you'll get the literal string
+   `'NA'` instead of a real serial (which metrics-utility already treats
+   as null).
+4. On Windows targets, `Win32_Bios.SerialNumber` requires the WinRM
+   credential to have admin rights on the host.
+5. **Run it on a schedule, not just once.** A one-time run only captures
+   facts at that moment — the entire point of hardware-identity dedup is
+   catching *renamed/rebuilt* hosts, and a host rebuilt after your
+   one-time run will never have its new identity captured. A daily or
+   weekly scheduled job keeps this current. `RENEWAL_GUIDANCE` has no
+   separate gather step of its own (it queries `main_host.ansible_facts`
+   live at report-build time), so the very next `build_report` run will
+   immediately reflect whatever this job most recently wrote.
+
+**Two caveats this does *not* fix, both documented earlier:**
+- **The uppercase-hostname join bug is independent of this.** If a
+  host's inventory name contains any uppercase letter,
+  `main_hostmetric.py`'s join (`main_host.name = main_hostmetric.hostname`)
+  still won't match — `main_hostmetric.hostname` is always lowercased by
+  AAP while `main_host.name` is not (see "Does AAP Itself Deduplicate?"
+  above). Running this job will correctly populate `ansible_facts` on
+  the `Host` row, but metrics-utility still won't be able to retrieve it
+  for that host via the collector's join.
+- **Multi-inventory duplicate-name fan-out.** `Host` uniqueness is
+  `(name, inventory)`, not global. If the same hostname exists in two
+  different inventories, the collector's join has no inventory scoping
+  and can produce two rows for one `main_hostmetric` record — worth
+  checking for if your inventory structure has overlapping hostnames
+  across inventories.
 
 ## Summary
 
@@ -577,6 +755,9 @@ FROM main_host WHERE name = 'YOUR_HOSTNAME_HERE';
 
 - [ansible/metrics-utility (GitHub)](https://github.com/ansible/metrics-utility)
 - [Managed Active Node Counting — Red Hat Customer Portal](https://access.redhat.com/articles/7088928)
+- [`awx/main/utils/licensing.py` (native compliance count) — ansible/awx](https://github.com/ansible/awx/blob/devel/awx/main/utils/licensing.py)
+- [`awx/main/models/events.py` (`HostMetric` write path, `.lower()` normalization) — ansible/awx](https://github.com/ansible/awx/blob/devel/awx/main/models/events.py)
+- [`awx/main/models/inventory.py` (`HostMetric`/`Host` model definitions) — ansible/awx](https://github.com/ansible/awx/blob/devel/awx/main/models/inventory.py)
 - [Subscription and Host Metric Changes in Ansible Automation Platform 2.4 — Red Hat Blog](https://www.redhat.com/en/blog/subscription-and-host-metric-changes-in-ansible-automation-platform-2.4)
 - [How to manage host metrics (managed nodes) in AAP — Red Hat Customer Portal](https://access.redhat.com/solutions/7075449)
 - [Turning Automation into Insights: Ansible's metrics-utility — Red Hat Customer Portal](https://access.redhat.com/articles/7127789)
