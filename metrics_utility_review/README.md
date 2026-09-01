@@ -37,6 +37,7 @@ from) is designed to handle.
   - [`renewal-hostname`](#renewal-hostname)
   - [`renewal-experimental` — confirmed bug on multi-hop mixed-key chains](#renewal-experimental--confirmed-bug-on-multi-hop-mixed-key-chains)
   - [How to test this yourself (or re-test after an AAP upgrade)](#how-to-test-this-yourself-or-re-test-after-an-aap-upgrade)
+  - [Live Validation on Real AAP Infrastructure](#live-validation-on-real-aap-infrastructure)
 - [Where the Dedup Keys Actually Come From (and a Prerequisite Nobody Documents)](#where-the-dedup-keys-actually-come-from-and-a-prerequisite-nobody-documents)
   - [The prerequisite: "Use Fact Cache" must be enabled somewhere](#the-prerequisite-use-fact-cache-must-be-enabled-somewhere)
   - [Quick check: is fact caching even in use in your environment?](#quick-check-is-fact-caching-even-in-use-in-your-environment)
@@ -436,7 +437,7 @@ metrics-utility build_report --since=12months --ephemeral=1month --force
 
 ### Variant: Containerized Deployment (podman/docker-compose install)
 In AAP's containerized install type, `metrics-utility` ships inside the
-`ansible-controller-task` container — there's no bare host shell with
+`automation-controller-task` container — there's no bare host shell with
 it on `$PATH`. You must exec into that container, and you need root or
 the `awx` user (it requires read access to `/etc/tower/SECRET_KEY`; a
 regular user hits a `PermissionError`).
@@ -447,7 +448,7 @@ podman exec -it \
   -e METRICS_UTILITY_REPORT_TYPE=RENEWAL_GUIDANCE \
   -e METRICS_UTILITY_SHIP_PATH=/var/lib/awx/metrics-utility/out \
   -e METRICS_UTILITY_DEDUPLICATOR=renewal \
-  ansible-controller-task \
+  automation-controller-task \
   metrics-utility build_report --since=12months --ephemeral=1month --force
 ```
 Note: the target output directory must already exist inside the
@@ -455,20 +456,19 @@ container and be writable by whichever user runs the command — the tool
 does not create it for you (`Invalid METRICS_UTILITY_SHIP_PATH: ... is
 not an existing directory`). Create/chown it first, e.g.:
 ```bash
-podman exec ansible-controller-task mkdir -p /var/lib/awx/metrics-utility/out
-podman exec ansible-controller-task chown awx:awx /var/lib/awx/metrics-utility/out
+podman exec automation-controller-task mkdir -p /var/lib/awx/metrics-utility/out
+podman exec automation-controller-task chown awx:awx /var/lib/awx/metrics-utility/out
 ```
 
 Copy the generated report back out of the container afterward:
 ```bash
-podman cp ansible-controller-task:/var/lib/awx/metrics-utility/out/<generated-file>.xlsx ./
+podman cp automation-controller-task:/var/lib/awx/metrics-utility/out/<generated-file>.xlsx ./
 ```
 
 Verify before running:
-1. Container name confirmed for this environment: `ansible-controller-task`
-   (not the upstream-docs default `automation-controller-task` — check
-   `podman ps` if you're working against a different environment, since
-   this varies by install inventory naming).
+1. Container name confirmed for this environment: `automation-controller-task`
+   — check `podman ps` if you're working against a different environment,
+   since this varies by install inventory naming.
 2. Confirm the write path exists/is writable in that container, or bind-
    mount a host directory to it so `podman cp` isn't needed.
 3. Run as root, or `podman exec --user awx ...`, to avoid the
@@ -480,14 +480,14 @@ On an Operator-managed (OpenShift/Kubernetes) install, the equivalent
 target is the task pod, exec'd via `oc`/`kubectl` instead of `podman`.
 Default storage for output in this deployment mode is a path on the
 attached Persistent Volume Claim rather than local container disk.
-The `ansible-controller-task` container name below is confirmed only for
+The `automation-controller-task` container name below is confirmed only for
 the podman-based deployment above — it is **not confirmed for OpenShift**;
 verify it first with
 `oc get pod <pod> -o jsonpath='{.spec.containers[*].name}'`.
 
 ```bash
 oc exec -it deployment/<controller-instance>-task \
-  -c ansible-controller-task -- bash -c '
+  -c automation-controller-task -- bash -c '
     export METRICS_UTILITY_SHIP_TARGET=controller_db
     export METRICS_UTILITY_REPORT_TYPE=RENEWAL_GUIDANCE
     export METRICS_UTILITY_SHIP_PATH=/var/lib/awx/metrics-utility/out
@@ -499,7 +499,7 @@ oc exec -it deployment/<controller-instance>-task \
 
 Then copy the report out via `oc cp`:
 ```bash
-oc cp <task-pod-name>:/var/lib/awx/metrics-utility/out/<generated-file>.xlsx ./ -c ansible-controller-task
+oc cp <task-pod-name>:/var/lib/awx/metrics-utility/out/<generated-file>.xlsx ./ -c automation-controller-task
 ```
 
 Verify before running:
@@ -597,10 +597,67 @@ change between AAP releases — don't assume the `devel` branch copy here
 matches your production version), pull the real file out of your
 container first and overwrite the bundled copy before running the test:
 ```bash
-podman cp ansible-controller-task:/var/lib/awx/venv/awx/lib64/python3.12/site-packages/metrics_utility/automation_controller_billing/dedup/renewal_guidance.py ./renewal_guidance.py
+podman cp automation-controller-task:/var/lib/awx/venv/awx/lib64/python3.12/site-packages/metrics_utility/automation_controller_billing/dedup/renewal_guidance.py ./renewal_guidance.py
 python3 test_renewal_dedup.py
 ```
-(On an OpenShift/Operator deployment, use `oc cp <task-pod>:<same path> ./renewal_guidance.py -c ansible-controller-task` instead.)
+(On an OpenShift/Operator deployment, use `oc cp <task-pod>:<same path> ./renewal_guidance.py -c automation-controller-task` instead.)
+
+### Live Validation on Real AAP Infrastructure
+
+`test_renewal_dedup.py` confirms this logic against synthetic fixtures.
+The table below is the same behavior confirmed **live**, on a real
+containerized AAP instance, using the cross-inventory test design from
+[`TESTING.md`](TESTING.md) (Phases 3.5/4/7): the same VM tracked as two
+separate `Host` objects in two separate inventories — `demo` (a
+hand-named entry) and `central` (an EC2 dynamic inventory source, synced
+under the raw public DNS hostname) — with three deliberately different
+combinations of shared identifiers:
+
+| Scenario | Shared `ansible_host`? | Shared `machine_id`? | Expected | Observed |
+|---|---|---|---|---|
+| `metrics_rhel9_3` ↔ `ec2-18-117-241-37...` | No | Yes | Merge via `machine_id` | ✅ Merged (`hostmetric_record_count=2`) |
+| `metrics_win_1` ↔ `ec2-3-129-12-48...` | No | Yes | Merge via `machine_id` | ✅ Merged (`hostmetric_record_count=2`) |
+| `metrics_win_2` ↔ `ec2-3-141-10-16...` | Yes | No | Merge via `ansible_host` | ✅ Merged (`hostmetric_record_count=2`) |
+
+All three merged as predicted, and the design isolates the two matching
+mechanisms cleanly: the first two rows prove hardware-identity matching
+(use case #8) works with **zero** help from `ansible_host` (neither side
+of those pairs shares one), while the third proves `ansible_host_variable`
+matching (use case #2) works with **zero** help from hardware facts,
+since `ec2-3-141-10-16...` has no `machine_id` populated at all. This is
+the same `renewal` deduplicator, the same transitive-matching code, doing
+on real infrastructure exactly what the fixtures predicted.
+
+Raw `Managed nodes` sheet output, parsed with the CSV-aware viewer from
+`TESTING.md` (Phase 6) rather than `column -s, -t`, which mis-splits this
+data — see `hostnames` and `Serial Numbers`/`Machine UUIDs`, which are
+themselves comma-joined lists:
+
+```
+Host name                                        First automation            Last automation             Number of Automations  ...  Host names                                                          Variables ansible_host          Serial Numbers                        Machine UUIDs
+metrics_rhel9_3                                  2026-09-01 14:21:43.118000  2026-09-01 15:27:23.063000  4                      ...  metrics_rhel9_3, ec2-18-117-241-37.us-east-2.compute.amazonaws.com  18.117.241.37                   ec2ba8b7-51d4-d0a0-74d7-cc1065d6727b  ec2ba8b751d4d0a074d7cc1065d6727b
+ec2-3-129-12-48.us-east-2.compute.amazonaws.com  2026-09-01 13:59:20.038000  2026-09-01 15:58:39.430000  4                      ...  metrics_win_1, ec2-3-129-12-48.us-east-2.compute.amazonaws.com      3.129.12.48                     ec259b7a-b283-4459-daff-9fed84971ef6  S-1-5-21-4100766907-1347740291-2814610555
+ec2-3-141-10-16.us-east-2.compute.amazonaws.com  2026-09-01 13:59:20.038000  2026-09-01 16:45:28.780000  2                      ...  ec2-3-141-10-16.us-east-2.compute.amazonaws.com, metrics_win_2      3.141.10.16                                                                                                    
+ip-172-31-2-120.us-east-2.compute.internal       2025-07-07 21:24:56.312000  2026-08-12 19:29:20.873000  246                    ...  ip-172-31-2-120.us-east-2.compute.internal                                                                                                6508a74bf54348d3b99307a1df849adf
+localhost                                        2025-06-30 17:39:28.922000  2026-09-01 14:19:39.228000  1776                   ...  localhost                                                                                                                                 990ff18f0daf4a578f5bfecaf8bc53ad
+metrics_rhel8_4                                  2026-09-01 14:21:43.118000  2026-09-01 14:21:43.117000  1                      ...  metrics_rhel8_4                                                     18.219.185.242
+metrics_rhel9_1                                  2026-09-01 14:07:15.884000  2026-09-01 14:21:43.117000  4                      ...  metrics_rhel9_1                                                     3.142.238.21                    ec2fd2ae-c188-1a4b-bc41-caa0c8cd0e5b  ec2fd2aec1881a4bbc41caa0c8cd0e5b
+metrics_rhel9_2                                  2026-09-01 14:07:15.884000  2026-09-01 14:21:43.117000  4                      ...  metrics_rhel9_2                                                     18.191.194.75                   ec222231-778f-cb0d-0178-f30e8d513452  ec222231778fcb0d0178f30e8d513452
+metrics_rhel9_4                                  2026-09-01 14:21:43.118000  2026-09-01 14:21:43.117000  1                      ...  metrics_rhel9_4                                                     3.15.185.84
+wincerttest3                                     2026-05-14 22:31:08.893000  2026-08-24 17:10:01.152000  30                     ...  wincerttest3                                                        3.144.171.204, 18.119.163.152
+wincerttest4                                     2026-05-26 14:43:33.416000  2026-08-24 17:10:01.152000  18                     ...  wincerttest4                                                        18.223.188.220, 18.222.114.117
+```
+
+The first three rows are the Phase 3.5/7 test pairs (already merged, one
+row each). Everything below them (`ip-172-31-2-120...`, `localhost`,
+`metrics_rhel8_4`, `metrics_rhel9_1`/`_2`/`_4`, `wincerttest3`/`4`) is
+pre-existing, unrelated infrastructure in the same AAP instance — expected
+to show up here since `RENEWAL_GUIDANCE` reports on the whole
+environment's `HostMetric` history, not just a filtered test set. Note
+that `metrics_rhel9_1` and `metrics_rhel9_2` show real `Serial
+Numbers`/`Machine UUIDs` values here too — a different job template
+against them happened to have "Use Fact Cache" enabled, independent of
+the Phase 3.5/7 test design above.
 
 ## Where the Dedup Keys Actually Come From (and a Prerequisite Nobody Documents)
 
@@ -667,7 +724,7 @@ dedup depends on it — that link only surfaces by reading both codebases.
 ### Quick check: is fact caching even in use in your environment?
 Run this from the same container you build reports in:
 ```bash
-podman exec -it ansible-controller-task awx-manage shell -c "
+podman exec -it automation-controller-task awx-manage shell -c "
 from awx.main.models import Host, JobTemplate
 print('Job templates with use_fact_cache=True:', JobTemplate.objects.filter(use_fact_cache=True).count())
 print('Hosts with any cached facts:', Host.objects.exclude(ansible_facts={}).count())
@@ -689,7 +746,7 @@ connection, so it works whether Postgres runs in a separate container,
 a Pod, or an external managed DB, without you needing to know its
 credentials or hostname:
 ```bash
-podman exec -it ansible-controller-task awx-manage dbshell -- -c "
+podman exec -it automation-controller-task awx-manage dbshell -- -c "
 SELECT name,
        ansible_facts ? 'ansible_product_serial' AS has_product_serial,
        ansible_facts->>'ansible_product_serial' AS product_serial,
