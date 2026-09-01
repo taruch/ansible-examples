@@ -8,8 +8,18 @@
 
   tasks:
 
+    # block/rescue works like try/except, but scoped per host: if ANY task inside
+    # `block` fails on a given host, Ansible skips the remaining block tasks for
+    # that host and jumps straight to `rescue`. Other hosts in the play are
+    # unaffected and keep running the block tasks normally. This lets us capture
+    # a per-host outcome (failed_node true/false) instead of the whole play
+    # aborting on the first failure, which is the default Ansible behavior.
     - name: Task that may fail, with rescue to track success and failure nodes
       block:
+        # assert fails the task (and therefore the block) when any condition in
+        # `that` evaluates to false. fail_msg/success_msg only control the text
+        # shown in the result — they do not change whether the task passes or
+        # fails. A failed assert here is what triggers `rescue` below.
         - name: Simulate a task that may fail by assert that ansible_distribution_major_version == 9
           ansible.builtin.assert:
             that:
@@ -17,13 +27,37 @@
             fail_msg: "This task simluates a failure in a playbook that we want to recover from."
             success_msg: "This host passed the test"
 
+        # Only reached if the assert above succeeded, so this marks the host
+        # as having passed the block cleanly.
         - name: Define successful node
           ansible.builtin.set_fact:
             failed_node: "false"
       rescue:
+        # Runs only for hosts that failed a task in the block above (in this
+        # case, the assert). Marking failed_node here lets later tasks build
+        # separate success/failure host lists via hostvars, without the
+        # playbook halting on the failure.
         - name: Define failure node
           ansible.builtin.set_fact:
             failed_node: "true"
+
+        - name: Handle error during Nginx installation/configuration
+          ansible.builtin.debug:
+            msg: "Error during package setup"
+      always:
+        # always runs after block/rescue regardless of outcome (success, or
+        # failure caught by rescue). Useful here because a real patching task
+        # downloads packages into the dnf cache before attempting the update —
+        # always guarantees that cache is cleared whether the patch succeeded
+        # or failed, so a failed run doesn't leave stale downloaded packages
+        # taking up disk space or being reused by a later, differently-targeted
+        # patch run. There is no ansible.builtin.dnf equivalent for this
+        # (it only manages package/group state, not cache maintenance), so
+        # the command module is used here to run the dnf CLI directly.
+        - name: Always clean up downloaded packages
+          ansible.builtin.command: dnf clean packages
+          changed_when: false
+          when: ansible_facts.pkg_mgr == "dnf"
 
     - name: Print out nodes that failed this play
       loop: "{{ ansible_play_hosts }}"
@@ -50,8 +84,8 @@
 
     - name: Generate a combined list of failed nodes
       delegate_to: localhost # Run this task on the control node
-      when: hostvars[item].failed_node is true
       run_once: true # Ensure the set_fact is executed only once
+      when: hostvars[item].failed_node is true
       loop: "{{ groups['all'] }}" # Or a specific group
       ansible.builtin.set_fact:
         failed_nodes: "{{ failed_nodes + [hostvars[item].inventory_hostname] }}"
