@@ -19,6 +19,20 @@ Specifically, we are implementing Mutual TLS (mTLS) Certificate Authentication o
 | Security Profile | Higher Risk: Target server gets delegable credentials (credential dumping risk). | Lower Risk: Uses X.509 PKI trust; raw credentials are never forwarded to the target host. |
 | Network Port | HTTP (5985) or HTTPS (5986) | HTTPS (5986) strictly enforced. |
 
+### WinRM Authentication Methods Comparison
+
+Certificate authentication is one of five authentication options WinRM supports. The table below shows why it was chosen over the alternatives for this architecture: it supports local accounts (matching the local-account mapping model used in Phase 3) without enabling credential delegation, unlike NTLM and CredSSP.
+
+| Option | Local Accounts | Active Directory Accounts | Credential Delegation | HTTP Encryption |
+|---|---|---|---|---|
+| Basic | Yes | No | No | No |
+| Certificate | Yes | No | No | No |
+| Kerberos | No | Yes | Yes | Yes |
+| NTLM | Yes | Yes | No | Yes |
+| CredSSP | Yes | Yes | Yes | Yes |
+
+Certificate authentication's "No" on Credential Delegation is the key security property here: there is no delegable credential for a compromised target to reuse against other hosts, which is exactly the "double-hop" risk CredSSP carries. Its "No" on Active Directory Accounts is why this architecture maps certificates to local accounts (Phase 3, step 4) rather than domain accounts.
+
 ## 2. Steps to Achieve the Outlined Goals
 
 To achieve end-to-end implementation of this architecture, the following structured phases must be executed. This covers the underlying PKI infrastructure, endpoint configuration, client certificate generation, and automation platform integration.

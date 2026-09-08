@@ -30,3 +30,10 @@ Tests the `set_stats` module behavior in isolation.
 ```
 
 This pattern enables targeted retry or remediation workflows without re-running tasks on already-successful hosts.
+
+## See Also
+
+For real-world (non-simulated) uses of `block`/`rescue` and `assert` elsewhere in this repo:
+
+- **`patching_examples/patching_playbook.yml`** — `block`/`rescue` around an actual `dnf` update, where `rescue` captures failure details and then re-raises with `ansible.builtin.fail` so the host still reports as failed to the AAP workflow (contrast with this pattern's rescue, which recovers gracefully instead of re-failing).
+- **`ai_granite_example/deploy_granite_model.yml`** — standalone `assert` tasks used as pre-flight guard checks (OS, memory, disk space) rather than a simulated failure, plus a `block`/`rescue` used for graceful degradation (an optional firewall check that's skipped, not failed, if it can't run).
