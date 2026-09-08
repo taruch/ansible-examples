@@ -1,0 +1,45 @@
+---
+- name: Configure WinRM HTTPS and Certificate Authentication
+  hosts: win_servers
+  gather_facts: yes
+  tasks:
+    - name: Allow inbound WinRM HTTPS traffic on port 5986
+      ansible.windows.win_firewall_rule:
+        name: WinRM-HTTPS-In
+        display_name: Windows Remote Management (HTTPS-In)
+        localport: 5986
+        protocol: tcp
+        action: allow
+        direction: in
+        state: present
+        enabled: yes
+
+    - name: Find or create Server Authentication certificate
+      ansible.windows.win_powershell:
+        script: |
+          $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object {
+              $_.EnhancedKeyUsageList.EnhancedKeyUsage.Value -contains "1.3.6.1.5.5.7.3.1"
+          } | Select-Object -First 1
+
+          if (-not $cert) {
+              $cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation "Cert:\LocalMachine\My" -Type Custom -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.1")
+          }
+          $Ansible.Result = @{ Thumbprint = $cert.Thumbprint }
+      register: winrm_cert
+
+    - name: Enable certificate authentication in WinRM service
+      ansible.windows.win_powershell:
+        script: |
+          Set-Item -Path WSMan:\localhost\Service\Auth\Certificate -Value $true
+
+    - name: Ensure WinRM HTTPS listener exists
+      ansible.windows.win_powershell:
+        script: |
+          $thumbprint = "{{ winrm_cert.result.Thumbprint }}"
+          $listener = Get-WSManInstance -ResourceURI winrm/config/listener -Enumerate | Where-Object { $_.Transport -eq "HTTPS" }
+          
+          if (-not $listener) {
+              New-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{Address="*"; Transport="HTTPS"} -ValueSet @{Hostname=$env:COMPUTERNAME; CertificateThumbprint=$thumbprint}
+          } else {
+              Set-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{Address="*"; Transport="HTTPS"} -ValueSet @{Hostname=$env:COMPUTERNAME; CertificateThumbprint=$thumbprint}
+          }

@@ -1,0 +1,44 @@
+---
+- name: Deploy AD CS Enterprise Root CA
+  hosts: ca_servers
+  gather_facts: true
+  tasks:
+    - name: Install AD CS Server Feature and Management Tools
+      ansible.windows.win_feature:
+        name:
+          - ADCS-Cert-Authority
+          - ADCS-Web-Enrollment
+          - RSAT-ADCS-Mgmt
+        state: present
+        include_management_tools: true
+
+    - name: Configure Enterprise Root Certificate Authority
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module ADCSDeployment
+          $service = Get-Service -Name CertSvc -ErrorAction SilentlyContinue
+          if (-not $service) {
+              Install-AdcsCertificationAuthority `
+                  -CAType EnterpriseRootCA `
+                  -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `
+                  -KeyLength 4096 `
+                  -HashAlgorithmName SHA256 `
+                  -ValidityPeriod Years `
+                  -ValidityPeriodUnits 10 `
+                  -Force
+          }
+
+    - name: Configure AD CS Web Enrollment Service
+      ansible.windows.win_powershell:
+        script: |
+          Import-Module ADCSDeployment
+          $webService = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
+          if ($webService) {
+              Install-AdcsWebEnrollment -Force
+          }
+
+    - name: Ensure CertSvc Service is Running and Automatic
+      ansible.windows.win_service:
+        name: CertSvc
+        start_mode: auto
+        state: started
