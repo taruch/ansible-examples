@@ -15,6 +15,10 @@ What differs is the **client library and remoting model** layered on top of that
 
 So the honest framing for a customer is: **same door, same lock, two different ways of walking through it once you're authenticated.**
 
+Both python libraries are available in the supported EE's from Red Hat.
+registry.redhat.io/ansible-automation-platform-26/ee-supported-rhel9:latest
+registry.redhat.io/ansible-automation-platform-26/ee-minimal-rhel9:latest
+
 ## 3. Functionality Implications
 
 | Concern | `winrm` | `psrp` |
