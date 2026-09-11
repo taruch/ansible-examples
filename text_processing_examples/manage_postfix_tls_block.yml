@@ -1,0 +1,78 @@
+---
+# Real-world variant of manage_text_block.yml: manage a block of TLS
+# hardening settings in Postfix's main.cf with ansible.builtin.lineinfile.
+# Point config_file at /etc/postfix/main.cf and set manage_postfix_service
+# to true to have this actually reload Postfix on a real mail server.
+- name: Manage a TLS settings block in postfix main.cf
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    config_file: "{{ playbook_dir }}/postfix_main.cf"
+    manage_postfix_service: false
+    tls_settings:
+      - smtpd_tls_security_level = may
+      - smtpd_tls_cert_file = /etc/pki/tls/certs/postfix.pem
+      - smtpd_tls_key_file = /etc/pki/tls/private/postfix.key
+      - smtpd_tls_protocols = !SSLv2, !SSLv3
+      - smtp_tls_security_level = may
+
+  tasks:
+    - name: Ensure the TLS managed block markers exist
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        line: "{{ item.line }}"
+        insertafter: "{{ item.insertafter }}"
+        state: present
+      loop:
+        - line: "# BEGIN ANSIBLE MANAGED BLOCK - TLS Hardening"
+          insertafter: "^mydestination"
+        - line: "# END ANSIBLE MANAGED BLOCK - TLS Hardening"
+          insertafter: "# BEGIN ANSIBLE MANAGED BLOCK - TLS Hardening"
+      loop_control:
+        label: "{{ item.line }}"
+      tags: [build]
+
+    - name: Build the TLS block, anchoring each setting after the one before it
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        line: "{{ item }}"
+        insertafter: "{{ '# BEGIN ANSIBLE MANAGED BLOCK - TLS Hardening' if loop_index == 0 else tls_settings[loop_index - 1] }}"
+        state: present
+      loop: "{{ tls_settings }}"
+      loop_control:
+        index_var: loop_index
+        label: "{{ item }}"
+      tags: [build]
+      notify: reload postfix
+
+    - name: Remove a single setting from the TLS block
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        line: "smtp_tls_security_level = may"
+        state: absent
+      tags: [remove_line]
+      notify: reload postfix
+
+    - name: Remove the entire TLS managed block (markers and remaining settings)
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        regexp: "{{ item }}"
+        state: absent
+      loop:
+        - "^# BEGIN ANSIBLE MANAGED BLOCK - TLS Hardening$"
+        - "^# END ANSIBLE MANAGED BLOCK - TLS Hardening$"
+        - "^smtpd_tls_security_level = may$"
+        - "^smtpd_tls_cert_file = /etc/pki/tls/certs/postfix\\.pem$"
+        - "^smtpd_tls_key_file = /etc/pki/tls/private/postfix\\.key$"
+        - "^smtpd_tls_protocols = !SSLv2, !SSLv3$"
+      loop_control:
+        label: "{{ item }}"
+      tags: [cleanup]
+      notify: reload postfix
+
+  handlers:
+    - name: reload postfix
+      ansible.builtin.command: postfix reload
+      when: manage_postfix_service | bool

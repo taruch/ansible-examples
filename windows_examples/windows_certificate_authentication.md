@@ -37,6 +37,8 @@ Certificate authentication's "No" on Credential Delegation is the key security p
 
 To achieve end-to-end implementation of this architecture, the following structured phases must be executed. This covers the underlying PKI infrastructure, endpoint configuration, client certificate generation, and automation platform integration.
 
+https://access.redhat.com/solutions/7099480
+
 ### Phase 1: Deploy Active Directory Certificate Services (AD CS)
 
 To establish implicit trust across the domain, an Enterprise Root CA must be configured. This ensures that any certificate issued by the CA is automatically trusted by all domain-joined target computers via Active Directory's automated distribution to the Trusted Root Certification Authorities store.

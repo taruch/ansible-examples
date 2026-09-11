@@ -1,0 +1,62 @@
+---
+# ansible.builtin.lineinfile has no begin/end markers like blockinfile, so a
+# "block" of text is built by chaining insertafter anchors: each task inserts
+# one line immediately after the line the previous task just added.
+- name: Manage a block of text with lineinfile
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    config_file: "{{ playbook_dir }}/sample_config.conf"
+    managed_lines:
+      - max_connections = 100
+      - timeout = 30
+      - retry_count = 3
+
+  tasks:
+    - name: Ensure the managed block markers exist
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        line: "{{ item.line }}"
+        insertafter: "{{ item.insertafter }}"
+        state: present
+      loop:
+        - { line: "# BEGIN ANSIBLE MANAGED BLOCK", insertafter: "^\\[general\\]" }
+        - { line: "# END ANSIBLE MANAGED BLOCK", insertafter: "# BEGIN ANSIBLE MANAGED BLOCK" }
+      loop_control:
+        label: "{{ item.line }}"
+      tags: [build]
+
+    - name: Build the block contents, anchoring each line after the one before it
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        line: "{{ item }}"
+        insertafter: "{{ '# BEGIN ANSIBLE MANAGED BLOCK' if loop_index == 0 else managed_lines[loop_index - 1] }}"
+        state: present
+      loop: "{{ managed_lines }}"
+      loop_control:
+        index_var: loop_index
+        label: "{{ item }}"
+      tags: [build]
+
+    - name: Remove a single line from the managed block
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        line: "retry_count = 3"
+        state: absent
+      tags: [remove_line]
+
+    - name: Remove the entire managed block (markers and remaining contents)
+      ansible.builtin.lineinfile:
+        path: "{{ config_file }}"
+        regexp: "{{ item }}"
+        state: absent
+      loop:
+        - "^# BEGIN ANSIBLE MANAGED BLOCK$"
+        - "^# END ANSIBLE MANAGED BLOCK$"
+        - "^max_connections = 100$"
+        - "^timeout = 30$"
+      loop_control:
+        label: "{{ item }}"
+      tags: [cleanup]

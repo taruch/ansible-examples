@@ -1,0 +1,13 @@
+# Sample /etc/postfix/main.cf used to demonstrate managing a block of
+# settings with ansible.builtin.lineinfile.
+
+myhostname = mail.example.com
+mydomain = example.com
+myorigin = $mydomain
+inet_interfaces = all
+mydestination = $myhostname, localhost.$mydomain, localhost
+
+# BEGIN ANSIBLE MANAGED BLOCK - TLS Hardening
+# END ANSIBLE MANAGED BLOCK - TLS Hardening
+
+home_mailbox = Maildir/
