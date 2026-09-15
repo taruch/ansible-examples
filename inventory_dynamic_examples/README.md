@@ -15,6 +15,7 @@ Dynamic inventory allows Ansible to query external systems (cloud providers, vir
 | **VMware vSphere** | `community.vmware.vmware_vm_inventory` | [vmware.yml](vmware/vmware.yml) | 50+ | vCenter VMs grouped by cluster, folder, OS, and properties |
 | **OpenShift Virtualization** | `kubernetes.core.k8s` | [openshift_virt.yml](openshift_virt/openshift_virt.yml) | 40+ | KubeVirt VMs with namespace and label-based grouping |
 | **Microsoft AD** | `community.windows.ldap` | [microsoft_ad.yml](microsoft_ad/microsoft_ad.yml) | 50+ | AD computer objects via LDAP with OU and group-based organization |
+| **Microsoft SCVMM** | `microsoft.scvmm.scvmm_inventory` | [scvmm_inventory.yml](microsoft_scvmm/scvmm_inventory.yml) | 15+ | SCVMM-managed VMs and Hyper-V hosts over PSRP, grouped by cloud, host group, status, and OS |
 | **Infoblox NIOS** | `infoblox.nios_modules.nios_inventory` | [infoblox.yml](infoblox/infoblox.yml) | 60+ | IPAM/DNS records with network, location, and extensible attribute grouping |
 | **NetBox** | `netbox.netbox.nb_inventory` | [netbox.yml](netbox/netbox.yml) | 70+ | IPAM/DCIM with site, rack, role, and custom field grouping |
 | **Nutanix AHV** | `nutanix.ncp.ntnx_vms_inventory` | [nutanix.yml](nutanix/nutanix.yml) | 60+ | Nutanix VMs with cluster, category, and resource-based groups |
@@ -246,6 +247,9 @@ ansible-galaxy collection install kubernetes.core
 # Microsoft AD
 ansible-galaxy collection install community.windows
 
+# Microsoft SCVMM
+ansible-galaxy collection install microsoft.scvmm
+
 # Infoblox
 ansible-galaxy collection install infoblox.nios_modules
 
@@ -346,6 +350,22 @@ export ANSIBLE_LDAP_PASSWORD="your_password"
 
 # Or configure in inventory file with vault
 ```
+
+### Microsoft SCVMM
+```bash
+# Environment variables
+export SCVMM_SERVER="scvmm.example.com"
+export SCVMM_USERNAME="svc-ansible@EXAMPLE.COM"   # UPN format required for kerberos auth
+export SCVMM_PASSWORD="your_password"
+export SCVMM_AUTH="kerberos"                       # negotiate (default) | kerberos | ntlm | credssp | basic | certificate
+
+# Or configure directly in the inventory file (use vault for the password)
+# vmm_server: scvmm.example.com
+# auth: kerberos
+```
+In AAP, there's no built-in SCVMM inventory source type or credential type — use a
+"Sourced from a Project" inventory source with a Custom Credential Type that injects
+`SCVMM_SERVER`/`SCVMM_USERNAME`/`SCVMM_PASSWORD`/`SCVMM_AUTH` as environment variables.
 
 ### Infoblox NIOS
 ```bash
@@ -712,3 +732,4 @@ For issues with specific inventory plugins:
 - VMware: https://github.com/ansible-collections/community.vmware
 - Kubernetes: https://github.com/ansible-collections/kubernetes.core
 - Windows: https://github.com/ansible-collections/community.windows
+- SCVMM: https://github.com/ansible-collections/microsoft.scvmm

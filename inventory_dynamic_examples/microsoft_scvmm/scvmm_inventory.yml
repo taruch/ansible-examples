@@ -1,0 +1,157 @@
+---
+# Microsoft SCVMM dynamic inventory configuration
+# Plugin: microsoft.scvmm.scvmm_inventory
+# Documentation: https://console.redhat.com/ansible/automation-hub/collections/published/microsoft/scvmm/documentation/inventory/scvmm_inventory
+#
+# Discovers Microsoft System Center Virtual Machine Manager (SCVMM) managed
+# virtual machines and the Hyper-V hosts they run on, connecting to the SCVMM
+# management server over PSRP.
+#
+# Authentication:
+#   Option 1: Environment variables (recommended)
+#     export SCVMM_SERVER="scvmm.example.com"
+#     export SCVMM_USERNAME="svc-ansible@EXAMPLE.COM"   # UPN format, required for kerberos
+#     export SCVMM_PASSWORD="your_password"
+#     export SCVMM_AUTH="kerberos"                       # negotiate (default) | kerberos | ntlm | credssp | basic | certificate
+#
+#   Option 2: Direct configuration (use vault for the password)
+#     vmm_server: scvmm.example.com
+#     username: "{{ lookup('env', 'SCVMM_USERNAME') }}"
+#     password: "{{ lookup('env', 'SCVMM_PASSWORD') }}"
+#     auth: kerberos
+#
+#   Notes:
+#     - 'negotiate' is the plugin default and needs no extra dependencies in
+#       the Execution Environment, but it silently falls back to NTLM if the
+#       pypsrp[kerberos] extra (gssapi) isn't installed there. Set auth to
+#       'kerberos' explicitly (as done below) if NTLM is not acceptable.
+#     - kerberos requires pypsrp[kerberos]/gssapi in the EE, the target's
+#       Kerberos realm to be resolvable (DNS SRV records in most AD setups),
+#       and a username in UPN format (user@DOMAIN.COM).
+#     - AAP has no built-in "SCVMM" inventory source type or credential
+#       type. Use a "Sourced from a Project" inventory source together with
+#       a Custom Credential Type whose injectors set SCVMM_SERVER,
+#       SCVMM_USERNAME, SCVMM_PASSWORD, and SCVMM_AUTH as environment
+#       variables — the built-in cloud source picker won't show a custom
+#       credential type.
+
+plugin: microsoft.scvmm.scvmm_inventory
+vmm_server: scvmm.example.com
+auth: kerberos
+
+# Both default to true; disable one to only inventory the other object type
+# include_vms: true
+# include_hosts: false
+
+# Compose host variables
+compose:
+  # VMs report an IPv4 list; Hyper-V hosts don't, so fall back to their computer name
+  ansible_host: |
+    scvmm_ipv4_addresses[0] if scvmm_object_type == 'vm' and scvmm_ipv4_addresses | default([]) | length > 0
+    else scvmm_computer_name if scvmm_object_type == 'host'
+    else None
+
+  # Connect to both VMs and Hyper-V hosts over PSRP
+  ansible_connection: "'psrp'"
+  ansible_psrp_auth: "'kerberos'"
+
+# Static groups
+#
+# The plugin already creates 'virtual_machines' and 'hyperv_hosts' groups
+# covering every discovered host, so there's no need for a blanket
+# "all hosts from this source" group here - use virtual_machines:hyperv_hosts
+# for that instead.
+groups:
+  # VMs with no reported IPv4 address yet (still provisioning, powered off, etc.)
+  scvmm_no_ip: scvmm_object_type == 'vm' and (scvmm_ipv4_addresses | default([]) | length == 0)
+
+# Keyed groups - create dynamic groups from SCVMM metadata
+# NOTE: the plugin already creates 'virtual_machines' and 'hyperv_hosts'
+# groups automatically; these add finer-grained grouping on top of that.
+keyed_groups:
+  # Group by object type (redundant with the built-in groups, kept for symmetry)
+  - key: scvmm_object_type
+    prefix: type
+
+  # Group VMs by SCVMM cloud
+  - key: scvmm_cloud | default('no_cloud') if scvmm_object_type == 'vm' else 'na'
+    prefix: cloud
+
+  # Group VMs by power/provisioning status
+  - key: scvmm_status | default('unknown') if scvmm_object_type == 'vm' else 'na'
+    prefix: status
+
+  # Group by SCVMM host group (applies to both VMs and Hyper-V hosts)
+  - key: scvmm_host_group | default('ungrouped')
+    prefix: hostgroup
+
+  # Group VMs by guest OS
+  - key: scvmm_operating_system | default('unknown') if scvmm_object_type == 'vm' else 'na'
+    prefix: os
+
+  # Group VMs by owner
+  - key: scvmm_owner | default('unassigned') if scvmm_object_type == 'vm' else 'na'
+    prefix: owner
+
+  # Group Hyper-V hosts by cluster
+  - key: scvmm_cluster | default('no_cluster') if scvmm_object_type == 'host' else 'na'
+    prefix: cluster
+
+  # Group Hyper-V hosts by virtualization platform (e.g. Hyper-V)
+  - key: scvmm_virtualization_platform | default('unknown') if scvmm_object_type == 'host' else 'na'
+    prefix: platform
+
+# Conditional groups based on more complex logic
+conditional_groups:
+  # Running VMs
+  scvmm_running: |
+    scvmm_object_type == 'vm' and scvmm_status | default('') == 'Running'
+
+  # Stopped/saved VMs
+  scvmm_stopped: |
+    scvmm_object_type == 'vm' and scvmm_status | default('') in ['Stopped', 'PowerOff', 'Saved']
+
+  # Windows guests
+  scvmm_windows: |
+    'windows' in (scvmm_operating_system | default('') | lower)
+
+  # Linux guests
+  scvmm_linux: |
+    scvmm_object_type == 'vm' and (
+      'linux' in (scvmm_operating_system | default('') | lower) or
+      'rhel' in (scvmm_operating_system | default('') | lower) or
+      'centos' in (scvmm_operating_system | default('') | lower) or
+      'ubuntu' in (scvmm_operating_system | default('') | lower)
+    )
+
+  # High memory VMs (16GB+)
+  scvmm_high_memory: |
+    scvmm_object_type == 'vm' and (scvmm_memory_mb | default(0) | int) >= 16384
+
+  # High vCPU VMs (4+)
+  scvmm_high_cpu: |
+    scvmm_object_type == 'vm' and (scvmm_cpu_count | default(0) | int) >= 4
+
+# Caching
+#
+# In AAP, each inventory sync runs in a fresh, isolated Execution Environment
+# container that is destroyed afterward. File-based caching provides no
+# benefit there: every sync starts with an empty cache (guaranteed miss),
+# and a single sync only queries the source once anyway. Leave caching off
+# for AAP-sourced inventories.
+#
+# NOTE: this plugin calls its cache-plugin loader unconditionally during
+# parse(), even when cache is false, so cache_plugin must still resolve to
+# something that doesn't require a connection string - use 'memory'.
+cache: false
+cache_plugin: memory
+
+# If you're running this file repeatedly from a persistent filesystem
+# outside AAP (a dev workstation, a long-lived CI runner) and want to avoid
+# re-querying SCVMM's slower PSRP-based API on every invocation, use the
+# jsonfile backend instead - it requires a connection path:
+# cache: true
+# cache_plugin: jsonfile
+# cache_timeout: 300
+# cache_connection: /tmp/scvmm_inventory_cache
+# cache_prefix: scvmm
