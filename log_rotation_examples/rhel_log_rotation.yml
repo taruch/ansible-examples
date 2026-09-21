@@ -1,0 +1,132 @@
+---
+# Rotates and prunes logs on RHEL hosts to reclaim disk space.
+#
+# Usage:
+#   ansible-playbook rhel_log_rotation.yml
+#   ansible-playbook rhel_log_rotation.yml -e "log_retention_days=14"
+#   ansible-playbook rhel_log_rotation.yml -e "log_paths=['/var/log/myapp']"
+#
+- name: Rotate and clean up logs on RHEL hosts
+  hosts: all
+  become: true
+  vars:
+    # Directories to scan for stale/oversized log files.
+    log_paths:
+      - /var/log
+      - /var/log/httpd
+      - /var/log/nginx
+
+    # Delete plain log files older than this many days.
+    log_retention_days: 30
+
+    # Compress rotated/plain log files older than this many days (but newer
+    # than log_retention_days) to save space without losing them outright.
+    log_compress_days: 7
+
+    # Truncate (rather than delete) any currently-open log file larger than
+    # this size, so actively-written logs don't get removed out from under
+    # a process.
+    log_max_size_mb: 500
+
+  tasks:
+    - name: Verify target host is running RHEL
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == "RedHat"
+          - ansible_facts['distribution'] == "RedHat"
+        fail_msg: >-
+          This playbook only supports Red Hat Enterprise Linux. Detected
+          distribution: {{ ansible_facts['distribution'] | default('unknown') }}
+          (os_family: {{ ansible_facts['os_family'] | default('unknown') }}).
+        success_msg: >-
+          Confirmed RHEL {{ ansible_facts['distribution_major_version'] }}
+          host, proceeding with log rotation.
+
+    - name: Capture disk usage before cleanup
+      ansible.builtin.command: df -h /var/log
+      register: disk_usage_before
+      changed_when: false
+
+    - name: Show disk usage before cleanup
+      ansible.builtin.debug:
+        var: disk_usage_before.stdout_lines
+
+    - name: Ensure logrotate is installed
+      ansible.builtin.dnf:
+        name: logrotate
+        state: present
+
+    - name: Force an immediate run of the system logrotate policy
+      ansible.builtin.command: logrotate --force /etc/logrotate.conf
+      register: logrotate_run
+      changed_when: logrotate_run.rc == 0
+      failed_when: logrotate_run.rc != 0
+
+    - name: Find rotated/compressed log files older than retention period
+      ansible.builtin.find:
+        paths: "{{ log_paths }}"
+        patterns:
+          - "*.log.*"
+          - "*.gz"
+          - "*.[0-9]"
+        recurse: true
+        age: "{{ log_retention_days }}d"
+        age_stamp: mtime
+      register: old_rotated_logs
+
+    - name: Remove rotated log files older than {{ log_retention_days }} days
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_rotated_logs.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Find plain (uncompressed) log files eligible for compression
+      ansible.builtin.find:
+        paths: "{{ log_paths }}"
+        patterns: "*.log"
+        recurse: true
+        age: "{{ log_compress_days }}d"
+        age_stamp: mtime
+      register: compressible_logs
+
+    - name: Compress plain log files older than {{ log_compress_days }} days
+      ansible.builtin.command: gzip --force "{{ item.path }}"
+      loop: "{{ compressible_logs.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      changed_when: true
+
+    - name: Find currently-open logs that have grown too large
+      ansible.builtin.find:
+        paths: "{{ log_paths }}"
+        patterns: "*.log"
+        recurse: true
+        size: "{{ log_max_size_mb }}m"
+      register: oversized_logs
+
+    - name: Truncate oversized active log files in place
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ item.path }}"
+        force: true
+        owner: "{{ item.pw_name | default(omit) }}"
+        group: "{{ item.gr_name | default(omit) }}"
+        mode: "{{ item.mode | default(omit) }}"
+      loop: "{{ oversized_logs.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Clean cached package metadata to free additional space
+      ansible.builtin.dnf:
+        autoremove: true
+
+    - name: Capture disk usage after cleanup
+      ansible.builtin.command: df -h /var/log
+      register: disk_usage_after
+      changed_when: false
+
+    - name: Show disk usage after cleanup
+      ansible.builtin.debug:
+        var: disk_usage_after.stdout_lines
