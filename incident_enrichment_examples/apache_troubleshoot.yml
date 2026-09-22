@@ -1,0 +1,149 @@
+---
+# Read-only Apache (httpd) diagnostics for RHEL hosts. Gathers service
+# status, config test results, recent journalctl/error/access log entries,
+# disk space, listening ports, and SELinux denials, then consolidates
+# everything into a single `apache_diagnostics` JSON structure intended for
+# an AI agent (e.g. a Claude step in an Automation Orchestrator workflow) to
+# decide on a remediation action. This playbook does not restart, reconfigure,
+# or otherwise change anything on the target host.
+#
+# Usage:
+#   ansible-playbook apache_troubleshoot.yml -e "_hosts=node1"
+
+- name: Troubleshoot Apache (httpd) on RHEL
+  hosts: "{{ _hosts | default('') }}"
+  become: true
+  gather_facts: true
+
+  vars:
+    apache_error_log: /var/log/httpd/error_log
+    apache_access_log: /var/log/httpd/access_log
+    apache_log_lines: 100
+    journalctl_lines: 200
+
+  tasks:
+    - name: Verify target host is running RHEL
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == "RedHat"
+        fail_msg: >-
+          This playbook only supports Red Hat family hosts (httpd package
+          names/paths differ on Debian/Ubuntu). Detected distribution:
+          {{ ansible_facts['distribution'] | default('unknown') }}.
+
+    - name: Check whether httpd is installed
+      ansible.builtin.command: rpm -q httpd
+      register: httpd_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Get httpd systemd status fields
+      ansible.builtin.command: >-
+        systemctl show httpd --no-page
+        -p ActiveState -p SubState -p UnitFileState
+        -p ActiveEnterTimestamp -p MainPID -p Result
+      register: httpd_systemctl_show
+      changed_when: false
+      failed_when: false
+      when: httpd_installed.rc == 0
+
+    - name: Parse httpd systemd status fields
+      ansible.builtin.set_fact:
+        httpd_status: "{{ httpd_status | default({}) | combine({item.split('=')[0]: item.split('=', 1)[1]}) }}"
+      loop: "{{ httpd_systemctl_show.stdout_lines | default([]) }}"
+      when: httpd_installed.rc == 0
+
+    - name: Run Apache config syntax test
+      ansible.builtin.command: apachectl configtest
+      register: apache_configtest
+      changed_when: false
+      failed_when: false
+      when: httpd_installed.rc == 0
+
+    - name: Get recent journalctl entries for httpd
+      ansible.builtin.command: journalctl -u httpd --no-pager -n {{ journalctl_lines }} -o short-iso
+      register: httpd_journal
+      changed_when: false
+      failed_when: false
+      when: httpd_installed.rc == 0
+
+    - name: Get recent httpd error log entries
+      ansible.builtin.command: tail -n {{ apache_log_lines }} {{ apache_error_log }}
+      register: httpd_error_log
+      changed_when: false
+      failed_when: false
+
+    - name: Get recent httpd access log entries
+      ansible.builtin.command: tail -n {{ apache_log_lines }} {{ apache_access_log }}
+      register: httpd_access_log
+      changed_when: false
+      failed_when: false
+
+    - name: Check disk usage for filesystems backing Apache logs/docroot
+      ansible.builtin.shell: |
+        df -h /var/log/httpd /var/www 2>/dev/null | awk 'NR>1 {print $1,$2,$3,$4,$5,$6}'
+      register: apache_disk_usage
+      changed_when: false
+      failed_when: false
+
+    - name: Parse disk usage
+      ansible.builtin.set_fact:
+        apache_disk_volumes: "{{ apache_disk_volumes | default([]) + [{'filesystem': item.split()[0], 'size': item.split()[1], 'used': item.split()[2], 'available': item.split()[3], 'percent_used': item.split()[4] | replace('%', '') | int, 'mount_point': item.split()[5]}] }}"
+      loop: "{{ apache_disk_usage.stdout_lines | default([]) }}"
+
+    - name: Check whether httpd is listening on expected ports
+      ansible.builtin.shell: |
+        ss -tlnp 2>/dev/null | grep -E ':(80|443)\b' || true
+      register: httpd_listening_ports
+      changed_when: false
+
+    - name: Get SELinux enforcement mode
+      ansible.builtin.command: getenforce
+      register: selinux_mode
+      changed_when: false
+      failed_when: false
+
+    - name: Check for recent SELinux denials related to httpd
+      ansible.builtin.shell: |
+        ausearch -m avc -ts recent -c httpd 2>/dev/null || true
+      register: selinux_denials
+      changed_when: false
+      failed_when: false
+      when: selinux_mode.stdout | default('') == 'Enforcing'
+
+    - name: Build consolidated Apache diagnostics report
+      ansible.builtin.set_fact:
+        apache_diagnostics:
+          host: "{{ inventory_hostname }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          system_info:
+            os_distribution: "{{ ansible_distribution }}"
+            os_version: "{{ ansible_distribution_version }}"
+            kernel_version: "{{ ansible_kernel }}"
+            hostname: "{{ ansible_hostname }}"
+            fqdn: "{{ ansible_fqdn }}"
+          httpd_installed: "{{ httpd_installed.rc == 0 }}"
+          httpd_package_version: "{{ httpd_installed.stdout | default('') }}"
+          service_status: "{{ httpd_status | default({}) }}"
+          config_test:
+            passed: "{{ (apache_configtest.rc | default(1)) == 0 }}"
+            output: "{{ (apache_configtest.stdout_lines | default([])) + (apache_configtest.stderr_lines | default([])) }}"
+          journalctl_recent: "{{ httpd_journal.stdout_lines | default([]) }}"
+          error_log_recent: "{{ httpd_error_log.stdout_lines | default([]) }}"
+          access_log_recent: "{{ httpd_access_log.stdout_lines | default([]) }}"
+          disk_volumes: "{{ apache_disk_volumes | default([]) }}"
+          listening_ports: "{{ httpd_listening_ports.stdout_lines | default([]) }}"
+          selinux:
+            mode: "{{ selinux_mode.stdout | default('unknown') }}"
+            recent_denials: "{{ selinux_denials.stdout_lines | default([]) }}"
+
+    - name: Display Apache diagnostics summary
+      ansible.builtin.debug:
+        var: apache_diagnostics
+
+    - name: Set stats for AAP dashboard / downstream workflow node
+      ansible.builtin.set_stats:
+        data:
+          apache_diagnostics: "{{ apache_diagnostics }}"
+        per_host: true
+        aggregate: false
