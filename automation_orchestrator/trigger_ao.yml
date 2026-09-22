@@ -12,7 +12,26 @@
     webhook_path: ""
     webhook_client_id: ""
     webhook_client_secret: ""
+
+    # event_payload is sent to AO as-is when provided. If left empty, it is
+    # built below from these flat ServiceNow incident fields - matches what
+    # the servicenow_incident_triage.yml EDA rulebook's "AI Triage - Evaluate
+    # Unmatched Incident" rule passes as extra_vars.
     event_payload: {}
+    incident_number: ""
+    incident_sys_id: ""
+    category: ""
+    subcategory: ""
+    priority: ""
+    configuration_item: ""
+    cmdb_ci: ""
+    short_description: ""
+    description: ""
+    business_service: ""
+
+    # Set to false for AO instances with self-signed/untrusted certs (e.g.
+    # workshop clusters). Defaults to validating certs.
+    webhook_validate_certs: true
 
   tasks:
     - name: Obtain OAuth token
@@ -24,8 +43,25 @@
           grant_type: client_credentials
           client_id: "{{ webhook_client_id }}"
           client_secret: "{{ webhook_client_secret }}"
+        validate_certs: "{{ webhook_validate_certs }}"
         status_code: 200
       register: token_response
+
+    - name: Build event payload from ServiceNow incident fields
+      when: event_payload | length == 0 and incident_number | length > 0
+      ansible.builtin.set_fact:
+        event_payload:
+          host: "{{ configuration_item | default(cmdb_ci, true) }}"
+          error: "{{ description | default(short_description, true) }}"
+          incident_number: "{{ incident_number }}"
+          incident_sys_id: "{{ incident_sys_id }}"
+          category: "{{ category }}"
+          subcategory: "{{ subcategory }}"
+          priority: "{{ priority }}"
+          cmdb_ci: "{{ cmdb_ci }}"
+          short_description: "{{ short_description }}"
+          description: "{{ description }}"
+          business_service: "{{ business_service }}"
 
     - name: Post event payload to Event-Driven Ansible trigger endpoint
       ansible.builtin.uri:
@@ -36,6 +72,7 @@
           Authorization: "Bearer {{ token_response.json.access_token }}"
           Content-Type: application/json
         body: "{{ event_payload }}"
+        validate_certs: "{{ webhook_validate_certs }}"
         status_code: 202
       register: webhook_response
 

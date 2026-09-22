@@ -7,7 +7,7 @@
 #   ansible-playbook rhel_log_rotation.yml -e "log_paths=['/var/log/myapp']"
 #
 - name: Rotate and clean up logs on RHEL hosts
-  hosts: "{{ _hosts }}"
+  hosts: "{{ _hosts | default('') }}"
   become: true
   vars:
     # Directories to scan for stale/oversized log files.
