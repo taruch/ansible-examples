@@ -1,0 +1,44 @@
+---
+- name: Trigger EDA webhook
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    webhook_base_url: ""
+    # Full path suffix after /api/v1/webhooks/, e.g.:
+    #   "29f4ab88-dff5-460c-a6d9-ec504382eb25"       (generic AO trigger)
+    #   "eda/7024302e-4beb-4473-8efc-8eceb2c05207"   (EDA-specific trigger)
+    webhook_path: ""
+    webhook_client_id: ""
+    webhook_client_secret: ""
+    event_payload: {}
+
+  tasks:
+    - name: Obtain OAuth token
+      ansible.builtin.uri:
+        url: "{{ webhook_base_url }}/api/v1/auth/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: client_credentials
+          client_id: "{{ webhook_client_id }}"
+          client_secret: "{{ webhook_client_secret }}"
+        status_code: 200
+      register: token_response
+
+    - name: Post event payload to Event-Driven Ansible trigger endpoint
+      ansible.builtin.uri:
+        url: "{{ webhook_base_url }}/api/v1/webhooks/{{ webhook_path }}"
+        method: POST
+        body_format: json
+        headers:
+          Authorization: "Bearer {{ token_response.json.access_token }}"
+          Content-Type: application/json
+        body: "{{ event_payload }}"
+        status_code: 202
+      register: webhook_response
+
+    - name: Display execution ID
+      ansible.builtin.debug:
+        msg: "Workflow execution started: {{ webhook_response.json.execution_id }}"
