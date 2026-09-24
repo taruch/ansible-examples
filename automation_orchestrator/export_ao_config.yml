@@ -1,0 +1,181 @@
+---
+# Exports Ansible Automation Orchestrator (AO) configuration so it can be
+# reimported into a new AO instance: projects, custom credential types,
+# credential metadata (for reference), and every workflow's exported
+# definition (via AO's own GET .../versions/{version}/export endpoint).
+#
+# NOT exported: credential secret values. The AO API always returns secret
+# credential inputs masked as "$encrypted$" (confirmed in the OpenAPI spec's
+# CredentialRead description) - there is no API to retrieve real secret
+# values. Credentials must be recreated manually on the target instance
+# (matching names/credential_type) before reimporting any workflow that
+# references one.
+#
+# Reimporting a workflow (not done by this playbook): POST /api/v1/workflows
+# with { name, project_id: <target-project-id>, workflow_definition: <the
+# exported JSON>, is_import: true }. The WorkflowCreate schema's is_import
+# flag exists specifically for this: it clears unavailable LLM models with
+# warnings instead of rejecting the import, and drops webhook/EDA-authorized
+# service accounts missing in the target project instead of failing.
+#
+# Required variables:
+#   - ao_base_url: AO instance URL
+#   - ao_username / ao_password: your AO user credentials. Logging in as a
+#     user (rather than a service account's client_credentials grant) means
+#     the export sees exactly what you can see in the AO UI - service
+#     accounts default to zero project/workflow visibility until explicitly
+#     granted a role, which silently produces an empty export.
+#
+# Usage:
+#   ansible-playbook export_ao_config.yml \
+#     -e ao_base_url="https://automation-orchestrator-....apps.example.com" \
+#     -e ao_username="<username>" \
+#     -e ao_password="<password>" \
+#     -e export_dir="./ao_export"
+
+- name: Export Automation Orchestrator configuration for reimport
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    ao_base_url: ""
+    ao_username: ""
+    ao_password: ""
+    export_dir: "./ao_export"
+    page_limit: 100
+    max_pages: 50
+    # Set to false for AO instances with self-signed/untrusted certs (e.g.
+    # workshop clusters). Defaults to validating certs.
+    ao_validate_certs: true
+
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - ao_base_url | length > 0
+          - ao_username | length > 0
+          - ao_password | length > 0
+        fail_msg: "ao_base_url, ao_username, and ao_password are required"
+
+    - name: Log in with username and password
+      ansible.builtin.uri:
+        url: "{{ ao_base_url }}/api/v1/auth/login"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ ao_username }}"
+          password: "{{ ao_password }}"
+        validate_certs: "{{ ao_validate_certs }}"
+        status_code: 200
+      register: ao_token_response
+      no_log: true
+
+    - name: Set auth header fact
+      ansible.builtin.set_fact:
+        ao_auth_header:
+          Authorization: "Bearer {{ ao_token_response.json.access_token }}"
+
+    - name: Ensure export directory exists
+      ansible.builtin.file:
+        path: "{{ export_dir }}/workflows"
+        state: directory
+        mode: '0755'
+
+    #
+    # Projects
+    #
+    - name: Fetch all projects
+      vars:
+        ao_paginate_path: /api/v1/projects
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Save projects fact
+      ansible.builtin.set_fact:
+        ao_projects: "{{ ao_paginate_result }}"
+
+    - name: Write projects export file
+      ansible.builtin.copy:
+        content: "{{ ao_projects | to_nice_json }}"
+        dest: "{{ export_dir }}/projects.json"
+        mode: '0644'
+
+    #
+    # Custom credential types (definitions only - no secrets involved)
+    #
+    - name: Fetch all credential types
+      vars:
+        ao_paginate_path: /api/v1/credential_types
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Write credential types export file
+      ansible.builtin.copy:
+        content: "{{ ao_paginate_result | to_nice_json }}"
+        dest: "{{ export_dir }}/credential_types.json"
+        mode: '0644'
+
+    #
+    # Credential metadata (names/types/non-secret inputs only, for reference -
+    # secret input values come back as "$encrypted$" and must be re-entered
+    # by hand on the target instance)
+    #
+    - name: Fetch all credentials
+      vars:
+        ao_paginate_path: /api/v1/credentials
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Write credentials export file (metadata only, secrets masked)
+      ansible.builtin.copy:
+        content: "{{ ao_paginate_result | to_nice_json }}"
+        dest: "{{ export_dir }}/credentials.json"
+        mode: '0644'
+
+    #
+    # Workflows (full exportable definition per workflow)
+    #
+    - name: Fetch all workflows
+      vars:
+        ao_paginate_path: /api/v1/workflows
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Save workflows fact
+      ansible.builtin.set_fact:
+        ao_workflows: "{{ ao_paginate_result }}"
+
+    - name: Write workflows summary export file
+      ansible.builtin.copy:
+        content: "{{ ao_workflows | to_nice_json }}"
+        dest: "{{ export_dir }}/workflows.json"
+        mode: '0644'
+
+    - name: Build project id-to-name lookup
+      ansible.builtin.set_fact:
+        ao_project_names: "{{ dict(ao_projects | map(attribute='id') | zip(ao_projects | map(attribute='name'))) }}"
+
+    - name: Export each workflow's definition
+      ansible.builtin.include_tasks: tasks/ao_export_workflow.yml
+      vars:
+        # published_version_number is explicitly null (not absent) for
+        # never-published workflows, so default() needs its boolean 2nd arg
+        # to treat that null as "use the fallback" - current_version is a
+        # required field on every workflow, so this always resolves.
+        ao_export_version: "{{ item.published_version_number | default(item.current_version, true) }}"
+        ao_project_dir: >-
+          {{ export_dir }}/workflows/{{
+          (ao_project_names[item.project_id] | default('_unknown_project'))
+          | regex_replace('[^A-Za-z0-9._-]', '_') }}
+        ao_workflow_filename: "{{ item.name | regex_replace('[^A-Za-z0-9._-]', '_') }}"
+      loop: "{{ ao_workflows }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Display export summary
+      ansible.builtin.debug:
+        msg:
+          - "=== AO EXPORT SUMMARY ==="
+          - "Projects exported: {{ ao_projects | length }}"
+          - "Credential types exported: {{ (lookup('file', export_dir + '/credential_types.json') | from_json) | length }}"
+          - "Credentials (metadata only) exported: {{ (lookup('file', export_dir + '/credentials.json') | from_json) | length }}"
+          - "Workflows exported: {{ ao_workflows | length }}"
+          - "Output directory: {{ export_dir }}"
+          - "Reminder: credential secret values are NOT included - recreate credentials on the target instance before reimporting workflows."

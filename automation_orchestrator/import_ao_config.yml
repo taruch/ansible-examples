@@ -1,0 +1,167 @@
+---
+# Imports workflow definitions previously exported by export_ao_config.yml
+# into a (possibly different/new) Automation Orchestrator (AO) instance.
+#
+# For each exported workflow (import_dir/workflows/<project>/<workflow>.json
+# + matching .meta.json), the source project - by name, from the
+# .meta.json's source_project_name - is created on the target instance if
+# it doesn't already exist, then the workflow is created via
+# POST /api/v1/workflows with is_import: true, the flag AO's own API
+# describes as being for "importing workflows from other instances" (it
+# clears unavailable LLM models with warnings, and drops missing
+# webhook/EDA-authorized service account bindings, instead of rejecting the
+# import outright).
+#
+# Idempotent: skips (does not overwrite) any workflow whose name already
+# exists in the target project.
+#
+# Newly-imported workflows are created as an unpublished draft version -
+# AO requires an explicit publish step (POST
+# /workflows/{id}/versions/{version}/publish) before a workflow actually
+# runs. This playbook does not publish automatically; review each imported
+# workflow before publishing it on the target.
+#
+# NOT imported: credential secret values (export_ao_config.yml never
+# exports them - the AO API always masks secret credential inputs as
+# "$encrypted$"). Recreate credentials by hand on the target instance
+# (matching names/types from credential_types.json/credentials.json) before
+# importing any workflow that references one.
+#
+# Required variables:
+#   - ao_base_url: target AO instance URL
+#   - ao_username / ao_password: your AO user credentials on the TARGET
+#     instance (needs project:create and workflow:create permissions)
+#   - import_dir: directory previously produced by export_ao_config.yml
+#
+# Usage:
+#   ansible-playbook import_ao_config.yml \
+#     -e ao_base_url="https://<target-ao-instance>" \
+#     -e ao_username="<username>" \
+#     -e ao_password="<password>" \
+#     -e import_dir="./ao_export"
+
+- name: Import Automation Orchestrator configuration
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    ao_base_url: ""
+    ao_username: ""
+    ao_password: ""
+    import_dir: "./ao_export"
+    page_limit: 100
+    max_pages: 50
+    # Set to false for AO instances with self-signed/untrusted certs (e.g.
+    # workshop clusters). Defaults to validating certs.
+    ao_validate_certs: true
+
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - ao_base_url | length > 0
+          - ao_username | length > 0
+          - ao_password | length > 0
+          - import_dir | length > 0
+        fail_msg: "ao_base_url, ao_username, ao_password, and import_dir are required"
+
+    - name: Log in with username and password
+      ansible.builtin.uri:
+        url: "{{ ao_base_url }}/api/v1/auth/login"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ ao_username }}"
+          password: "{{ ao_password }}"
+        validate_certs: "{{ ao_validate_certs }}"
+        status_code: 200
+      register: ao_token_response
+      no_log: true
+
+    - name: Set auth header fact
+      ansible.builtin.set_fact:
+        ao_auth_header:
+          Authorization: "Bearer {{ ao_token_response.json.access_token }}"
+
+    #
+    # Load what was exported
+    #
+    - name: Find exported workflow metadata files
+      ansible.builtin.find:
+        paths: "{{ import_dir }}/workflows"
+        patterns: "*.meta.json"
+        recurse: true
+      register: ao_meta_files
+
+    - name: Fail if nothing to import
+      ansible.builtin.assert:
+        that:
+          - ao_meta_files.matched > 0
+        fail_msg: "No exported workflow .meta.json files found under {{ import_dir }}/workflows - nothing to import."
+
+    - name: Load workflow metadata
+      ansible.builtin.set_fact:
+        ao_import_items: >-
+          {{ ao_import_items | default([]) + [
+            (lookup('file', item.path) | from_json) | combine({
+              '_definition_path': item.path | regex_replace('\.meta\.json$', '.json')
+            })
+          ] }}
+      loop: "{{ ao_meta_files.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    #
+    # Fetch existing target projects and workflows (for idempotency)
+    #
+    - name: Fetch existing target projects
+      vars:
+        ao_paginate_path: /api/v1/projects
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Build target project name-to-id lookup
+      ansible.builtin.set_fact:
+        ao_target_project_ids: "{{ dict(ao_paginate_result | map(attribute='name') | zip(ao_paginate_result | map(attribute='id'))) }}"
+
+    - name: Fetch existing target workflows
+      vars:
+        ao_paginate_path: /api/v1/workflows
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Save target workflows fact
+      ansible.builtin.set_fact:
+        ao_target_workflows: "{{ ao_paginate_result }}"
+
+    #
+    # Ensure each referenced project exists on the target
+    #
+    - name: Determine distinct source project names to import into
+      ansible.builtin.set_fact:
+        ao_import_project_names: "{{ ao_import_items | map(attribute='source_project_name') | unique | list }}"
+
+    - name: Ensure target projects exist
+      ansible.builtin.include_tasks: tasks/ao_ensure_project.yml
+      loop: "{{ ao_import_project_names }}"
+      loop_control:
+        loop_var: ao_project_name
+        label: "{{ ao_project_name }}"
+
+    #
+    # Import each workflow
+    #
+    - name: Import each workflow
+      ansible.builtin.include_tasks: tasks/ao_import_workflow.yml
+      loop: "{{ ao_import_items }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Display import summary
+      ansible.builtin.debug:
+        msg:
+          - "=== AO IMPORT SUMMARY ==="
+          - "Source directory: {{ import_dir }}"
+          - "Projects referenced: {{ ao_import_project_names | length }}"
+          - "Workflows processed: {{ ao_import_items | length }}"
+          - "Reminder: credential secrets were NOT imported - recreate them on the target before running anything that needs them."
+          - "Reminder: imported workflows are unpublished drafts - publish each one on the target before it can run."
