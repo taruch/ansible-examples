@@ -1,15 +1,4 @@
 ---
-# Triggers an AO webhook from a ServiceNow incident.
-#
-# Field normalization now happens upstream, in the ServiceNow EDA
-# rulebook's action (see rulebooks/servicenow_incident_triage.yml) - it
-# maps raw ServiceNow incident fields into the canonical event_payload
-# shape shared across all event sources (source, event_id, _hosts,
-# category, severity, short_description, description, error, raw). This
-# playbook is intentionally identical in shape to trigger_ao_eventsource.yml;
-# it exists as a separate, ServiceNow-named entry point (distinct AAP job
-# template) rather than because the logic actually differs.
-
 - name: Trigger EDA webhook
   hosts: localhost
   connection: local
@@ -24,25 +13,27 @@
     webhook_client_id: ""
     webhook_client_secret: ""
 
-    # Required: the canonical event payload (see rulebooks/servicenow_incident_triage.yml
-    # for how it's built from a raw ServiceNow incident).
+    # event_payload is sent to AO as-is when provided. If left empty, it is
+    # built below from these flat ServiceNow incident fields - matches what
+    # the servicenow_incident_triage.yml EDA rulebook's "AI Triage - Evaluate
+    # Unmatched Incident" rule passes as extra_vars.
     event_payload: {}
+    incident_number: ""
+    incident_sys_id: ""
+    category: ""
+    subcategory: ""
+    priority: ""
+    configuration_item: ""
+    cmdb_ci: ""
+    short_description: ""
+    description: ""
+    business_service: ""
 
     # Set to false for AO instances with self-signed/untrusted certs (e.g.
     # workshop clusters). Defaults to validating certs.
     webhook_validate_certs: true
 
   tasks:
-    - name: Validate required variables
-      ansible.builtin.assert:
-        that:
-          - webhook_base_url | length > 0
-          - webhook_path | length > 0
-          - webhook_client_id | length > 0
-          - webhook_client_secret | length > 0
-          - event_payload | length > 0
-        fail_msg: "webhook_base_url, webhook_path, webhook_client_id, webhook_client_secret, and a non-empty event_payload are required"
-
     - name: Obtain OAuth token
       ansible.builtin.uri:
         url: "{{ webhook_base_url }}/api/v1/auth/token"
@@ -55,6 +46,22 @@
         validate_certs: "{{ webhook_validate_certs }}"
         status_code: 200
       register: token_response
+
+    - name: Build event payload from ServiceNow incident fields
+      when: event_payload | length == 0 and incident_number | length > 0
+      ansible.builtin.set_fact:
+        event_payload:
+          host: "{{ configuration_item | default(cmdb_ci, true) }}"
+          error: "{{ description | default(short_description, true) }}"
+          incident_number: "{{ incident_number }}"
+          incident_sys_id: "{{ incident_sys_id }}"
+          category: "{{ category }}"
+          subcategory: "{{ subcategory }}"
+          priority: "{{ priority }}"
+          cmdb_ci: "{{ cmdb_ci }}"
+          short_description: "{{ short_description }}"
+          description: "{{ description }}"
+          business_service: "{{ business_service }}"
 
     - name: Post event payload to Event-Driven Ansible trigger endpoint
       ansible.builtin.uri:
