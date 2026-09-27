@@ -1,0 +1,74 @@
+---
+# Triggers an AO webhook from a ServiceNow incident.
+#
+# Field normalization now happens upstream, in the ServiceNow EDA
+# rulebook's action (see rulebooks/servicenow_incident_triage.yml) - it
+# maps raw ServiceNow incident fields into the canonical event_payload
+# shape shared across all event sources (source, event_id, _hosts,
+# category, severity, short_description, description, error, raw). This
+# playbook is intentionally identical in shape to trigger_ao_eventsource.yml;
+# it exists as a separate, ServiceNow-named entry point (distinct AAP job
+# template) rather than because the logic actually differs.
+
+- name: Trigger EDA webhook
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    webhook_base_url: ""
+    # Full path suffix after /api/v1/webhooks/, e.g.:
+    #   "29f4ab88-dff5-460c-a6d9-ec504382eb25"       (generic AO trigger)
+    #   "eda/7024302e-4beb-4473-8efc-8eceb2c05207"   (EDA-specific trigger)
+    webhook_path: ""
+    webhook_client_id: ""
+    webhook_client_secret: ""
+
+    # Required: the canonical event payload (see rulebooks/servicenow_incident_triage.yml
+    # for how it's built from a raw ServiceNow incident).
+    event_payload: {}
+
+    # Set to false for AO instances with self-signed/untrusted certs (e.g.
+    # workshop clusters). Defaults to validating certs.
+    webhook_validate_certs: true
+
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - webhook_base_url | length > 0
+          - webhook_path | length > 0
+          - webhook_client_id | length > 0
+          - webhook_client_secret | length > 0
+          - event_payload | length > 0
+        fail_msg: "webhook_base_url, webhook_path, webhook_client_id, webhook_client_secret, and a non-empty event_payload are required"
+
+    - name: Obtain OAuth token
+      ansible.builtin.uri:
+        url: "{{ webhook_base_url }}/api/v1/auth/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: client_credentials
+          client_id: "{{ webhook_client_id }}"
+          client_secret: "{{ webhook_client_secret }}"
+        validate_certs: "{{ webhook_validate_certs }}"
+        status_code: 200
+      register: token_response
+
+    - name: Post event payload to Event-Driven Ansible trigger endpoint
+      ansible.builtin.uri:
+        url: "{{ webhook_base_url }}/api/v1/webhooks/{{ webhook_path }}"
+        method: POST
+        body_format: json
+        headers:
+          Authorization: "Bearer {{ token_response.json.access_token }}"
+          Content-Type: application/json
+        body: "{{ event_payload }}"
+        validate_certs: "{{ webhook_validate_certs }}"
+        status_code: 202
+      register: webhook_response
+
+    - name: Display execution ID
+      ansible.builtin.debug:
+        msg: "Workflow execution started: {{ webhook_response.json.execution_id }}"
