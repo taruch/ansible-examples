@@ -10,7 +10,14 @@
 # describes as being for "importing workflows from other instances" (it
 # clears unavailable LLM models with warnings, and drops missing
 # webhook/EDA-authorized service account bindings, instead of rejecting the
-# import outright).
+# import outright). That leniency does NOT cover a node's own credential_id/
+# integration_id/integration_connections references, though - AO
+# hard-rejects the whole workflow with a 422 if those point at a credential
+# or integration missing on the target. So before importing workflows, this
+# playbook also recreates every credential type/credential/integration
+# referenced by an imported project (matched by name) if missing on the
+# target, and rewrites each workflow definition's embedded credential and
+# integration ids to the target instance's ids.
 #
 # Idempotent: skips (does not overwrite) any workflow whose name already
 # exists in the target project.
@@ -21,11 +28,13 @@
 # runs. This playbook does not publish automatically; review each imported
 # workflow before publishing it on the target.
 #
-# NOT imported: credential secret values (export_ao_config.yml never
+# Credential secret values are NOT recoverable (export_ao_config.yml never
 # exports them - the AO API always masks secret credential inputs as
-# "$encrypted$"). Recreate credentials by hand on the target instance
-# (matching names/types from credential_types.json/credentials.json) before
-# importing any workflow that references one.
+# "$encrypted$"), so any credential created here gets a dummy
+# "PLACEHOLDER-<name>" value for every secret field instead - printed at the
+# end of the run. Fine for this repo's throwaway demo/workshop targets;
+# replace the placeholder values by hand (or in the target's vault) before
+# relying on the credential for anything real.
 #
 # Required variables:
 #   - ao_base_url: target AO instance URL
@@ -148,6 +157,138 @@
         label: "{{ ao_project_name }}"
 
     #
+    # Load exported credential types/credentials/projects (source side) so
+    # workflow-embedded credential ids can be resolved and recreated
+    #
+    - name: Load exported credential types
+      ansible.builtin.set_fact:
+        ao_source_credential_types: "{{ lookup('file', import_dir + '/credential_types.json') | from_json }}"
+
+    - name: Load exported credentials
+      ansible.builtin.set_fact:
+        ao_source_credentials: "{{ lookup('file', import_dir + '/credentials.json') | from_json }}"
+
+    - name: Load exported projects
+      ansible.builtin.set_fact:
+        ao_source_projects: "{{ lookup('file', import_dir + '/projects.json') | from_json }}"
+
+    - name: Build source project id-to-name lookup
+      ansible.builtin.set_fact:
+        ao_project_names: "{{ dict(ao_source_projects | map(attribute='id') | zip(ao_source_projects | map(attribute='name'))) }}"
+
+    - name: Build source credential type inputs-schema lookup (type id -> inputs)
+      ansible.builtin.set_fact:
+        ao_credential_type_inputs: "{{ dict(ao_source_credential_types | map(attribute='id') | zip(ao_source_credential_types | map(attribute='inputs'))) }}"
+
+    #
+    # Ensure every credential type exists on the target
+    #
+    - name: Fetch existing target credential types
+      vars:
+        ao_paginate_path: /api/v1/credential_types
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Build target credential type name-to-id lookup
+      ansible.builtin.set_fact:
+        ao_target_credential_type_ids: "{{ dict(ao_paginate_result | map(attribute='name') | zip(ao_paginate_result | map(attribute='id'))) }}"
+
+    - name: Init source-to-target credential type id map
+      ansible.builtin.set_fact:
+        ao_credential_type_id_map: {}
+
+    - name: Ensure target credential types exist
+      ansible.builtin.include_tasks: tasks/ao_ensure_credential_type.yml
+      loop: "{{ ao_source_credential_types }}"
+      loop_control:
+        loop_var: ao_credential_type
+        label: "{{ ao_credential_type.name }}"
+
+    #
+    # Ensure every credential referenced by an imported project exists on
+    # the target (placeholder secret values - see header comment above)
+    #
+    - name: Fetch existing target credentials
+      vars:
+        ao_paginate_path: /api/v1/credentials
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Save target credentials fact
+      ansible.builtin.set_fact:
+        ao_target_credentials: "{{ ao_paginate_result }}"
+
+    - name: Init credential id map, placeholder summary, and import results summary
+      ansible.builtin.set_fact:
+        ao_credential_id_map: {}
+        ao_created_credential_placeholders: []
+        ao_import_results: []
+
+    - name: Determine source project ids being imported
+      ansible.builtin.set_fact:
+        ao_import_project_ids: "{{ ao_source_projects | selectattr('name', 'in', ao_import_project_names) | map(attribute='id') | list }}"
+
+    - name: Determine credentials referenced by imported projects
+      ansible.builtin.set_fact:
+        ao_import_credentials: "{{ ao_source_credentials | selectattr('project_id', 'in', ao_import_project_ids) | list }}"
+
+    - name: Ensure target credentials exist
+      ansible.builtin.include_tasks: tasks/ao_ensure_credential.yml
+      loop: "{{ ao_import_credentials }}"
+      loop_control:
+        loop_var: ao_credential
+        label: "{{ ao_credential.name }}"
+
+    #
+    # Ensure every integration (MCP Server/LLM Provider/AAP connection)
+    # referenced by an imported project exists on the target. Older exports
+    # (from before integrations.json was captured) won't have this file -
+    # tolerate that rather than failing the whole import.
+    #
+    - name: Check for an exported integrations file
+      ansible.builtin.stat:
+        path: "{{ import_dir }}/integrations.json"
+      register: ao_integrations_file_stat
+
+    - name: Load exported integrations
+      ansible.builtin.set_fact:
+        ao_source_integrations: "{{ lookup('file', import_dir + '/integrations.json') | from_json }}"
+      when: ao_integrations_file_stat.stat.exists
+
+    - name: Default empty integrations list (export predates integrations.json)
+      ansible.builtin.set_fact:
+        ao_source_integrations: []
+      when: not ao_integrations_file_stat.stat.exists
+
+    - name: Fetch existing target integrations
+      vars:
+        ao_paginate_path: /api/v1/integrations
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Save target integrations fact
+      ansible.builtin.set_fact:
+        ao_target_integrations: "{{ ao_paginate_result }}"
+
+    - name: Init integration id map
+      ansible.builtin.set_fact:
+        ao_integration_id_map: {}
+
+    # Unlike credentials, integrations aren't necessarily project-scoped
+    # (confirmed live: a real integration came back with scope: "global" and
+    # an empty project_ids list) - there's no reliable "belongs to this
+    # imported project" filter to apply, so every exported integration is
+    # brought over. tasks/ao_ensure_integration.yml best-effort remaps
+    # project_ids for the (untested) project-scoped case.
+    - name: Determine integrations to import
+      ansible.builtin.set_fact:
+        ao_import_integrations: "{{ ao_source_integrations }}"
+
+    - name: Ensure target integrations exist
+      ansible.builtin.include_tasks: tasks/ao_ensure_integration.yml
+      loop: "{{ ao_import_integrations }}"
+      loop_control:
+        loop_var: ao_integration
+        label: "{{ ao_integration.name }}"
+
+    #
     # Import each workflow
     #
     - name: Import each workflow
@@ -163,5 +304,10 @@
           - "Source directory: {{ import_dir }}"
           - "Projects referenced: {{ ao_import_project_names | length }}"
           - "Workflows processed: {{ ao_import_items | length }}"
-          - "Reminder: credential secrets were NOT imported - recreate them on the target before running anything that needs them."
+          - "Per-workflow results:"
+          - "{{ ao_import_results }}"
+          - "Credentials created with PLACEHOLDER secret values: {{ ao_created_credential_placeholders | length }}"
+          - "{{ ao_created_credential_placeholders }}"
+          - "Reminder: the credentials above are dummy values - replace them (target instance, by name) before relying on the workflow for anything real."
           - "Reminder: imported workflows are unpublished drafts - publish each one on the target before it can run."
+          - "Reminder: a newly-created integration has no tools/models synced yet - any workflow's tool_selections from the OLD sync are gone; re-pick tools by hand in the AO UI for that workflow. Any FAILED integration/workflow above should be recreated by hand in the AO UI, then this playbook re-run (idempotent, picks up only what's still missing)."

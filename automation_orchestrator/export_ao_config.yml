@@ -1,8 +1,21 @@
 ---
 # Exports Ansible Automation Orchestrator (AO) configuration so it can be
 # reimported into a new AO instance: projects, custom credential types,
-# credential metadata (for reference), and every workflow's exported
-# definition (via AO's own GET .../versions/{version}/export endpoint).
+# credential metadata (for reference), integrations (MCP Server/LLM
+# Provider/Ansible Automation Platform connections), and every workflow's
+# exported definition (via AO's own GET .../versions/{version}/export
+# endpoint).
+#
+# Integrations matter because workflow nodes reference them by id
+# (integration_id, integration_connections) just like they reference
+# credentials by id - and unlike credentials, there's no way to recover a
+# missing integration export after the fact: its config (and any
+# name-to-tool-id mapping a Task Agent's tool_selections depended on) only
+# exists on the source instance. A prior version of this playbook omitted
+# integrations entirely, which surfaced as workflows silently failing to
+# import on a new target with "One or more selected integrations are no
+# longer available" - by the time that was noticed, the source instance
+# involved had already been deleted, making the specific data unrecoverable.
 #
 # NOT exported: credential secret values. The AO API always returns secret
 # credential inputs masked as "$encrypted$" (confirmed in the OpenAPI spec's
@@ -131,6 +144,25 @@
         mode: '0644'
 
     #
+    # Integrations (MCP Server / LLM Provider / Ansible Automation Platform
+    # connections) - a separate resource type from Credentials. A workflow's
+    # Task Agent/aap_job_template nodes reference these by id
+    # (integration_id, integration_connections), and AO hard-rejects import
+    # of a workflow whose referenced integration is missing on the target -
+    # unlike credential_id references, that failure isn't recoverable after
+    # the fact if this isn't exported now.
+    - name: Fetch all integrations
+      vars:
+        ao_paginate_path: /api/v1/integrations
+      ansible.builtin.include_tasks: tasks/ao_paginate.yml
+
+    - name: Write integrations export file
+      ansible.builtin.copy:
+        content: "{{ ao_paginate_result | to_nice_json }}"
+        dest: "{{ export_dir }}/integrations.json"
+        mode: '0644'
+
+    #
     # Workflows (full exportable definition per workflow)
     #
     - name: Fetch all workflows
@@ -176,6 +208,7 @@
           - "Projects exported: {{ ao_projects | length }}"
           - "Credential types exported: {{ (lookup('file', export_dir + '/credential_types.json') | from_json) | length }}"
           - "Credentials (metadata only) exported: {{ (lookup('file', export_dir + '/credentials.json') | from_json) | length }}"
+          - "Integrations exported: {{ (lookup('file', export_dir + '/integrations.json') | from_json) | length }}"
           - "Workflows exported: {{ ao_workflows | length }}"
           - "Output directory: {{ export_dir }}"
           - "Reminder: credential secret values are NOT included - recreate credentials on the target instance before reimporting workflows."
