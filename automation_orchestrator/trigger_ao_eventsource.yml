@@ -38,8 +38,7 @@
           - webhook_path | length > 0
           - webhook_client_id | length > 0
           - webhook_client_secret | length > 0
-          - event_payload | length > 0
-        fail_msg: "webhook_base_url, webhook_path, webhook_client_id, webhook_client_secret, and a non-empty event_payload are required"
+        fail_msg: "webhook_base_url, webhook_path, webhook_client_id, webhook_client_secret are required"
 
     - name: Obtain OAuth token
       ansible.builtin.uri:
