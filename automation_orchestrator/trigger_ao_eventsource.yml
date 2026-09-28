@@ -1,12 +1,14 @@
 ---
 # Triggers an AO webhook from a generic event source (Dynatrace, Splunk,
-# etc.). Unlike trigger_ao_servicenow.yml, there's no single flat-field
-# schema that fits every event source, so this playbook doesn't attempt to
-# build event_payload for you - the caller must assemble it (e.g. in the
-# monitoring tool's webhook/alert action config, or a wrapper playbook) and
-# pass it in directly, shaped to match what the target AO workflow's trigger
-# step expects to read (commonly trigger.host / trigger.error - check the
-# specific workflow).
+# etc.). When display_id is set, event_payload is always rebuilt from the
+# flat Dynatrace problem fields below - matches what the
+# dynatrace_event_triage.yml EDA rulebook's "AI Triage - Evaluate Unmatched
+# Event" rule passes as extra_vars - and forwarded under their native
+# Dynatrace field names (unlike trigger_ao_servicenow.yml, which renames
+# ServiceNow incident fields into its own schema - the two event sources
+# feed different AO workflows with different trigger contracts, so don't
+# assume a shared schema). event_payload is only forwarded unmodified when
+# display_id is empty (a non-Dynatrace caller assembled it directly).
 
 - name: Trigger EDA webhook
   hosts: localhost
@@ -22,25 +24,26 @@
     webhook_client_id: ""
     webhook_client_secret: ""
 
-    # Required: the event payload to send to AO as-is, shaped for whatever
-    # the target workflow's trigger step expects.
-    event_payload: {}
+    # If display_id is set, event_payload is always rebuilt below from these
+    # flat Dynatrace problem fields, overriding whatever was passed in - the
+    # caller (dynatrace_event_triage.yml) currently also sets a stale,
+    # incorrectly-nested event_payload alongside these flat fields, so it
+    # can't be trusted as-is. event_payload is only forwarded unmodified
+    # when display_id is empty (i.e. a non-Dynatrace caller assembled it
+    # directly).
+    eventData: {}
+    display_id: ""
+    event: ""
+    problem_id: ""
+    event_category: ""
+    event_name: ""
+    _hosts: []
 
     # Set to false for AO instances with self-signed/untrusted certs (e.g.
     # workshop clusters). Defaults to validating certs.
     webhook_validate_certs: true
 
   tasks:
-    - name: Validate required variables
-      ansible.builtin.assert:
-        that:
-          - webhook_base_url | length > 0
-          - webhook_path | length > 0
-          - webhook_client_id | length > 0
-          - webhook_client_secret | length > 0
-          - event_payload | length > 0
-        fail_msg: "webhook_base_url, webhook_path, webhook_client_id, webhook_client_secret, and a non-empty event_payload are required"
-
     - name: Obtain OAuth token
       register: token_response
       no_log: true
@@ -55,6 +58,15 @@
         validate_certs: "{{ webhook_validate_certs }}"
         status_code: 200
 
+    - name: Build event payload from Dynatrace problem fields
+      when: display_id | length > 0
+      ansible.builtin.set_fact:
+        eventData: "{{ event_payload.eventData }}"
+
+    - name: Debug eventData
+      ansible.builtin.debug:
+        var: eventData
+
     - name: Post event payload to Event-Driven Ansible trigger endpoint
       ansible.builtin.uri:
         url: "{{ webhook_base_url }}/api/v1/webhooks/{{ webhook_path }}"
@@ -63,7 +75,7 @@
         headers:
           Authorization: "Bearer {{ token_response.json.access_token }}"
           Content-Type: application/json
-        body: "{{ event_payload.eventData }}"
+        body: "{{ eventData }}"
         validate_certs: "{{ webhook_validate_certs }}"
         status_code: 202
       register: webhook_response
