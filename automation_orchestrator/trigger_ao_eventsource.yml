@@ -49,9 +49,9 @@
       ansible.builtin.set_fact:
         eventData: "{{ event_payload.eventData }}"
 
-    - name: Sanitize eventData field names (AO rejects dots in keys)
+    - name: Sanitize eventData field names and values (AO rejects dots in keys and requires string values)
       ansible.builtin.set_fact:
-        eventData_sanitized: "{{ eventData_sanitized | default({}) | combine({ item.key | replace('.', '_'): item.value }) }}"
+        eventData_sanitized: "{{ eventData_sanitized | default({}) | combine({ item.key | replace('.', '_'): item.value | string }) }}"
       loop: "{{ eventData | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
