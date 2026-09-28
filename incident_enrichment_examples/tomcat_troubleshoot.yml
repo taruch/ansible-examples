@@ -142,5 +142,5 @@
       ansible.builtin.set_stats:
         data:
           tomcat_diagnostics: "{{ tomcat_diagnostics }}"
-        per_host: true
+        per_host: false
         aggregate: false
