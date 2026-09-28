@@ -60,10 +60,6 @@
       ansible.builtin.set_fact:
         eventData: "{{ eventData_sanitized }}"
 
-    - name: Debug eventData
-      ansible.builtin.debug:
-        var: eventData
-
     - name: Post event payload to Event-Driven Ansible trigger endpoint
       ansible.builtin.uri:
         url: "{{ webhook_base_url }}/api/v1/webhooks/{{ webhook_path }}"
