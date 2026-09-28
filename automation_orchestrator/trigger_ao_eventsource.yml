@@ -1,14 +1,10 @@
 ---
 # Triggers an AO webhook from a generic event source (Dynatrace, Splunk,
-# etc.). When display_id is set, event_payload is always rebuilt from the
-# flat Dynatrace problem fields below - matches what the
-# dynatrace_event_triage.yml EDA rulebook's "AI Triage - Evaluate Unmatched
-# Event" rule passes as extra_vars - and forwarded under their native
-# Dynatrace field names (unlike trigger_ao_servicenow.yml, which renames
-# ServiceNow incident fields into its own schema - the two event sources
-# feed different AO workflows with different trigger contracts, so don't
-# assume a shared schema). event_payload is only forwarded unmodified when
-# display_id is empty (a non-Dynatrace caller assembled it directly).
+# etc.). The caller (e.g. dynatrace_event_triage.yml) passes the raw event
+# data as event_payload.eventData; AO's trigger schema requires eventData
+# to be a string, not a nested object, so this playbook unwraps it and
+# posts the raw fields directly as the top-level JSON body instead of
+# nesting them under an "eventData" key.
 
 - name: Trigger EDA webhook
   hosts: localhost
@@ -24,20 +20,10 @@
     webhook_client_id: ""
     webhook_client_secret: ""
 
-    # If display_id is set, event_payload is always rebuilt below from these
-    # flat Dynatrace problem fields, overriding whatever was passed in - the
-    # caller (dynatrace_event_triage.yml) currently also sets a stale,
-    # incorrectly-nested event_payload alongside these flat fields, so it
-    # can't be trusted as-is. event_payload is only forwarded unmodified
-    # when display_id is empty (i.e. a non-Dynatrace caller assembled it
-    # directly).
+    # Required: event_payload.eventData holds the raw event fields to send
+    # to AO, unwrapped, as the top-level JSON body.
+    event_payload: {}
     eventData: {}
-    display_id: ""
-    event: ""
-    problem_id: ""
-    event_category: ""
-    event_name: ""
-    _hosts: []
 
     # Set to false for AO instances with self-signed/untrusted certs (e.g.
     # workshop clusters). Defaults to validating certs.
@@ -58,10 +44,21 @@
         validate_certs: "{{ webhook_validate_certs }}"
         status_code: 200
 
-    - name: Build event payload from Dynatrace problem fields
-      when: display_id | length > 0
+    - name: Unwrap eventData from event_payload
+      when: event_payload.eventData is defined
       ansible.builtin.set_fact:
         eventData: "{{ event_payload.eventData }}"
+
+    - name: Sanitize eventData field names (AO rejects dots in keys)
+      ansible.builtin.set_fact:
+        eventData_sanitized: "{{ eventData_sanitized | default({}) | combine({ item.key | replace('.', '_'): item.value }) }}"
+      loop: "{{ eventData | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Replace eventData with sanitized field names
+      ansible.builtin.set_fact:
+        eventData: "{{ eventData_sanitized }}"
 
     - name: Debug eventData
       ansible.builtin.debug:
