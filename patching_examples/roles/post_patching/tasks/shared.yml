@@ -52,6 +52,115 @@
   tags: [services, post_patch]
 
 # =========================================================================
+# WINDOWS SERVICE RESTORATION
+# =========================================================================
+- name: Restore Windows services after patching
+  ansible.windows.win_service:
+    name: "{{ item }}"
+    state: started
+    start_mode: auto
+  loop: "{{ services_to_start }}"
+  when:
+    - services_to_start | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [services, post_patch]
+
+- name: Confirm Windows services are running
+  ansible.windows.win_service_info:
+    name: "{{ item }}"
+  loop: "{{ services_to_start }}"
+  register: post_patching_win_service_status
+  when:
+    - services_to_start | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [services, post_patch]
+
+- name: Assert expected Windows services are running
+  ansible.builtin.assert:
+    that:
+      - item.services | length > 0
+      - item.services[0].state == 'started'
+    fail_msg: >-
+      Service {{ item.item }} is NOT running after patching.
+      Check the Services console or the System event log for the failure reason.
+  loop: "{{ post_patching_win_service_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - services_to_start | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [services, post_patch]
+
+# =========================================================================
+# IIS APPLICATION VALIDATION (Windows)
+# =========================================================================
+- name: Ensure IIS application pools are started
+  community.windows.win_iis_webapppool:
+    name: "{{ item }}"
+    state: started
+  loop: "{{ iis_app_pools_to_check }}"
+  register: post_patching_iis_apppool_status
+  when:
+    - iis_app_pools_to_check | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [health, post_patch]
+
+- name: Assert IIS application pools came back up started
+  ansible.builtin.assert:
+    that:
+      - item.info.attributes.state == 'Started'
+    fail_msg: >-
+      IIS application pool {{ item.item }} is NOT running after patching.
+      Check Event Viewer > Windows Logs > Application for WAS/W3SVC crash events.
+  loop: "{{ post_patching_iis_apppool_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - iis_app_pools_to_check | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [health, post_patch]
+
+- name: Ensure IIS websites are started
+  community.windows.win_iis_website:
+    name: "{{ item }}"
+    state: started
+  loop: "{{ iis_sites_to_check }}"
+  register: post_patching_iis_site_status
+  when:
+    - iis_sites_to_check | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [health, post_patch]
+
+- name: Assert IIS websites came back up started
+  ansible.builtin.assert:
+    that:
+      - item.site.State == 'Started'
+    fail_msg: "IIS website {{ item.item }} is NOT running after patching."
+  loop: "{{ post_patching_iis_site_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - iis_sites_to_check | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [health, post_patch]
+
+- name: Confirm IIS is actually serving traffic (checked from the host itself)
+  ansible.windows.win_uri:
+    url: "{{ item }}"
+    method: GET
+    status_code: [200, 301, 302]
+    timeout: 15
+  loop: "{{ iis_local_health_check_urls }}"
+  register: post_patching_iis_local_checks
+  retries: 3
+  delay: 10
+  until: post_patching_iis_local_checks is not failed
+  when:
+    - iis_local_health_check_urls | length > 0
+    - ansible_facts.os_family == 'Windows'
+  tags: [health, post_patch]
+
+# =========================================================================
 # APPLICATION HEALTH CHECKS
 # =========================================================================
 - name: HTTP application health check
@@ -62,7 +171,9 @@
     timeout: 30
     validate_certs: false
   loop: "{{ health_check_urls }}"
-  when: health_check_urls | length > 0
+  when:
+    - health_check_urls | length > 0
+    - ansible_facts.os_family != 'Windows'
   register: http_health
   retries: 3
   delay: 10
@@ -120,7 +231,10 @@
       OS Family:       {{ ansible_facts.os_family }}
       Reboot Required: {{ reboot_required | default(false) }}
       Services OK:     {{ services_to_start | join(', ') or 'None configured' }}
+      IIS App Pools:   {{ iis_app_pools_to_check | join(', ') or 'None configured' }}
+      IIS Websites:    {{ iis_sites_to_check | join(', ') or 'None configured' }}
       HTTP Checks:     {{ health_check_urls | length }} URL(s) verified
+      IIS Local Checks: {{ iis_local_health_check_urls | length }} URL(s) verified
       TCP Checks:      {{ tcp_health_checks | length }} port(s) verified
       Status:          PATCHING COMPLETE
     dest: "{{ patch_report_dir }}/post_patch_report_{{ ansible_date_time.date }}.txt"
@@ -137,7 +251,10 @@
       - "OS family:    {{ ansible_facts.os_family }}"
       - "Rebooted:     {{ reboot_required | default(false) }}"
       - "Services:     {{ services_to_start | join(', ') or 'None' }}"
+      - "IIS pools:    {{ iis_app_pools_to_check | join(', ') or 'None' }}"
+      - "IIS sites:    {{ iis_sites_to_check | join(', ') or 'None' }}"
       - "HTTP checks:  {{ health_check_urls | length }}"
+      - "IIS checks:   {{ iis_local_health_check_urls | length }}"
       - "TCP checks:   {{ tcp_health_checks | length }}"
       - "Monitoring:   {{ 'Exited maintenance' if monitoring_provider else 'N/A' }}"
       - "Status:       SUCCESS"

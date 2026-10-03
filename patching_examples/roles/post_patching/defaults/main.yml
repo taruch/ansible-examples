@@ -1,9 +1,24 @@
 ---
-# Services to restart after patching (those stopped in pre_patching)
+# Services to restart after patching (those stopped in pre_patching).
+# Works for both Linux (systemd unit names) and Windows (service names, e.g.
+# "W3SVC" for IIS) — the role dispatches to the right module per OS.
 services_to_start: []
 
-# HTTP application health check endpoints to verify after reboot
+# IIS application pool names to confirm are started after patching (Windows only).
+# Also self-heals: if found stopped, the role starts it before asserting.
+iis_app_pools_to_check: []
+
+# IIS website names to confirm are started after patching (Windows only).
+# Also self-heals: if found stopped, the role starts it before asserting.
+iis_sites_to_check: []
+
+# HTTP application health check endpoints to verify after reboot (Linux only —
+# ansible.builtin.uri does not run against Windows targets over WinRM).
 health_check_urls: []
+
+# HTTP checks run directly on the Windows host via win_uri (e.g. "http://localhost/")
+# to confirm IIS is actually serving traffic, not just that the service is running.
+iis_local_health_check_urls: []
 
 # TCP port health checks: list of {host: ..., port: ..., timeout: ...}
 tcp_health_checks: []

@@ -35,8 +35,10 @@ or Rollback stages — only Pre-Patching Checks has a Windows counterpart today.
 
 Each stage also has a matching role under [`roles/`](roles/) that dispatches to
 `linux.yml` or `windows.yml` based on `ansible_facts.os_family`, then runs a
-`shared.yml` (VM snapshot, monitoring maintenance mode, health checks, reporting,
-etc. — the parts that don't differ by OS). A thin playbook just calls the role:
+`shared.yml` for the rest (reboot, service/application restoration, health
+checks, monitoring maintenance mode, reporting) — branching internally by OS
+wherever the module or check itself is platform-specific. A thin playbook just
+calls the role:
 
 | Playbook | Role | OS |
 |---|---|---|
@@ -53,6 +55,35 @@ rollback playbook has been written yet.
 Pick whichever style fits how you want to demo the workflow: standalone
 playbooks read top-to-bottom with nothing hidden in a role; the role-based
 playbooks are what you'd actually want in a mixed-OS fleet.
+
+### Post-patch application validation (beyond "did it reboot")
+
+`roles/post_patching`/`shared.yml` doesn't stop at confirming the host came
+back from its reboot — it verifies the application on top actually came back
+up:
+
+- **Linux** — restores `services_to_start` via `ansible.builtin.service`,
+  asserts each is `running` via `service_facts`, then checks
+  `health_check_urls` (HTTP, via `ansible.builtin.uri`) and `tcp_health_checks`
+  (port reachability).
+- **Windows / IIS** — restores `services_to_start` via `ansible.windows.win_service`
+  (e.g. `W3SVC`) and confirms each is `started` via `win_service_info`; sets
+  `iis_app_pools_to_check` and `iis_sites_to_check` to `started` via
+  `community.windows.win_iis_webapppool` / `win_iis_website` (self-healing if
+  found stopped) and asserts the resulting state; then hits
+  `iis_local_health_check_urls` (e.g. `http://localhost/`) with
+  `ansible.windows.win_uri` **from the host itself** to confirm the site is
+  actually serving traffic, not just that the service/app pool looks right.
+
+  Note: `ansible.builtin.uri` doesn't run against Windows targets over WinRM
+  (it's not one of the core modules ansible-core auto-redirects to a `win_*`
+  equivalent), which is why Windows gets its own `win_uri`-based check instead
+  of reusing `health_check_urls`.
+
+All of the above are empty lists by default (no-op) — set them via survey/
+`extra_vars` per target group. See
+[`roles/post_patching/defaults/main.yml`](roles/post_patching/defaults/main.yml)
+for the full variable list.
 
 ## Variables
 

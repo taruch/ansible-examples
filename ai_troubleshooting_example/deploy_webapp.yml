@@ -1,0 +1,56 @@
+---
+# AI Troubleshooting Demo — Deploy Web App
+#
+# Ships with two intentional bugs for a live "AI reads job output, proposes a
+# fix, human approves before it reruns" demo. See README.md for the full
+# script and the answer key — do not pre-fix these before the demo.
+#
+# Survey variables to expose in AAP:
+#   target_hosts, web_app_port
+
+- name: Deploy simple web app behind nginx
+  hosts: "{{ target_hosts | default('') }}"
+  become: true
+  vars:
+    web_app_port: 8080
+    app_name: hello-app
+
+  tasks:
+    - name: Install nginx
+      ansible.builtin.package:
+        name: nginx
+        state: present
+
+    - name: Deploy placeholder index page
+      ansible.builtin.copy:
+        content: "<html><body><h1>{{ app_name }} is up</h1></body></html>"
+        dest: /usr/share/nginx/html/index.html
+        mode: '0644'
+
+    - name: Deploy nginx vhost config
+      ansible.builtin.template:
+        src: templates/vhost.conf.j2
+        dest: "/etc/nginx/conf.d/{{ app_name }}.conf"
+        mode: '0644'
+      notify: restart nginx
+
+    - name: Ensure nginx is running and enabled
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Verify app responds
+      ansible.builtin.uri:
+        url: "http://localhost:{{ web_app_port }}/"
+        status_code: 200
+      register: app_health
+      retries: 3
+      delay: 5
+      until: app_health is succeeded
+
+  handlers:
+    - name: Restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted

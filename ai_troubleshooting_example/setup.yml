@@ -1,0 +1,63 @@
+---
+# Configuration-as-code for registering the AI Troubleshooting Demo with
+# Ansible Automation Platform 2.6.
+#
+# Apply with ../controller_setup/configure_aap.yml (or any wrapper that
+# `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
+#
+# Required pre-existing artifacts in AAP:
+#   - A Machine credential for the target Linux host(s). Set its name below
+#     in `machine_credential`.
+#   - An inventory containing a Linux host to demo against (needs outbound
+#     access to install nginx from its configured package repos). Set its
+#     name below in `target_inventory`.
+#
+# See README.md for the full demo script, the two intentional bugs shipped
+# in deploy_webapp.yml, and the answer key.
+
+# ---------------------------------------------------------------------------
+# Tunables — change these without touching the rest of this file.
+# ---------------------------------------------------------------------------
+machine_credential: "Demo Credential"          # MUST already exist in AAP
+project_scm_url: "https://github.com/taruch/ansible-examples.git"
+project_scm_branch: "master"
+target_organization: "Default"
+target_inventory: "Demo Inventory"
+
+# ---------------------------------------------------------------------------
+# Project — git-synced from this repository. scm_update_on_launch means the
+# next launch always reflects exactly what's on the branch — this is the
+# mechanism behind the demo's human gate: nothing a job runs changes until
+# someone reviews and pushes the fix. See README.md.
+# ---------------------------------------------------------------------------
+controller_projects:
+  - name: "AI Troubleshooting Demo"
+    description: "Deliberately-broken deploy playbook for the live AI-assisted troubleshooting demo."
+    organization: "{{ target_organization }}"
+    scm_type: "git"
+    scm_url: "{{ project_scm_url }}"
+    scm_branch: "{{ project_scm_branch }}"
+    scm_clean: false
+    scm_delete_on_update: false
+    scm_update_on_launch: true
+    allow_override: false
+
+# ---------------------------------------------------------------------------
+# Job template.
+# ---------------------------------------------------------------------------
+controller_templates:
+  - name: "AI DEMO / Deploy Web App"
+    description: "Installs nginx, deploys a vhost config and placeholder page, verifies the app responds. Ships with two intentional bugs for live troubleshooting."
+    organization: "{{ target_organization }}"
+    project: "AI Troubleshooting Demo"
+    inventory: "{{ target_inventory }}"
+    playbook: "ai_troubleshooting_example/deploy_webapp.yml"
+    credentials:
+      - "{{ machine_credential }}"
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    job_type: "run"
+    verbosity: 1
+    forks: 0
+    become_enabled: true
+    allow_simultaneous: false
