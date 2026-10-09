@@ -1,13 +1,22 @@
 ---
-# Configuration-as-code for deploying the Linux Patching workflow
-# to Ansible Automation Platform 2.6.
+# Configuration-as-code for deploying the mixed-OS (Linux + Windows) Patching
+# workflow to Ansible Automation Platform 2.6.
+#
+# Pre-Patching Checks, Apply Patches, and Post-Patching Validation run the
+# role-based playbooks (roles/pre_patching, roles/apply_patches,
+# roles/post_patching), which dispatch to linux.yml/windows.yml internally —
+# a single job template per stage handles both OSes against a mixed
+# inventory. Rollback is the exception: roles/rollback is still an empty
+# stub (see patching_examples/README.md), so it stays on the standalone
+# rollback_playbook.yml, which is Linux-only.
 #
 # Apply with ../controller_setup/configure_aap.yml (or any wrapper that
 # `include_vars: setup.yml` and then runs infra.aap_configuration.dispatch).
 #
 # Required pre-existing artifacts in AAP:
-#   - A Machine credential for the target Linux hosts. Set its name below
-#     in `machine_credential` so the job templates can reference it.
+#   - A Machine credential for the target hosts (Linux SSH and/or Windows
+#     WinRM, depending on your inventory). Set its name below in
+#     `machine_credential` so the job templates can reference it.
 #   - An inventory containing the hosts to patch. Set its name below
 #     in `target_inventory`.
 #
@@ -30,7 +39,7 @@ target_inventory: "Demo Inventory"
 # ---------------------------------------------------------------------------
 controller_projects:
   - name: "Patching"
-    description: "Patching workflow — pre-checks, patching, post-validation, rollback."
+    description: "Patching workflow — pre-checks, patching, post-validation, rollback. Mixed Linux + Windows via the role-based playbooks."
     organization: "{{ target_organization }}"
     scm_type: "git"
     scm_url: "{{ project_scm_url }}"
@@ -45,11 +54,11 @@ controller_projects:
 # ---------------------------------------------------------------------------
 controller_templates:
   - name: "PATCHING / Pre-Patching Checks"
-    description: "System readiness checks, baseline recording, optional VM snapshots, monitoring maintenance mode, service suspension, and user notification."
+    description: "System readiness checks, baseline recording, optional VM snapshots, monitoring maintenance mode, service suspension, and user notification. Linux + Windows (roles/pre_patching)."
     organization: "{{ target_organization }}"
     project: "Patching"
     inventory: "{{ target_inventory }}"
-    playbook: "patching_examples/pre_patching_playbook.yml"
+    playbook: "patching_examples/pre_patching_role_playbook.yml"
     credentials:
       - "{{ machine_credential }}"
     ask_variables_on_launch: true
@@ -61,11 +70,11 @@ controller_templates:
     allow_simultaneous: false
 
   - name: "PATCHING / Apply Patches"
-    description: "List available updates, apply patches via dnf, record changes. Includes rescue block for workflow failure routing."
+    description: "List available updates and apply them — dnf on Linux, win_updates on Windows. Linux + Windows (roles/apply_patches)."
     organization: "{{ target_organization }}"
     project: "Patching"
     inventory: "{{ target_inventory }}"
-    playbook: "patching_examples/patching_playbook.yml"
+    playbook: "patching_examples/patching_role_playbook.yml"
     credentials:
       - "{{ machine_credential }}"
     ask_variables_on_launch: true
@@ -77,11 +86,11 @@ controller_templates:
     allow_simultaneous: false
 
   - name: "PATCHING / Post-Patching Validation"
-    description: "Reboot handling, patch verification, service restoration, health checks (HTTP + TCP), monitoring exit, cleanup, and final report."
+    description: "Reboot handling, patch verification, service restoration, health checks (HTTP+TCP on Linux; services/IIS app pools/sites/local HTTP on Windows), monitoring exit, and final report. Linux + Windows (roles/post_patching)."
     organization: "{{ target_organization }}"
     project: "Patching"
     inventory: "{{ target_inventory }}"
-    playbook: "patching_examples/post_patching_playbook.yml"
+    playbook: "patching_examples/post_patching_role_playbook.yml"
     credentials:
       - "{{ machine_credential }}"
     ask_variables_on_launch: true
@@ -93,7 +102,7 @@ controller_templates:
     allow_simultaneous: false
 
   - name: "PATCHING / Rollback"
-    description: "VM snapshot revert, service restart, monitoring cleanup, and rollback report. Best-effort with ignore_errors."
+    description: "VM snapshot revert, service restart, monitoring cleanup, and rollback report. Best-effort with ignore_errors. Linux only — no role-based/Windows rollback exists yet (roles/rollback is an empty stub)."
     organization: "{{ target_organization }}"
     project: "Patching"
     inventory: "{{ target_inventory }}"
@@ -113,7 +122,7 @@ controller_templates:
 # ---------------------------------------------------------------------------
 controller_workflows:
   - name: "PATCHING / Patching Workflow"
-    description: "End-to-end patching: pre-checks, patch application, post-validation, with automatic rollback on failure."
+    description: "End-to-end patching: pre-checks, patch application, post-validation, with automatic rollback on failure. Pre-checks/patching/post-validation run against mixed Linux + Windows inventory; rollback is Linux only."
     organization: "{{ target_organization }}"
     survey_enabled: true
     survey_spec:

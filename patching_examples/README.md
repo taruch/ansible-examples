@@ -10,51 +10,60 @@ Pre-Patching Checks ──success──▶ Apply Patches ──success──▶ 
                                                   Post-Patching Validation ──failure──▶ Rollback
 ```
 
-This directory demonstrates the same workflow two different ways.
+This directory demonstrates the same workflow two different ways. Only the
+playbooks actually wired into AAP live at the top level; everything else is
+under [`standalone_playbooks/`](standalone_playbooks/).
 
 ## Two implementation styles
 
-### 1. Standalone playbooks (currently wired into AAP via `setup.yml`)
+### 1. Role-based, OS-aware playbooks (wired into AAP via `setup.yml`) — top level
 
-Each stage is a single, self-contained playbook with all tasks written
-inline — no roles involved. This is the easiest style to read top-to-bottom
-for a demo, at the cost of duplicating logic across OS variants.
-
-| Playbook | Stage | OS |
-|---|---|---|
-| [`pre_patching_playbook_linux.yml`](pre_patching_playbook_linux.yml) | Pre-Patching Checks | Linux |
-| [`pre_patching_playbook_windows.yml`](pre_patching_playbook_windows.yml) | Pre-Patching Checks | Windows |
-| [`patching_playbook.yml`](patching_playbook.yml) | Apply Patches (dnf) | Linux |
-| [`post_patching_playbook.yml`](post_patching_playbook.yml) | Post-Patching Validation | Linux |
-| [`rollback_playbook.yml`](rollback_playbook.yml) | Rollback (failure branch) | Linux |
-
-There is no standalone Windows playbook yet for the Apply Patches, Post-Patching,
-or Rollback stages — only Pre-Patching Checks has a Windows counterpart today.
-
-### 2. Role-based, OS-aware playbooks (not yet wired into AAP)
-
-Each stage also has a matching role under [`roles/`](roles/) that dispatches to
+Each stage has a matching role under [`roles/`](roles/) that dispatches to
 `linux.yml` or `windows.yml` based on `ansible_facts.os_family`, then runs a
 `shared.yml` for the rest (reboot, service/application restoration, health
 checks, monitoring maintenance mode, reporting) — branching internally by OS
-wherever the module or check itself is platform-specific. A thin playbook just
-calls the role:
+wherever the module or check itself is platform-specific. A thin playbook at
+the top level just calls the role:
 
 | Playbook | Role | OS |
 |---|---|---|
 | [`pre_patching_role_playbook.yml`](pre_patching_role_playbook.yml) | `roles/pre_patching` | Linux + Windows |
 | [`patching_role_playbook.yml`](patching_role_playbook.yml) | `roles/apply_patches` | Linux (dnf) + Windows (`win_updates`) |
 | [`post_patching_role_playbook.yml`](post_patching_role_playbook.yml) | `roles/post_patching` | Linux + Windows |
+| [`rollback_playbook.yml`](rollback_playbook.yml) | *(no role — see below)* | Linux only |
 
 This style is a single playbook per stage regardless of target OS — point it at
 a mixed Linux/Windows inventory and each host runs its own branch automatically.
+`rollback_playbook.yml` is the one exception: it stays standalone and
+Linux-only at the top level (alongside the three role-based playbooks, since
+it's still what `setup.yml` wires up) because `roles/rollback/` exists only as
+an empty stub — no rollback role or role-based rollback playbook has been
+written yet.
 
-`roles/rollback/` exists as an empty stub — no rollback role or role-based
-rollback playbook has been written yet.
+### 2. Standalone playbooks (not wired into AAP) — [`standalone_playbooks/`](standalone_playbooks/)
 
-Pick whichever style fits how you want to demo the workflow: standalone
+Each stage is a single, self-contained playbook with all tasks written
+inline — no roles involved. This is the easiest style to read top-to-bottom
+for a demo, at the cost of duplicating logic across OS variants. Kept for
+reference/readability, but no longer registered as AAP job templates.
+
+| Playbook | Stage | OS |
+|---|---|---|
+| [`standalone_playbooks/pre_patching_playbook_linux.yml`](standalone_playbooks/pre_patching_playbook_linux.yml) | Pre-Patching Checks | Linux |
+| [`standalone_playbooks/pre_patching_playbook_windows.yml`](standalone_playbooks/pre_patching_playbook_windows.yml) | Pre-Patching Checks | Windows |
+| [`standalone_playbooks/patching_playbook.yml`](standalone_playbooks/patching_playbook.yml) | Apply Patches (dnf) | Linux |
+| [`standalone_playbooks/post_patching_playbook.yml`](standalone_playbooks/post_patching_playbook.yml) | Post-Patching Validation | Linux |
+
+There is no standalone Windows playbook for the Apply Patches or
+Post-Patching stages — only Pre-Patching Checks has a Windows counterpart in
+this style. There's also no standalone Rollback playbook here since
+`rollback_playbook.yml` (Linux-only either way) already lives at the top
+level — see above.
+
+Pick whichever style fits how you want to demo the workflow: the standalone
 playbooks read top-to-bottom with nothing hidden in a role; the role-based
-playbooks are what you'd actually want in a mixed-OS fleet.
+playbooks at the top level are what's actually registered in AAP and what
+you'd want in a mixed-OS fleet.
 
 ### Post-patch application validation (beyond "did it reboot")
 
@@ -87,9 +96,10 @@ for the full variable list.
 
 ## Variables
 
-Standalone playbooks declare their tunables directly in the play's `vars:`
-block (see the header comment in each file for which ones to expose as an AAP
-survey). Role-based playbooks take their defaults from the matching role:
+Standalone playbooks (under `standalone_playbooks/`) declare their tunables
+directly in the play's `vars:` block (see the header comment in each file for
+which ones to expose as an AAP survey). Role-based playbooks take their
+defaults from the matching role:
 
 - [`roles/pre_patching/defaults/main.yml`](roles/pre_patching/defaults/main.yml)
 - [`roles/apply_patches/defaults/main.yml`](roles/apply_patches/defaults/main.yml)
@@ -105,13 +115,17 @@ Override role defaults via survey/`extra_vars`, not by editing the role.
 
 [`setup.yml`](setup.yml) is the configuration-as-code file that registers this
 example with AAP — a project, four job templates, and a workflow job template
-that chains them with failure routing to rollback. It currently only
-references the **standalone Linux** playbooks
-(`pre_patching_playbook_linux.yml`, `patching_playbook.yml`,
-`post_patching_playbook.yml`, `rollback_playbook.yml`). The Windows
-pre-patching playbook and all three role-based playbooks are not yet
-registered as job templates — add them to `controller_templates` /
-`controller_workflows` in `setup.yml` if you want them available in AAP.
+that chains them with failure routing to rollback. Pre-Patching Checks, Apply
+Patches, and Post-Patching Validation reference the **role-based** playbooks
+(`pre_patching_role_playbook.yml`, `patching_role_playbook.yml`,
+`post_patching_role_playbook.yml`), so each of those three job templates
+handles a mixed Linux + Windows inventory on its own. Rollback is the one
+exception — it still references the standalone, **Linux-only**
+`rollback_playbook.yml` (top level), since `roles/rollback` is an empty stub
+(see above). The single-OS playbooks under `standalone_playbooks/` are no
+longer wired into AAP, but are kept around for the top-to-bottom-readable
+demo style described above — point `setup.yml`'s `controller_templates` at
+them instead if you want that style.
 
 Apply it via `../controller_setup/configure_aap.yml` (or any wrapper that
 `include_vars: setup.yml` and runs `infra.aap_configuration.dispatch`).
@@ -132,3 +146,6 @@ Or with `ansible-navigator` and an EE that bundles `ansible.windows`,
 ```bash
 ansible-navigator run -mstdout pre_patching_role_playbook.yml -e target_hosts=webservers
 ```
+
+To run a standalone playbook instead, prefix the path:
+`ansible-playbook standalone_playbooks/pre_patching_playbook_linux.yml -e target_hosts=webservers`.
