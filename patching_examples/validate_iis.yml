@@ -1,0 +1,53 @@
+---
+# Validate IIS — service running + site reachable with a 200.
+#
+# Standalone, read-only validation (no remediation/self-healing) extracted
+# from the IIS checks in roles/post_patching/tasks/shared.yml. Safe to run
+# any time, not just after patching — e.g. as its own scheduled health check.
+#
+# Survey variables to expose in AAP:
+#   target_hosts, iis_service_name, iis_health_check_urls
+
+- name: Validate IIS service and site availability
+  hosts: "{{ target_hosts | default('') }}"
+  gather_facts: false
+  vars:
+    # Windows service name backing IIS ("W3SVC" is the standard IIS service)
+    iis_service_name: "W3SVC"
+
+    # URLs to check from the host itself, e.g. ["http://localhost/"]
+    iis_health_check_urls: []
+
+  tasks:
+    - name: Confirm the IIS service is running
+      ansible.windows.win_service_info:
+        name: "{{ iis_service_name }}"
+      register: iis_service_status
+
+    - name: Assert the IIS service is started
+      ansible.builtin.assert:
+        that:
+          - iis_service_status.services | length > 0
+          - iis_service_status.services[0].state == 'started'
+        fail_msg: >-
+          IIS service '{{ iis_service_name }}' is NOT running on {{ inventory_hostname }}.
+        success_msg: "IIS service '{{ iis_service_name }}' is running."
+
+    - name: Confirm the site responds with HTTP 200
+      ansible.windows.win_uri:
+        url: "{{ item }}"
+        method: GET
+        status_code: 200
+        timeout: 15
+      loop: "{{ iis_health_check_urls }}"
+      register: iis_health_checks
+      retries: 3
+      delay: 10
+      until: iis_health_checks is not failed
+      when: iis_health_check_urls | length > 0
+
+    - name: Report IIS validation result
+      ansible.builtin.debug:
+        msg:
+          - "IIS service '{{ iis_service_name }}': running"
+          - "HTTP checks: {{ iis_health_check_urls | length }} URL(s) returned 200"
