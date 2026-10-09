@@ -19,19 +19,43 @@ starts the service, and verifies the app responds on `web_app_port`
 first must be fixed before the job gets far enough to hit the second. Don't
 pre-fix them; that's the point of the demo.
 
-## Setup (before the demo)
+## Setup (before *every* run — this is not a one-time step)
 
-1. Register the project and job template:
+The demo fixes get committed and pushed for real, so running it once "spends"
+the bugs — whatever branch AAP's project points at won't reproduce them again.
+`master` must stay permanently broken as the pristine source of both bugs, so
+each run happens on a **throwaway branch created fresh off `master`**, which
+you reset or discard afterward:
+
+1. Create (or reset) the demo branch from `master`:
+   ```bash
+   git checkout master && git pull
+   git branch -D ai-troubleshooting-demo 2>/dev/null   # ignore error if it doesn't exist locally
+   git checkout -b ai-troubleshooting-demo
+   git push --force origin ai-troubleshooting-demo
+   ```
+   If the remote branch doesn't exist yet, drop `--force` on the first push.
+2. Register the project and job template, pointing the project at that
+   branch rather than `master` (extra-vars override `include_vars`, so you
+   don't need to edit `setup.yml` itself):
    ```bash
    # from controller_setup/, with this file's contents as setup.yml
-   ansible-playbook configure_aap.yml -e aap_hostname=... -e aap_username=... -e aap_password=...
+   ansible-playbook configure_aap.yml \
+     -e aap_hostname=... -e aap_username=... -e aap_password=... \
+     -e project_scm_branch=ai-troubleshooting-demo
    ```
    Requires a `machine_credential` and `target_inventory` to already exist in
-   AAP — see the tunables at the top of `setup.yml`.
-2. Confirm the target host can reach its package repos (to install `nginx`)
-   and that you (the presenter) have push access to this repo's branch — the
-   fix has to actually land on `master` (or whatever `project_scm_branch` is)
-   for AAP to pick it up.
+   AAP — see the tunables at the top of `setup.yml`. Safe to re-run — it just
+   updates the existing project's branch if you're resetting for another run.
+3. Confirm the target host can reach its package repos (to install `nginx`)
+   and that you (the presenter) have push access to `ai-troubleshooting-demo`
+   — the fixes have to actually land on that branch for AAP to pick them up.
+
+**After the demo**, leave `ai-troubleshooting-demo` as-is or delete it
+(`git push origin --delete ai-troubleshooting-demo`) — step 1 above recreates
+it from a clean `master` next time regardless of what state it was left in.
+**Never commit a fix directly to `master`** — that would permanently remove
+the bug from the fixture.
 
 ## Live demo script
 
@@ -47,10 +71,11 @@ pre-fix them; that's the point of the demo.
    reference `web_app_port`. You review it — this is the human gate. Nothing
    has changed in AAP yet.
 4. **Approve: commit and push.** Once you're satisfied, commit and push the
-   change yourself. This is the actual enforcement mechanism of the gate:
-   the project is git-backed with `scm_update_on_launch: true`, so a launch
-   always runs exactly what's on the branch — the AI's suggestion has zero
-   effect on anything until a human deliberately pushes it.
+   change yourself to `ai-troubleshooting-demo` (not `master`). This is the
+   actual enforcement mechanism of the gate: the project is git-backed with
+   `scm_update_on_launch: true`, so a launch always runs exactly what's on
+   the branch — the AI's suggestion has zero effect on anything until a human
+   deliberately pushes it.
 5. **Relaunch — it fails differently.** The template task now succeeds, but
    the play aborts with `ERROR! The requested handler 'restart nginx' was
    not found in any of the known handlers`.
@@ -83,3 +108,8 @@ pre-fix them; that's the point of the demo.
 - **Nothing about this requires changing your existing patch process** — it's
   a troubleshooting aid for playbook development/maintenance, independent of
   whatever job templates and workflows you already run in production.
+- **The demo branch is a disposable fixture, not a real workflow.** In
+  practice a fix would go through a normal PR against a feature branch, same
+  as any other change — the throwaway-branch-off-`master` reset here only
+  exists so this specific demo can reproduce the same two bugs on repeat
+  runs.

@@ -20,7 +20,11 @@
 # ---------------------------------------------------------------------------
 machine_credential: "Demo Credential"          # MUST already exist in AAP
 project_scm_url: "https://github.com/taruch/ansible-examples.git"
-project_scm_branch: "master"
+# NEVER point this at "master" — master must stay permanently broken as the
+# pristine source of both demo bugs. Create/reset "ai-troubleshooting-demo"
+# off master before every run (see README.md "Setup") and leave this as-is,
+# or override with -e project_scm_branch=<branch> if you use a different name.
+project_scm_branch: "ai-troubleshooting-demo"
 target_organization: "Default"
 target_inventory: "Demo Inventory"
 
@@ -28,7 +32,9 @@ target_inventory: "Demo Inventory"
 # Project — git-synced from this repository. scm_update_on_launch means the
 # next launch always reflects exactly what's on the branch — this is the
 # mechanism behind the demo's human gate: nothing a job runs changes until
-# someone reviews and pushes the fix. See README.md.
+# someone reviews and pushes the fix. See README.md. This only works as a
+# repeatable demo because fixes land on the throwaway branch above, never
+# on master.
 # ---------------------------------------------------------------------------
 controller_projects:
   - name: "AI Troubleshooting Demo"
