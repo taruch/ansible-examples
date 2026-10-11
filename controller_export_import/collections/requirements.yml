@@ -5,3 +5,5 @@ collections:
   - name: ansible.eda
   - name: infra.aap_configuration
   - name: infra.aap_configuration_extended
+  - name: awx.awx
+    version: "==9.3.0"  # used by tower_36_export.yml - last 9.x release (the line contemporaneous with Tower 3.6.x) and the oldest with the export module (requires awxkit>=9.3.0)
