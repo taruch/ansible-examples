@@ -1,16 +1,28 @@
 ---
-# Export configuration from an Ansible Tower 3.6.3 instance.
+# Export configuration from an Ansible Tower 3.8 instance (the engine
+# bundled with Red Hat Ansible Automation Platform 1.2).
 #
-# Tower 3.6.3 predates the ansible.controller / infra.aap_configuration
-# collections used elsewhere in this directory for AAP 2.x exports - those
-# assume API surface (execution_environments, gateway settings, etc.) that
-# doesn't exist on Tower 3.6.3. Use the community awx.awx collection's
-# `export` module instead - it talks to the same /api/v2/ REST API via
-# awxkit. collections/requirements.yml pins awx.awx to 9.3.0: the last
-# release in the 9.x line (contemporaneous with Tower 3.6.x) and the
-# earliest version whose export module exists at all (it requires
-# awxkit>=9.3.0). Newer awx.awx releases still talk to Tower 3.6.3 fine for
-# basic exports, but assume exportable asset types Tower 3.6.3 doesn't have.
+# Tower 3.8.0's own release notes call out that this is the version where
+# the config-as-code import/export feature was introduced, via the (then
+# new) `ansible.tower` certified collection - the AAP-1.x-era predecessor
+# of `ansible.controller`, which targets AAP 2.x only and isn't a fit here.
+# `ansible.tower` is Automation-Hub-only (not on public Galaxy, requires a
+# subscription); this playbook uses the community `awx.awx` collection's
+# `export` module instead, since it's the same underlying module/codebase
+# and doesn't require Hub access. If you do have Automation Hub configured,
+# swap `awx.awx.export` for `ansible.tower.export` below - same arguments.
+#
+# Collection version: pin awx.awx to 17.1.0 for this playbook - the last
+# release before the collection adopted the "Automation Platform
+# Controller" naming/API assumptions at 18.0.0 (the point where the
+# collection and AWX itself transitioned towards the AAP 2.0/Controller 4.0
+# era). 17.1.0 is the newest release still inside the window contemporary
+# with Tower 3.8.x, using the same boundary-release logic as pinning
+# collection versions for Tower 3.6.3 elsewhere in this file's history.
+# Note Tower 3.8.x itself remained in support well into the AAP 2.0
+# timeframe (AAP 1.2.x shipped a late "transition venvs to execution
+# environments" feature to ease migration to 2.x), so this boundary is
+# judgment-based on API assumptions, not a hard compatibility cutoff.
 #
 # As with the other export playbooks in this directory, this does not
 # export actual credential secrets - those come back as "$encrypted$".
@@ -20,15 +32,20 @@
 # importable by the Python interpreter running this playbook - installing
 # the awx.awx collection alone is not enough. Match it to the collection
 # pin above:
-#   pip install awxkit==9.3.0
+#   pip install awxkit==17.1.0
 # A mismatched awxkit (e.g. a newer one installed separately/already on the
-# control node) can talk to a newer AWX/Controller API than Tower 3.6.3
+# control node) can talk to a newer AWX/Controller API than Tower 3.8
 # actually has, which is the same compatibility risk described above for
 # newer awx.awx releases. If running under an execution environment, bake
-# awxkit==9.3.0 into its requirements.txt rather than relying on whatever
+# awxkit==17.1.0 into its requirements.txt rather than relying on whatever
 # the base image happens to ship.
+#
+# This playbook is not registered in collections/requirements.yml - add
+# `awx.awx` there yourself (pinned as above) if you want it installed via
+# the usual `ansible-galaxy collection install -r collections/requirements.yml`
+# flow for this directory.
 
-- name: Export configuration from Ansible Tower 3.6.3
+- name: Export configuration from Ansible Tower 3.8
   hosts: localhost
   connection: local
   gather_facts: false
@@ -37,7 +54,7 @@
     controller_password: "{{ vault_controller_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     controller_hostname: "{{ vault_controller_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
     controller_validate_certs: "{{ vault_controller_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
-    export_dest: "./export_tower_36.json"
+    export_dest: "./export_tower_38.json"
 
   pre_tasks:
     - name: "Setup authentication (block)"
