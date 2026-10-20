@@ -1,5 +1,0 @@
----
-controller_labels_all:
-  - name: EE
-    organization: config_as_code
-...

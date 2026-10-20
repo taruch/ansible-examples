@@ -1,5 +1,0 @@
----
-controller_labels:
-  - name: "Prod"
-    organization: "Default"
-...

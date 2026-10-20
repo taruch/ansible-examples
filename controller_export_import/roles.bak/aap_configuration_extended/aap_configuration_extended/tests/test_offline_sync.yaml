@@ -1,6 +1,0 @@
----
-- name: "Test offline_sync for PAH"
-  hosts: localhost
-  connection: local
-  gather_facts: false
-...

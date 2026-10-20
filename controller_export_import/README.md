@@ -52,14 +52,16 @@ export CONTROLLER_PASSWORD=<password>
 export CONTROLLER_USERNAME=<username>
 ```
 
+**`filetree_import_25.yml` also requires an `import_path` extra var pointing at the directory produced by the export playbook (it's commented out in the playbook's own `vars:` block) — pass it with `-e import_path=...` every time you run the import, unless you're using `file_path` instead (see below).**
+
 ### Run the playbook:
 ```
-ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.1 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL
+ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.4 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e import_path='./export_25_20260707_1'
 ```
 
-**You can set 'file_path' to have a specific file read in and processed for troubleshooting.  Typically you would do this by adding it as an extra var when running the playbook.**
+**You can set 'file_path' to have a specific file read in and processed for troubleshooting.  Typically you would do this by adding it as an extra var when running the playbook. This bypasses `import_path`/`filetree_read` entirely and just includes the one file's vars.**
 ```
-ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.1 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e file_path='./Default/projects/13_Template_Demo.yaml'
+ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.4 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e file_path='./export_25_20260707_1/Default/projects/13_Template_Demo.yaml'
 ```
 
 # Considerations / Issues / Troubleshooting:
@@ -207,26 +209,23 @@ You will sometimes get an error about gateway_settings:
 You can resolve this by adding a variable with an empty dictionary:
 
 ```
-ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.3 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e "gateway_settings={}"
+ansible-navigator run -mstdout filetree_import_25.yml -vvv --eei=quay.io/truch/ee25:1.4 --penv=CONTROLLER_USERNAME --penv=CONTROLLER_PASSWORD --penv=CONTROLLER_HOST --penv=CONTROLLER_VERIFY_SSL -e import_path='./export_25_20260707_1' -e "gateway_settings={}"
 ```
 
-Alternatively, to ensure the dispatcher runs only the necessary roles and avoids errors on empty default settings (like `gateway_settings`), define the explicit dispatch list in your `vars.yml`.
+Under the hood, `infra.aap_configuration`'s `dispatch` role only runs a given role (`gateway_settings`, `gateway_organizations`, `gateway_teams`, etc.) **if its corresponding variable is defined** — so in most cases you don't need an explicit "dispatch list" at all; just don't define a variable for anything you don't want applied. If you need to force-skip a role even when its variable *is* defined (e.g. it came from your export file), exclude it by role name:
 
 ```yaml
-gateway_dispatch_roles:
-  - gateway_organizations
-  - gateway_teams
-  - gateway_authenticators
-  - gateway_authenticator_maps
-  # gateway_settings is omitted to prevent 'missing settings' errors
-
+aap_configuration_dispatcher_exclude_roles:
+  - gateway_settings
 ```
+
+(There's no `gateway_dispatch_roles` allow-list variable in the collection — don't rely on one.)
 
 
 #### Important Notes
 
 * **Passwords:** The Gateway requires the `BIND_PASSWORD` in plaintext during the API call. Protect this value using **Ansible Vault**.
-* **Pre-requisites:** The `LDAP_Organization` and `TeamA` objects must exist. It is recommended to include `gateway_organizations` and `gateway_teams` in your dispatch list to create them dynamically before the maps are applied.
+* **Pre-requisites:** The `LDAP_Organization` and `TeamA` objects must exist. It is recommended to define `gateway_organizations` and `gateway_teams` in your vars so those roles run and create them before the authenticator maps are applied.
 
 
 
