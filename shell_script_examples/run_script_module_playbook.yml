@@ -1,0 +1,43 @@
+---
+# Demonstrates wrapping an existing bash script (files/cleanup_old_logs.sh)
+# in an Ansible playbook: pushing it to the managed node, passing arguments,
+# capturing output, and deriving changed/failed status from the script's
+# own exit code and stdout instead of just trusting "it didn't error".
+#
+# Launch as an AAP Job Template with target_hosts set via survey/extra_vars,
+# e.g.: -e target_hosts=webservers -e cleanup_target_dir=/var/log/myapp
+- name: Run existing bash script against target hosts
+  hosts: "{{ target_hosts | default('') }}"
+  gather_facts: false
+  become: true
+
+  vars:
+    cleanup_target_dir: /var/log/myapp
+    cleanup_max_age_days: 30
+
+  tasks:
+    - name: Copy and run cleanup_old_logs.sh on the target host
+      ansible.builtin.script:
+        cmd: >-
+          files/cleanup_old_logs.sh
+          {{ cleanup_target_dir }} {{ cleanup_max_age_days }}
+        executable: /bin/bash
+      register: cleanup_result
+      # The script always exits 0/3 on success; failure is reserved for
+      # bad arguments (1) or a missing directory (2). Treat only those as
+      # fatal so Ansible's failure semantics match the script's own.
+      failed_when: cleanup_result.rc not in [0, 3]
+      # The script reports what it did via a parseable summary line rather
+      # than relying on Ansible's default "rc==0 means unchanged" assumption.
+      changed_when: "'files_removed=0' not in cleanup_result.stdout"
+
+    - name: Warn if the script could not remove every eligible file
+      ansible.builtin.debug:
+        msg: >-
+          cleanup_old_logs.sh reported errors on {{ inventory_hostname }}:
+          {{ cleanup_result.stdout }}
+      when: cleanup_result.rc == 3
+
+    - name: Show script summary
+      ansible.builtin.debug:
+        msg: "{{ cleanup_result.stdout_lines }}"
