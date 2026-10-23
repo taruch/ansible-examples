@@ -1,0 +1,30 @@
+---
+# EXAMPLE ONLY -- copy the relevant pieces into your real inventory's group_vars,
+# scoped to whichever host group actually needs CyberArk-resolved credentials
+# (do not apply this to every host in `all` in a real inventory).
+#
+# cyberark_ccp_url / cyberark_ccp_app_id / cyberark_ccp_client_cert / cyberark_ccp_client_key
+# are expected to arrive as extra_vars injected by the single "CyberArk CCP"
+# AAP credential (see ../setup_aap_credential.yml). They authenticate to
+# CyberArk -- they are never used to log into this host.
+#
+# Because ansible_password below is a Jinja lookup (not a static value),
+# Ansible resolves it fresh per host, right when it needs connection vars for
+# that host -- there is no "fetch before connect" ordering problem, since the
+# lookup talks to CyberArk's CCP over HTTPS, not to the target host.
+
+ansible_user: "{{ inventory_hostname }}-admin"
+
+ansible_password: >-
+  {{ (lookup('ansible.builtin.url',
+             cyberark_ccp_url ~ '/AIMWebService/api/Accounts'
+             ~ '?AppID=' ~ cyberark_ccp_app_id
+             ~ '&Safe=LINUX_SERVERS'
+             ~ '&Object=' ~ inventory_hostname ~ '-admin',
+             client_cert=cyberark_ccp_client_cert | default(omit),
+             client_key=cyberark_ccp_client_key | default(omit),
+             validate_certs=true) | from_json).Content }}
+
+# If CyberArk is only guarding privilege escalation (the host is already
+# reachable via a shared SSH key) rather than the login itself, resolve
+# ansible_become_password the same way instead of ansible_password.
