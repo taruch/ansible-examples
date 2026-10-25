@@ -1,0 +1,83 @@
+---
+- name: Process Triage Findings and Update ServiceNow
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Passed in from AO via extra_vars
+    snow_incident: "{{ incident_number }}"
+    triage: "{{ triage_result }}"
+
+  tasks:
+    # =========================================================================
+    # Step 1: Wait for Controller Job (Runs ONLY if triage executed a job)
+    # =========================================================================
+    - name: Wait for troubleshooting job to finish
+      when: triage.executed | bool
+      ansible.controller.job_wait:
+        job_id: "{{ triage.launched_job.job_id }}"
+        timeout: 600
+      register: finished_job
+
+    - name: Extract apache_diagnostics artifact
+      when: triage.executed | bool
+      ansible.builtin.set_fact:
+        # Resolves artifact whether Controller stored it globally or keyed under host
+        diag: >-
+          {{
+            finished_job.job_info.artifacts.apache_diagnostics
+            | default(finished_job.job_info.artifacts.values() | map(attribute='apache_diagnostics') | first | default({}))
+          }}
+
+    # =========================================================================
+    # Step 2: Update ServiceNow Incident (Always runs)
+    # =========================================================================
+    - name: Post Triage and Diagnostic Findings to ServiceNow
+      servicenow.itsm.incident:
+        number: "{{ snow_incident }}"
+        other:
+          work_notes: |
+            [code]<b>=== AI Triage Summary ===</b>[/code]
+            * Root Cause: {{ triage.root_cause | default('Unknown') }}
+            * Action Taken: {{ triage.action_type | upper }}
+            * Decision: {{ triage.reasoning }}
+
+            {% if triage.executed | bool %}
+            [code]<b>=== Execution Details ===</b>[/code]
+            * Template: {{ triage.launched_job.template_name }} (ID: {{ triage.launched_job.template_id }})
+            * Controller Job ID: {{ triage.launched_job.job_id }}
+            * Status: {{ finished_job.job_info.status | upper }}
+
+            {% if diag | length > 0 %}
+            [code]<b>=== Apache Diagnostic Report ===</b>[/code]
+            * Host: {{ diag.host | default('N/A') }} ({{ diag.system_info.os_distribution }} {{ diag.system_info.os_version }})
+            * Service State: <b>{{ diag.service_status.ActiveState | default('N/A') }}</b> (SubState: {{ diag.service_status.SubState | default('N/A') }}, Result: {{ diag.service_status.Result | default('N/A') }})
+            * Syntax Test: <b>{{ 'PASSED' if diag.config_test.passed else 'FAILED' }}</b>
+            * Listening Ports (80/443): {{ diag.listening_ports | default([]) | join(', ') | default('None detected', true) }}
+            * SELinux Mode: {{ diag.selinux.mode | default('unknown') }}
+
+            {% if not diag.config_test.passed and (diag.config_test.output | default([]) | length > 0) %}
+            [code]<b>Config Test Errors:</b><pre>{{ diag.config_test.output | join('\n') }}</pre>[/code]
+            {% endif %}
+
+            {% if diag.error_log_recent | default([]) | length > 0 %}
+            [code]<b>Recent Error Log Lines:</b><pre>{{ diag.error_log_recent[-10:] | join('\n') }}</pre>[/code]
+            {% endif %}
+
+            {% if diag.selinux.recent_denials | default([]) | length > 0 %}
+            [code]<b>SELinux Denials Detected:</b><pre>{{ diag.selinux.recent_denials | join('\n') }}</pre>[/code]
+            {% endif %}
+            {% else %}
+            <i>Warning: Job finished with status '{{ finished_job.job_info.status }}' but produced no artifact data.</i>
+            {% endif %}
+
+            {% else %}
+            [code]<b>=== Manual Triage Required ===</b>[/code]
+            No automated job was executed.
+            {% endif %}
+
+            {% if triage.manual_remediation_steps | default([]) | length > 0 %}
+            [code]<b>=== Prescribed Manual Next Steps ===</b>[/code]
+            {% for step in triage.manual_remediation_steps %}
+            {{ loop.index }}. {{ step }}
+            {% endfor %}
+            {% endif %}
