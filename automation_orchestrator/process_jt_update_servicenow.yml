@@ -16,6 +16,7 @@
       ansible.controller.job_wait:
         job_id: "{{ triage.launched_job.job_id }}"
         timeout: 600
+        request_timeout: 10
       register: finished_job
 
     - name: Extract apache_diagnostics artifact
