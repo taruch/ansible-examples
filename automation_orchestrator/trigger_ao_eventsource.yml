@@ -31,18 +31,19 @@
 
   tasks:
     - name: Obtain OAuth token
-      register: token_response
-      no_log: falsegit 
       ansible.builtin.uri:
         url: "{{ webhook_base_url }}/api/v1/auth/token"
         method: POST
         body_format: form-urlencoded
         body:
           grant_type: client_credentials
-          client_id: "{{ webhook_client_id }}"
-          client_secret: "{{ webhook_client_secret }}"
+        url_username: "{{ webhook_client_id }}"
+        url_password: "{{ webhook_client_secret }}"
+        force_basic_auth: true
         validate_certs: "{{ webhook_validate_certs }}"
         status_code: 200
+      register: token_response
+      no_log: true
 
     - name: Unwrap eventData from event_payload
       when: event_payload.eventData is defined

@@ -41,11 +41,13 @@
         body_format: form-urlencoded
         body:
           grant_type: client_credentials
-          client_id: "{{ webhook_client_id }}"
-          client_secret: "{{ webhook_client_secret }}"
+        url_username: "{{ webhook_client_id }}"
+        url_password: "{{ webhook_client_secret }}"
+        force_basic_auth: true
         validate_certs: "{{ webhook_validate_certs }}"
         status_code: 200
       register: token_response
+      no_log: true
 
     - name: Build event payload from ServiceNow incident fields
       when: event_payload | length == 0 and incident_number | length > 0
