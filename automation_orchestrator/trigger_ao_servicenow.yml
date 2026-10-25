@@ -47,7 +47,7 @@
         validate_certs: "{{ webhook_validate_certs }}"
         status_code: 200
       register: token_response
-      no_log: true
+      # no_log: true
 
     - name: Build event payload from ServiceNow incident fields
       when: event_payload | length == 0 and incident_number | length > 0
