@@ -53,14 +53,27 @@
         request_timeout: 10
       register: finished_job
 
+    # ansible.controller.job_wait only returns flat fields (id, status,
+    # elapsed, started, finished) - no artifacts. Fetch the full job record
+    # directly to get artifacts.
+    - name: Get finished job details
+      when: triage.executed | bool
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/jobs/{{ triage.launched_job.job_id }}/"
+        headers:
+          Authorization: "Bearer {{ controller_oauthtoken }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: job_details
+
     - name: Extract apache_diagnostics artifact
       when: triage.executed | bool
       ansible.builtin.set_fact:
         # Resolves artifact whether Controller stored it globally or keyed under host
         diag: >-
           {{
-            finished_job.job_info.artifacts.apache_diagnostics
-            | default(finished_job.job_info.artifacts.values() | map(attribute='apache_diagnostics') | first | default({}))
+            job_details.json.artifacts.apache_diagnostics
+            | default(job_details.json.artifacts.values() | map(attribute='apache_diagnostics') | first | default({}))
           }}
 
     # =========================================================================
@@ -80,7 +93,7 @@
             [code]<b>=== Execution Details ===</b>[/code]
             * Template: {{ triage.launched_job.template_name }} (ID: {{ triage.launched_job.template_id }})
             * Controller Job ID: {{ triage.launched_job.job_id }}
-            * Status: {{ finished_job.job_info.status | upper }}
+            * Status: {{ finished_job.status | upper }}
 
             {% if diag | length > 0 %}
             [code]<b>=== Apache Diagnostic Report ===</b>[/code]
@@ -102,7 +115,7 @@
             [code]<b>SELinux Denials Detected:</b><pre>{{ diag.selinux.recent_denials | join('\n') }}</pre>[/code]
             {% endif %}
             {% else %}
-            <i>Warning: Job finished with status '{{ finished_job.job_info.status }}' but produced no artifact data.</i>
+            <i>Warning: Job finished with status '{{ finished_job.status }}' but produced no artifact data.</i>
             {% endif %}
 
             {% else %}
