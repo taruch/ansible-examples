@@ -145,5 +145,5 @@
       ansible.builtin.set_stats:
         data:
           apache_diagnostics: "{{ apache_diagnostics }}"
-        per_host: true
+        per_host: false
         aggregate: false
