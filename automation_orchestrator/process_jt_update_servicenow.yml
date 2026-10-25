@@ -13,7 +13,7 @@
     # =========================================================================
     - name: Wait for troubleshooting job to finish
       when: triage.executed | bool
-      ansible.controller.job_wait:
+      ansible.platform.job_wait:
         job_id: "{{ triage.launched_job.job_id }}"
         timeout: 600
         request_timeout: 10
