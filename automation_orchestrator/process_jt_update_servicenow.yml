@@ -7,14 +7,48 @@
     snow_incident: "{{ incident_number }}"
     triage: "{{ triage_result }}"
 
+    # Injected by the "Controller Credential" (Red Hat Ansible Automation
+    # Platform credential type) on the job template.
+    controller_hostname: "{{ aap_hostname | default(lookup('env', 'CONTROLLER_HOST')) }}"
+    controller_username: "{{ aap_username | default(lookup('env', 'CONTROLLER_USERNAME')) }}"
+    controller_password: "{{ aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
+    controller_validate_certs: "{{ aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
+
   tasks:
+    # =========================================================================
+    # Step 0: Exchange username/password for a Gateway OAuth token.
+    # AAP 2.5+ Gateway does not support Basic auth for token creation, so
+    # ansible.controller modules given only username/password fail with
+    # "Failed to get token: HTTP Error 404: Not Found".
+    # =========================================================================
+    - name: "Setup authentication (block)"
+      when: controller_oauthtoken is not defined
+      block:
+        - name: "Get the Authentication Token for the future requests"
+          ansible.builtin.uri:
+            url: "https://{{ controller_hostname }}/api/gateway/v1/tokens/"
+            user: "{{ controller_username }}"
+            password: "{{ controller_password }}"
+            method: POST
+            force_basic_auth: true
+            validate_certs: "{{ controller_validate_certs }}"
+            status_code: 201
+          register: authtoken_res
+          no_log: true
+
+        - name: "Set the oauth token to be used since now"
+          ansible.builtin.set_fact:
+            controller_oauthtoken: "{{ authtoken_res.json.token }}"
+          no_log: true
+
     # =========================================================================
     # Step 1: Wait for Controller Job (Runs ONLY if triage executed a job)
     # =========================================================================
     - name: Wait for troubleshooting job to finish
       when: triage.executed | bool
-      ansible.platform.job_wait:
+      ansible.controller.job_wait:
         job_id: "{{ triage.launched_job.job_id }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
         timeout: 600
         request_timeout: 10
       register: finished_job
