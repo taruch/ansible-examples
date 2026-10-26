@@ -1,0 +1,12 @@
+---
+# Default variables for general host incident enrichment
+
+# Filesystems at or above this percentage are flagged as "full"
+disk_threshold_percent: 90
+
+# Number of recent log entries to inspect for errors
+log_lines: 200
+
+# Linux only: minimum journalctl priority to treat as an "error"
+# (see `man journalctl` PRIORITY values - err, warning, crit, etc.)
+log_priority: err

@@ -1,0 +1,106 @@
+---
+# Linux host incident enrichment tasks: failed services, full filesystems,
+# and recent error-level log entries.
+
+- name: Gather system facts
+  ansible.builtin.setup:
+    gather_subset:
+      - date_time
+      - mounts
+
+- name: Get list of failed services
+  ansible.builtin.command: >-
+    systemctl list-units --type=service --state=failed
+    --no-pager --no-legend --plain
+  register: services_failed_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse failed services
+  ansible.builtin.set_fact:
+    failed_services: >-
+      {{
+        services_failed_raw.stdout_lines
+        | default([])
+        | map('regex_replace', '^(\S+)\s+.*', '\1')
+        | list
+      }}
+
+- name: Get detailed status for each failed service
+  ansible.builtin.command: >-
+    systemctl status {{ item }} --no-pager -l
+  register: failed_service_status
+  changed_when: false
+  failed_when: false
+  loop: "{{ failed_services }}"
+
+- name: Check disk usage on all mounted filesystems
+  ansible.builtin.shell: |
+    df -h --output=source,size,used,avail,pcent,target -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1 {print $1,$2,$3,$4,$5,$6}'
+  register: disk_usage_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse disk usage
+  ansible.builtin.set_fact:
+    disk_volumes: >-
+      {{
+        disk_volumes | default([]) + [{
+          'filesystem': item.split()[0],
+          'size': item.split()[1],
+          'used': item.split()[2],
+          'available': item.split()[3],
+          'percent_used': item.split()[4] | replace('%', '') | int,
+          'mount_point': item.split()[5]
+        }]
+      }}
+  loop: "{{ disk_usage_raw.stdout_lines | default([]) }}"
+
+- name: Identify full filesystems
+  ansible.builtin.set_fact:
+    full_filesystems: "{{ disk_volumes | default([]) | selectattr('percent_used', 'ge', disk_threshold_percent) | list }}"
+
+- name: Get recent system log entries at error level or higher
+  ansible.builtin.command: >-
+    journalctl -p {{ log_priority }} --no-pager -n {{ log_lines }} -o short-iso
+  register: log_errors_raw
+  changed_when: false
+  failed_when: false
+
+- name: Build consolidated host diagnostics report
+  ansible.builtin.set_fact:
+    host_diagnostics:
+      alert_type: "host_health"
+      host: "{{ inventory_hostname }}"
+      timestamp: "{{ ansible_date_time.iso8601 }}"
+      system_info:
+        os_distribution: "{{ ansible_distribution }}"
+        os_version: "{{ ansible_distribution_version }}"
+        kernel_version: "{{ ansible_kernel }}"
+        hostname: "{{ ansible_hostname }}"
+        fqdn: "{{ ansible_fqdn }}"
+      failed_services: "{{ failed_services }}"
+      failed_service_details: >-
+        {{
+          dict(failed_services | zip(failed_service_status.results | default([]) | map(attribute='stdout_lines') | map('default', [])))
+        }}
+      disk_volumes: "{{ disk_volumes | default([]) }}"
+      full_filesystems: "{{ full_filesystems | default([]) }}"
+      log_errors_recent: "{{ log_errors_raw.stdout_lines | default([]) }}"
+      issues_detected: >-
+        {{
+          (failed_services | length > 0)
+          or (full_filesystems | default([]) | length > 0)
+          or (log_errors_raw.stdout_lines | default([]) | length > 0)
+        }}
+
+- name: Display host diagnostics summary
+  ansible.builtin.debug:
+    var: host_diagnostics
+
+- name: Set stats for AAP dashboard / downstream workflow node
+  ansible.builtin.set_stats:
+    data:
+      host_diagnostics: "{{ host_diagnostics }}"
+    per_host: false
+    aggregate: false

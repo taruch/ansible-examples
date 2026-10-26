@@ -1,0 +1,20 @@
+---
+# Main tasks file for general host incident enrichment.
+# Supports Windows and Linux hosts only - anything else fails fast.
+
+- name: Fail fast on unsupported host type
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == 'Windows' or ansible_system == 'Linux'
+    fail_msg: >-
+      incident_enrichment_host only supports Windows and Linux hosts.
+      Detected os_family: {{ ansible_os_family | default('unknown') }},
+      system: {{ ansible_system | default('unknown') }}.
+
+- name: Include Windows-specific tasks
+  ansible.builtin.include_tasks: windows.yml
+  when: ansible_os_family == 'Windows'
+
+- name: Include Linux-specific tasks
+  ansible.builtin.include_tasks: linux.yml
+  when: ansible_os_family != 'Windows'

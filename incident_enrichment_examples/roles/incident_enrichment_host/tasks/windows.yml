@@ -1,0 +1,86 @@
+---
+# Windows host incident enrichment tasks: services that are stopped but set
+# to start automatically, full fixed drives, and recent error-level entries
+# from the System/Application event logs.
+
+- name: Get services set to Automatic start that are not running
+  ansible.windows.win_powershell:
+    script: |
+      Get-CimInstance Win32_Service |
+        Where-Object { $_.StartMode -eq 'Auto' -and $_.State -ne 'Running' } |
+        Select-Object Name, DisplayName, State, StartMode, ExitCode
+  register: failed_services_raw
+
+- name: Get recent Service Control Manager failure events
+  ansible.windows.win_powershell:
+    script: |
+      Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; Level=2} -MaxEvents {{ log_lines }} -ErrorAction SilentlyContinue |
+        Select-Object TimeCreated, Id, Message
+  register: service_failure_events_raw
+
+- name: Check disk usage on all fixed drives
+  ansible.windows.win_powershell:
+    script: |
+      Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
+        Select-Object DeviceID,
+          @{Name='SizeGB';Expression={[math]::Round($_.Size / 1GB, 2)}},
+          @{Name='FreeGB';Expression={[math]::Round($_.FreeSpace / 1GB, 2)}},
+          @{Name='PercentUsed';Expression={ if ($_.Size -gt 0) { [math]::Round((($_.Size - $_.FreeSpace) / $_.Size) * 100, 1) } else { 0 } }}
+  register: disk_usage_raw
+
+- name: Get recent error-level entries from System and Application logs
+  ansible.windows.win_powershell:
+    script: |
+      Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2} -MaxEvents {{ log_lines }} -ErrorAction SilentlyContinue |
+        Select-Object TimeCreated, LogName, ProviderName, Id, Message
+  register: log_errors_raw
+
+- name: Get OS, hostname, and current timestamp
+  ansible.windows.win_powershell:
+    script: |
+      $os = Get-CimInstance Win32_OperatingSystem
+      $cs = Get-CimInstance Win32_ComputerSystem
+      [PSCustomObject]@{
+          OSName = $os.Caption
+          OSVersion = $os.Version
+          Hostname = $cs.Name
+          Timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+      }
+  register: os_info
+
+- name: Identify full filesystems
+  ansible.builtin.set_fact:
+    full_filesystems: "{{ disk_usage_raw.output | default([]) | selectattr('PercentUsed', 'ge', disk_threshold_percent) | list }}"
+
+- name: Build consolidated host diagnostics report
+  ansible.builtin.set_fact:
+    host_diagnostics:
+      alert_type: "host_health"
+      host: "{{ inventory_hostname }}"
+      timestamp: "{{ os_info.output[0].Timestamp }}"
+      system_info:
+        os_name: "{{ os_info.output[0].OSName }}"
+        os_version: "{{ os_info.output[0].OSVersion }}"
+        hostname: "{{ os_info.output[0].Hostname }}"
+      failed_services: "{{ failed_services_raw.output | default([]) }}"
+      service_failure_events: "{{ service_failure_events_raw.output | default([]) }}"
+      disk_volumes: "{{ disk_usage_raw.output | default([]) }}"
+      full_filesystems: "{{ full_filesystems | default([]) }}"
+      log_errors_recent: "{{ log_errors_raw.output | default([]) }}"
+      issues_detected: >-
+        {{
+          (failed_services_raw.output | default([]) | length > 0)
+          or (full_filesystems | default([]) | length > 0)
+          or (log_errors_raw.output | default([]) | length > 0)
+        }}
+
+- name: Display host diagnostics summary
+  ansible.builtin.debug:
+    var: host_diagnostics
+
+- name: Set stats for AAP dashboard / downstream workflow node
+  ansible.builtin.set_stats:
+    data:
+      host_diagnostics: "{{ host_diagnostics }}"
+    per_host: false
+    aggregate: false

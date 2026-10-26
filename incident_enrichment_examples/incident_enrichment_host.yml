@@ -1,0 +1,17 @@
+---
+# General Host Health Investigation - OS-agnostic wrapper using the
+# incident_enrichment_host role. Supports Windows and Linux hosts only.
+# Use case: Alert system detects a generic host-health issue and triggers
+# this playbook via AAP (webhook, EDA, or manual launch) to gather failed
+# services, full filesystems, and recent error log entries before deciding
+# on a remediation action.
+#
+# Usage:
+#   ansible-playbook incident_enrichment_host.yml -e "_hosts=node1"
+
+- name: Host Health Investigation
+  hosts: "{{ _hosts | default('') }}"
+  gather_facts: true
+
+  roles:
+    - roles/incident_enrichment_host
