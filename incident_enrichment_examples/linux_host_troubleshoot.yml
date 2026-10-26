@@ -1,0 +1,173 @@
+---
+# Read-only general-purpose diagnostics for Linux hosts. Gathers running
+# services, failed services, recent system logs, disk/memory/CPU usage,
+# listening ports, and SELinux status, then consolidates everything into a
+# single `host_diagnostics` JSON structure intended for an AI agent (e.g. a
+# Claude step in an Automation Orchestrator workflow) to decide on a
+# remediation action. This playbook does not restart, reconfigure, or
+# otherwise change anything on the target host.
+#
+# Usage:
+#   ansible-playbook linux_host_troubleshoot.yml -e "_hosts=node1"
+
+- name: Gather general troubleshooting data on a Linux host
+  hosts: "{{ _hosts | default('') }}"
+  become: true
+  gather_facts: true
+
+  vars:
+    journalctl_lines: 100
+    journalctl_priority: warning
+
+  tasks:
+    - name: Get list of running services
+      ansible.builtin.command: >-
+        systemctl list-units --type=service --state=running
+        --no-pager --no-legend --plain
+      register: services_running_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Get list of failed services
+      ansible.builtin.command: >-
+        systemctl list-units --type=service --state=failed
+        --no-pager --no-legend --plain
+      register: services_failed_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Parse running services
+      ansible.builtin.set_fact:
+        services_running: >-
+          {{
+            services_running_raw.stdout_lines
+            | default([])
+            | map('regex_replace', '^(\S+)\s+.*', '\1')
+            | list
+          }}
+
+    - name: Parse failed services
+      ansible.builtin.set_fact:
+        services_failed: >-
+          {{
+            services_failed_raw.stdout_lines
+            | default([])
+            | map('regex_replace', '^(\S+)\s+.*', '\1')
+            | list
+          }}
+
+    - name: Get recent systemd journal entries at warning level or higher
+      ansible.builtin.command: >-
+        journalctl -p {{ journalctl_priority }} --no-pager
+        -n {{ journalctl_lines }} -o short-iso
+      register: journal_recent
+      changed_when: false
+      failed_when: false
+
+    - name: Get detailed status for each failed service
+      ansible.builtin.command: >-
+        systemctl status {{ item }} --no-pager -l
+      register: failed_service_status
+      changed_when: false
+      failed_when: false
+      loop: "{{ services_failed }}"
+
+    - name: Check disk usage on all mounted filesystems
+      ansible.builtin.shell: |
+        df -h --output=source,size,used,avail,pcent,target -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1 {print $1,$2,$3,$4,$5,$6}'
+      register: disk_usage_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Parse disk usage
+      ansible.builtin.set_fact:
+        disk_volumes: >-
+          {{
+            disk_volumes | default([]) + [{
+              'filesystem': item.split()[0],
+              'size': item.split()[1],
+              'used': item.split()[2],
+              'available': item.split()[3],
+              'percent_used': item.split()[4] | replace('%', '') | int,
+              'mount_point': item.split()[5]
+            }]
+          }}
+      loop: "{{ disk_usage_raw.stdout_lines | default([]) }}"
+
+    - name: Check memory and swap usage
+      ansible.builtin.command: free -m
+      register: memory_usage_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Check current load average and uptime
+      ansible.builtin.command: uptime
+      register: uptime_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Check listening TCP/UDP ports
+      ansible.builtin.shell: |
+        ss -tulnp 2>/dev/null || true
+      register: listening_ports_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Get last reboot history
+      ansible.builtin.command: last reboot -n 5
+      register: reboot_history_raw
+      changed_when: false
+      failed_when: false
+
+    - name: Get SELinux enforcement mode
+      ansible.builtin.command: getenforce
+      register: selinux_mode
+      changed_when: false
+      failed_when: false
+
+    - name: Check for recent SELinux denials
+      ansible.builtin.shell: |
+        ausearch -m avc -ts recent 2>/dev/null || true
+      register: selinux_denials
+      changed_when: false
+      failed_when: false
+      when: selinux_mode.stdout | default('') == 'Enforcing'
+
+    - name: Build consolidated host diagnostics report
+      ansible.builtin.set_fact:
+        host_diagnostics:
+          host: "{{ inventory_hostname }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          system_info:
+            os_distribution: "{{ ansible_distribution }}"
+            os_version: "{{ ansible_distribution_version }}"
+            kernel_version: "{{ ansible_kernel }}"
+            hostname: "{{ ansible_hostname }}"
+            fqdn: "{{ ansible_fqdn }}"
+            architecture: "{{ ansible_architecture }}"
+          uptime: "{{ uptime_raw.stdout | default('') }}"
+          reboot_history: "{{ reboot_history_raw.stdout_lines | default([]) }}"
+          services_running: "{{ services_running }}"
+          services_failed: "{{ services_failed }}"
+          failed_service_details: >-
+            {{
+              dict(services_failed | zip(failed_service_status.results | default([]) | map(attribute='stdout_lines') | map('default', [])))
+            }}
+          journal_recent: "{{ journal_recent.stdout_lines | default([]) }}"
+          disk_volumes: "{{ disk_volumes | default([]) }}"
+          memory_usage: "{{ memory_usage_raw.stdout_lines | default([]) }}"
+          listening_ports: "{{ listening_ports_raw.stdout_lines | default([]) }}"
+          selinux:
+            mode: "{{ selinux_mode.stdout | default('unknown') }}"
+            recent_denials: "{{ selinux_denials.stdout_lines | default([]) }}"
+
+    - name: Display host diagnostics summary
+      ansible.builtin.debug:
+        var: host_diagnostics
+
+    - name: Set stats for AAP dashboard / downstream workflow node
+      ansible.builtin.set_stats:
+        data:
+          host_diagnostics: "{{ host_diagnostics }}"
+        per_host: false
+        aggregate: false
