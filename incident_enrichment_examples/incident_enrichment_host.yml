@@ -3,11 +3,28 @@
 # incident_enrichment_host role. Supports Windows and Linux hosts only.
 # Use case: Alert system detects a generic host-health issue and triggers
 # this playbook via AAP (webhook, EDA, or manual launch) to gather failed
-# services, full filesystems, and recent error log entries before deciding
-# on a remediation action.
+# services, full filesystems, and recent error log entries, then (when
+# incident_number is provided) reports the findings into the ServiceNow
+# incident's work notes.
+#
+# This assumes _hosts names a single host - the ServiceNow update play below
+# reports on hostvars[_hosts] only, matching how this playbook (and
+# apache_troubleshoot.yml/process_jt_update_servicenow.yml) are used in
+# practice: one incident maps to one target host per run.
+#
+# The work note includes the [AAP-REVIEWED] marker (same convention as
+# servicenow_add_enrichment_note.yml) so it also satisfies EDA rulebook
+# queries that filter out already-handled incidents - no separate call to
+# servicenow_add_enrichment_note.yml is needed when this playbook runs.
+#
+# Required variables (for the ServiceNow update step):
+#   - incident_number: ServiceNow incident number (e.g. INC0010001). If not
+#     provided, the ServiceNow update play is skipped entirely and this
+#     playbook just reports the diagnostics via debug/set_stats.
 #
 # Usage:
 #   ansible-playbook incident_enrichment_host.yml -e "_hosts=node1"
+#   ansible-playbook incident_enrichment_host.yml -e "_hosts=node1" -e "incident_number=INC0010001"
 
 - name: Host Health Investigation
   hosts: "{{ _hosts | default('') }}"
@@ -15,3 +32,103 @@
 
   roles:
     - roles/incident_enrichment_host
+
+- name: Report host health findings to ServiceNow
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    work_note_marker: "[AAP-REVIEWED]"
+
+  tasks:
+    - name: Update ServiceNow incident with host health findings
+      when: incident_number is defined and incident_number | length > 0
+      block:
+        - name: Get diagnostics collected for the target host
+          ansible.builtin.set_fact:
+            diag: "{{ hostvars[_hosts].host_diagnostics | default({}) }}"
+
+        - name: Fail if diagnostics were not collected
+          ansible.builtin.assert:
+            that:
+              - diag | length > 0
+            fail_msg: >-
+              No host_diagnostics found for '{{ _hosts }}' - the
+              incident_enrichment_host role may not have completed
+              successfully.
+
+        - name: Look up ServiceNow credential injected by the AAP job template
+          ansible.builtin.set_fact:
+            sn_host: "{{ lookup('env', 'SN_HOST') }}"
+            sn_username: "{{ lookup('env', 'SN_USERNAME') }}"
+            sn_password: "{{ lookup('env', 'SN_PASSWORD') }}"
+          no_log: true
+
+        - name: Validate ServiceNow credential is available
+          ansible.builtin.assert:
+            that:
+              - sn_host | length > 0
+              - sn_username | length > 0
+              - sn_password | length > 0
+            fail_msg: >-
+              incident_number was provided but the AAP job template is
+              missing an attached ServiceNow credential
+              (SN_HOST/SN_USERNAME/SN_PASSWORD).
+
+        - name: Normalize recent log entries into display strings
+          # Linux entries are plain journalctl lines (strings); Windows
+          # entries are Get-WinEvent objects (dicts) that need formatting.
+          ansible.builtin.set_fact:
+            log_errors_display: >-
+              {{
+                log_errors_display | default([]) + [
+                  (item.TimeCreated | default('') ~ ' [' ~ (item.ProviderName | default('')) ~ '] ' ~ (item.Message | default('') | trim))
+                  if item is mapping
+                  else item
+                ]
+              }}
+          loop: "{{ diag.log_errors_recent | default([]) }}"
+          loop_control:
+            label: "{{ item if item is string else item.get('Id', 'event') }}"
+
+        - name: Build work note from host diagnostics results
+          ansible.builtin.set_fact:
+            host_health_work_note: |
+              [code]<b>=== AAP Host Health Enrichment ===</b>[/code]
+              Host: {{ diag.host | default(_hosts) }}
+              Issues Detected: {{ 'YES' if diag.issues_detected | default(false) else 'No' }}
+
+              {% if diag.failed_services | default([]) | length > 0 %}
+              [code]<b>Failed Services:</b>[/code]
+              {% for svc in diag.failed_services %}
+              - {{ svc.Name | default(svc) }}
+              {% endfor %}
+              {% endif %}
+
+              {% if diag.full_filesystems | default([]) | length > 0 %}
+              [code]<b>Full Filesystems:</b>[/code]
+              {% for fs in diag.full_filesystems %}
+              - {{ fs.mount_point | default(fs.DeviceID | default('unknown')) }}: {{ fs.percent_used | default(fs.PercentUsed | default('?')) }}% used
+              {% endfor %}
+              {% endif %}
+
+              {% if log_errors_display | default([]) | length > 0 %}
+              [code]<b>Recent Error Log Entries ({{ log_errors_display | length }} total, showing last 10):</b><pre>{{ log_errors_display[-10:] | join('\n') }}</pre>[/code]
+              {% endif %}
+
+              {{ work_note_marker }}
+
+        - name: Update ServiceNow incident with host health findings
+          servicenow.itsm.incident:
+            instance:
+              host: "{{ sn_host }}"
+              username: "{{ sn_username }}"
+              password: "{{ sn_password }}"
+            number: "{{ incident_number }}"
+            other:
+              work_notes: "{{ host_health_work_note }}"
+          register: incident_update
+
+        - name: Display result
+          ansible.builtin.debug:
+            msg: "Updated ServiceNow incident {{ incident_number }} with host health findings."
