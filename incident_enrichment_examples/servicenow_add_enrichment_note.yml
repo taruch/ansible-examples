@@ -1,15 +1,19 @@
 ---
-# Adds a work note to a ServiceNow incident indicating that Ansible
-# Automation Platform is reviewing it for automated enrichment, and clears
-# u_automated_remediation so the incident stops matching EDA rulebook
-# queries that filter on u_automated_remediation=true (e.g.
-# sysparm_query: "active=true^state=1^u_automated_remediation=true").
+# Adds a work note to a ServiceNow incident containing the [AAP-REVIEWED]
+# marker, so it stops matching EDA rulebook queries that filter on
+# work_notesNOT LIKE[AAP-REVIEWED] (e.g.
+# sysparm_query: "active=true^state=1^work_notesNOT LIKE[AAP-REVIEWED]").
+# Does not change state or any other field visible to ops staff.
 #
-# NOTE: work_notes is a ServiceNow journal field - its value is never
-# readable back through the REST Table API, and ISEMPTY/ISNOTEMPTY against
-# journal fields is not reliable via sysparm_query. Do not use work_notes
-# (or comments) as the "already seen" gate - u_automated_remediation is the
-# real, queryable flag for that.
+# NOTE: work_notes is a journal field, so ISEMPTY/ISNOTEMPTY against it is
+# not reliable via sysparm_query (its aggregate value is never readable back
+# through the REST Table API either - a record's work_notes field always
+# reads back blank regardless of history). LIKE/NOT LIKE content-matching
+# against journal fields, by contrast, is a standard, documented ServiceNow
+# query operator (see servicenow.itsm's module_utils/query.py, OPERATORS_STRING)
+# and is the supported way to filter on journal field content. This is the
+# mechanism this gate relies on - verify it against your instance before
+# depending on it in production.
 #
 # Assumes execution as an AAP job template with a ServiceNow credential
 # attached - the credential injects SN_HOST/SN_USERNAME/SN_PASSWORD as
@@ -29,7 +33,7 @@
   gather_facts: false
 
   vars:
-    work_note: "Ansible Automation Platform is reviewing this incident for automated enrichment."
+    work_note: "[AAP-REVIEWED] Ansible Automation Platform reviewed this incident for automated enrichment."
 
   tasks:
     - name: Look up ServiceNow credential injected by the AAP job template
@@ -52,7 +56,7 @@
           template is missing an attached ServiceNow credential
           (SN_HOST/SN_USERNAME/SN_PASSWORD).
 
-    - name: Add work note to the incident and mark it as touched
+    - name: Add work note to the incident
       servicenow.itsm.incident:
         instance:
           host: "{{ sn_host }}"
@@ -61,14 +65,11 @@
         number: "{{ incident_number }}"
         other:
           work_notes: "{{ work_note }}"
-          u_automated_remediation: false
       register: incident_update
 
     - name: Display result
       ansible.builtin.debug:
-        msg: >-
-          Added work note to incident {{ incident_number }} and cleared
-          u_automated_remediation: {{ work_note }}
+        msg: "Added work note to incident {{ incident_number }}: {{ work_note }}"
 
     - name: Set stats for AAP dashboard / downstream workflow node
       ansible.builtin.set_stats:
