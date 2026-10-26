@@ -1,12 +1,15 @@
 ---
 # Adds a work note to a ServiceNow incident indicating that Ansible
-# Automation Platform is reviewing it for automated enrichment. Does not
-# change the incident's state - this is purely an informational marker.
+# Automation Platform is reviewing it for automated enrichment, and clears
+# u_automated_remediation so the incident stops matching EDA rulebook
+# queries that filter on u_automated_remediation=true (e.g.
+# sysparm_query: "active=true^state=1^u_automated_remediation=true").
 #
-# This also doubles as the "already seen" marker for EDA rulebooks that poll
-# ServiceNow and filter out incidents that already have work notes (e.g. a
-# sysparm_query ending in ^work_notesISEMPTY) - once this note lands, the
-# incident stops matching that filter on the next poll.
+# NOTE: work_notes is a ServiceNow journal field - its value is never
+# readable back through the REST Table API, and ISEMPTY/ISNOTEMPTY against
+# journal fields is not reliable via sysparm_query. Do not use work_notes
+# (or comments) as the "already seen" gate - u_automated_remediation is the
+# real, queryable flag for that.
 #
 # Assumes execution as an AAP job template with a ServiceNow credential
 # attached - the credential injects SN_HOST/SN_USERNAME/SN_PASSWORD as
@@ -49,7 +52,7 @@
           template is missing an attached ServiceNow credential
           (SN_HOST/SN_USERNAME/SN_PASSWORD).
 
-    - name: Add work note to the incident
+    - name: Add work note to the incident and mark it as touched
       servicenow.itsm.incident:
         instance:
           host: "{{ sn_host }}"
@@ -58,11 +61,14 @@
         number: "{{ incident_number }}"
         other:
           work_notes: "{{ work_note }}"
+          u_automated_remediation: false
       register: incident_update
 
     - name: Display result
       ansible.builtin.debug:
-        msg: "Added work note to incident {{ incident_number }}: {{ work_note }}"
+        msg: >-
+          Added work note to incident {{ incident_number }} and cleared
+          u_automated_remediation: {{ work_note }}
 
     - name: Set stats for AAP dashboard / downstream workflow node
       ansible.builtin.set_stats:
