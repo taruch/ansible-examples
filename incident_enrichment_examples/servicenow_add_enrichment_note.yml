@@ -1,0 +1,73 @@
+---
+# Adds a work note to a ServiceNow incident indicating that Ansible
+# Automation Platform is reviewing it for automated enrichment. Does not
+# change the incident's state - this is purely an informational marker.
+#
+# This also doubles as the "already seen" marker for EDA rulebooks that poll
+# ServiceNow and filter out incidents that already have work notes (e.g. a
+# sysparm_query ending in ^work_notesISEMPTY) - once this note lands, the
+# incident stops matching that filter on the next poll.
+#
+# Assumes execution as an AAP job template with a ServiceNow credential
+# attached - the credential injects SN_HOST/SN_USERNAME/SN_PASSWORD as
+# environment variables, so no ServiceNow secrets are passed as extra vars.
+#
+# Required variables:
+#   - incident_number: ServiceNow incident number (e.g. INC0010001)
+#
+# Optional variables:
+#   - work_note: Work note text to add (defaults to a generic message below)
+#
+# Usage:
+#   ansible-playbook servicenow_add_enrichment_note.yml -e "incident_number=INC0010001"
+
+- name: Add an enrichment-in-progress work note to a ServiceNow incident
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    work_note: "Ansible Automation Platform is reviewing this incident for automated enrichment."
+
+  tasks:
+    - name: Look up ServiceNow credential injected by the AAP job template
+      ansible.builtin.set_fact:
+        sn_host: "{{ lookup('env', 'SN_HOST') }}"
+        sn_username: "{{ lookup('env', 'SN_USERNAME') }}"
+        sn_password: "{{ lookup('env', 'SN_PASSWORD') }}"
+      no_log: true
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - incident_number is defined
+          - incident_number | length > 0
+          - sn_host | length > 0
+          - sn_username | length > 0
+          - sn_password | length > 0
+        fail_msg: >-
+          Missing required variables: incident_number, or the AAP job
+          template is missing an attached ServiceNow credential
+          (SN_HOST/SN_USERNAME/SN_PASSWORD).
+
+    - name: Add work note to the incident
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ sn_host }}"
+          username: "{{ sn_username }}"
+          password: "{{ sn_password }}"
+        number: "{{ incident_number }}"
+        other:
+          work_notes: "{{ work_note }}"
+      register: incident_update
+
+    - name: Display result
+      ansible.builtin.debug:
+        msg: "Added work note to incident {{ incident_number }}: {{ work_note }}"
+
+    - name: Set stats for AAP dashboard / downstream workflow node
+      ansible.builtin.set_stats:
+        data:
+          incident_number: "{{ incident_number }}"
+          incident_sys_id: "{{ incident_update.record.sys_id }}"
+          servicenow_link: "https://{{ sn_host }}/nav_to.do?uri=incident.do?sys_id={{ incident_update.record.sys_id }}"
+        aggregate: false
