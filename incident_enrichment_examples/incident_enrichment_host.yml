@@ -55,8 +55,11 @@
         incident_type: cpu
 
     - name: Capture CPU alert report
+      # alert_report_json is built from a JSON-looking block scalar; Ansible's
+      # templating auto-casts that to a native dict, so it is not reliably a
+      # JSON string here - handle both forms like servicenow_incident_update.yml does.
       ansible.builtin.set_fact:
-        cpu_alert_report: "{{ alert_report_json | from_json }}"
+        cpu_alert_report: "{{ alert_report_json if alert_report_json is mapping else (alert_report_json | from_json) }}"
 
     - name: Run memory investigation
       ansible.builtin.include_role:
@@ -66,7 +69,7 @@
 
     - name: Capture memory alert report
       ansible.builtin.set_fact:
-        memory_alert_report: "{{ alert_report_json | from_json }}"
+        memory_alert_report: "{{ alert_report_json if alert_report_json is mapping else (alert_report_json | from_json) }}"
 
     - name: Run disk investigation
       ansible.builtin.include_role:
@@ -76,7 +79,7 @@
 
     - name: Capture disk alert report
       ansible.builtin.set_fact:
-        disk_alert_report: "{{ alert_report_json | from_json }}"
+        disk_alert_report: "{{ alert_report_json if alert_report_json is mapping else (alert_report_json | from_json) }}"
 
     - name: Build combined host investigation report
       ansible.builtin.set_fact:
