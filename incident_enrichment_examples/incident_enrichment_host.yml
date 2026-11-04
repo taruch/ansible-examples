@@ -100,7 +100,7 @@
           memory_alert_data: "{{ memory_alert_report }}"
           disk_alert_data: "{{ disk_alert_report }}"
           alert_data: "{{ combined_alert_report | to_json }}"
-        per_host: true
+        per_host: false
         aggregate: false
 
 - name: Report host investigation findings to ServiceNow
