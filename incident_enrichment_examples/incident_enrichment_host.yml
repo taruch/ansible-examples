@@ -362,7 +362,7 @@
             data:
               incident_number: "{{ incident_number }}"
               incident_sys_id: "{{ incident_sys_id }}"
-              servicenow_link: "https://{{ sn_host }}/nav_to.do?uri=incident.do?sys_id={{ incident_sys_id }}"
+              servicenow_link: "https://{{ sn_host | regex_replace('^https?://', '') | regex_replace('/$', '') }}/nav_to.do?uri=incident.do?sys_id={{ incident_sys_id }}"
               update_status: "success"
               overall_issues_detected: "{{ overall_issues_detected }}"
             aggregate: false
