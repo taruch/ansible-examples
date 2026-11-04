@@ -1,11 +1,14 @@
 ---
-# General Host Health Investigation - OS-agnostic wrapper using the
-# incident_enrichment_host role. Supports Windows and Linux hosts only.
+# General Host Investigation - OS-agnostic wrapper combining the
+# incident_enrichment_host role (failed services, full filesystems, recent
+# error logs) with the incident_enrichment role run once per incident_type
+# (cpu, memory, disk). Supports Windows and Linux hosts only.
+#
 # Use case: Alert system detects a generic host-health issue and triggers
-# this playbook via AAP (webhook, EDA, or manual launch) to gather failed
-# services, full filesystems, and recent error log entries, then (when
-# incident_number is provided) reports the findings into the ServiceNow
-# incident's work notes.
+# this playbook via AAP (webhook, EDA/automation orchestrator, or manual
+# launch) to gather a full diagnostic snapshot of the host, then (when
+# incident_number is provided) reports all of the findings into the
+# ServiceNow incident's work notes.
 #
 # This assumes _hosts names a single host - the ServiceNow update play below
 # reports on hostvars[_hosts] only, matching how this playbook (and
@@ -17,23 +20,87 @@
 # queries that filter out already-handled incidents - no separate call to
 # servicenow_add_enrichment_note.yml is needed when this playbook runs.
 #
+# All gathered data (host diagnostics, plus CPU/memory/disk alert reports)
+# is also published via set_stats, so it is available as workflow
+# artifacts (workflow_job.artifacts) to the next node in an AAP workflow or
+# an automation orchestrator / EDA-driven workflow - e.g. an AI triage
+# prompt node, or a further escalation step.
+#
 # Required variables (for the ServiceNow update step):
 #   - incident_number: ServiceNow incident number (e.g. INC0010001). If not
 #     provided, the ServiceNow update play is skipped entirely and this
 #     playbook just reports the diagnostics via debug/set_stats.
 #
+# Optional variables (passed through to the incident_enrichment role):
+#   - cpu_threshold, memory_threshold, disk_threshold, top_process_count,
+#     large_file_size_mb, top_folder_count, top_directory_count
+#
 # Usage:
 #   ansible-playbook incident_enrichment_host.yml -e "_hosts=node1"
 #   ansible-playbook incident_enrichment_host.yml -e "_hosts=node1" -e "incident_number=INC0010001"
 
-- name: Host Health Investigation
+- name: Host Investigation
   hosts: "{{ _hosts | default('') }}"
   gather_facts: true
 
-  roles:
-    - roles/incident_enrichment_host
+  tasks:
+    - name: Run general host health checks
+      ansible.builtin.include_role:
+        name: roles/incident_enrichment_host
 
-- name: Report host health findings to ServiceNow
+    - name: Run CPU investigation
+      ansible.builtin.include_role:
+        name: roles/incident_enrichment
+      vars:
+        incident_type: cpu
+
+    - name: Capture CPU alert report
+      ansible.builtin.set_fact:
+        cpu_alert_report: "{{ alert_report_json | from_json }}"
+
+    - name: Run memory investigation
+      ansible.builtin.include_role:
+        name: roles/incident_enrichment
+      vars:
+        incident_type: memory
+
+    - name: Capture memory alert report
+      ansible.builtin.set_fact:
+        memory_alert_report: "{{ alert_report_json | from_json }}"
+
+    - name: Run disk investigation
+      ansible.builtin.include_role:
+        name: roles/incident_enrichment
+      vars:
+        incident_type: disk
+
+    - name: Capture disk alert report
+      ansible.builtin.set_fact:
+        disk_alert_report: "{{ alert_report_json | from_json }}"
+
+    - name: Build combined host investigation report
+      ansible.builtin.set_fact:
+        combined_alert_report:
+          alert_type: "host_investigation"
+          host: "{{ inventory_hostname }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          host_diagnostics: "{{ host_diagnostics | default({}) }}"
+          cpu: "{{ cpu_alert_report }}"
+          memory: "{{ memory_alert_report }}"
+          disk: "{{ disk_alert_report }}"
+
+    - name: Set stats for AAP dashboard / downstream workflow node
+      ansible.builtin.set_stats:
+        data:
+          host_diagnostics: "{{ host_diagnostics | default({}) }}"
+          cpu_alert_data: "{{ cpu_alert_report }}"
+          memory_alert_data: "{{ memory_alert_report }}"
+          disk_alert_data: "{{ disk_alert_report }}"
+          alert_data: "{{ combined_alert_report | to_json }}"
+        per_host: true
+        aggregate: false
+
+- name: Report host investigation findings to ServiceNow
   hosts: localhost
   gather_facts: false
 
@@ -41,21 +108,37 @@
     work_note_marker: "[AAP-REVIEWED]"
 
   tasks:
-    - name: Update ServiceNow incident with host health findings
+    - name: Update ServiceNow incident with host investigation findings
       when: incident_number is defined and incident_number | length > 0
       block:
-        - name: Get diagnostics collected for the target host
+        - name: Get diagnostics and alert reports collected for the target host
           ansible.builtin.set_fact:
             diag: "{{ hostvars[_hosts].host_diagnostics | default({}) }}"
+            cpu: "{{ hostvars[_hosts].cpu_alert_report | default({}) }}"
+            memory: "{{ hostvars[_hosts].memory_alert_report | default({}) }}"
+            disk: "{{ hostvars[_hosts].disk_alert_report | default({}) }}"
 
         - name: Fail if diagnostics were not collected
           ansible.builtin.assert:
             that:
               - diag | length > 0
+              - cpu | length > 0
+              - memory | length > 0
+              - disk | length > 0
             fail_msg: >-
-              No host_diagnostics found for '{{ _hosts }}' - the
-              incident_enrichment_host role may not have completed
-              successfully.
+              Host investigation data for '{{ _hosts }}' is incomplete - the
+              incident_enrichment_host / incident_enrichment roles may not
+              have completed successfully.
+
+        - name: Determine overall issue status
+          ansible.builtin.set_fact:
+            overall_issues_detected: >-
+              {{
+                (diag.issues_detected | default(false))
+                or (cpu.cpu_metrics.current_cpu_percent | float > cpu.cpu_metrics.threshold_percent | float)
+                or (memory.memory_metrics.percent_used | float > memory.memory_metrics.threshold_percent | float)
+                or ((disk.critical_filesystems | default(disk.critical_drives | default([]))) | length > 0)
+              }}
 
         - name: Look up ServiceNow credential injected by the AAP job template
           ansible.builtin.set_fact:
@@ -91,34 +174,168 @@
           loop_control:
             label: "{{ item if item is string else item.get('Id', 'event') }}"
 
-        - name: Build work note from host diagnostics results
+        - name: Build host health section of the work note
           ansible.builtin.set_fact:
-            host_health_work_note: |
-              [code]<b>=== AAP Host Health Enrichment ===</b>[/code]
-              Host: {{ diag.host | default(_hosts) }}
-              Issues Detected: {{ 'YES' if diag.issues_detected | default(false) else 'No' }}
-
+            host_health_section: |
+              [code]<b>=== Host Health ===</b>[/code]
               {% if diag.failed_services | default([]) | length > 0 %}
-              [code]<b>Failed Services:</b>[/code]
+              Failed Services:
               {% for svc in diag.failed_services %}
               - {{ svc.Name | default(svc) }}
               {% endfor %}
+              {% else %}
+              Failed Services: None
               {% endif %}
 
               {% if diag.full_filesystems | default([]) | length > 0 %}
-              [code]<b>Full Filesystems:</b>[/code]
+              Full Filesystems:
               {% for fs in diag.full_filesystems %}
               - {{ fs.mount_point | default(fs.DeviceID | default('unknown')) }}: {{ fs.percent_used | default(fs.PercentUsed | default('?')) }}% used
               {% endfor %}
+              {% else %}
+              Full Filesystems: None
               {% endif %}
 
               {% if log_errors_display | default([]) | length > 0 %}
-              [code]<b>Recent Error Log Entries ({{ log_errors_display | length }} total, showing last 10):</b><pre>{{ log_errors_display[-10:] | join('\n') }}</pre>[/code]
+              Recent Error Log Entries ({{ log_errors_display | length }} total, showing last 10):
+              [code]<pre>{{ log_errors_display[-10:] | join('\n') }}</pre>[/code]
               {% endif %}
+
+        - name: Build CPU section of the work note
+          ansible.builtin.set_fact:
+            cpu_section: |
+              [code]<b>=== CPU Investigation ===</b>[/code]
+              Current CPU Usage: {{ cpu.cpu_metrics.current_cpu_percent }}% (threshold {{ cpu.cpu_metrics.threshold_percent }}%)
+              {% if cpu.system_info.os_distribution is defined %}
+              Load Average (1/5/15 min): {{ cpu.cpu_metrics.load_average['1min'] }} / {{ cpu.cpu_metrics.load_average['5min'] }} / {{ cpu.cpu_metrics.load_average['15min'] }}
+              Processor: {{ cpu.cpu_metrics.processor_info.model }} ({{ cpu.cpu_metrics.processor_info.sockets }} socket(s), {{ cpu.cpu_metrics.processor_info.cores_per_socket }} cores/socket, {{ cpu.cpu_metrics.processor_info.total_vcpus }} vCPUs)
+              Context Switches: {{ cpu.cpu_metrics.stats.context_switches }}, Interrupts: {{ cpu.cpu_metrics.stats.interrupts }}
+              Running/Total Processes: {{ cpu.cpu_metrics.stats.running_processes }}/{{ cpu.cpu_metrics.stats.total_processes }} (Zombies: {{ cpu.cpu_metrics.stats.zombie_processes }})
+              Uptime: {{ cpu.system_info.uptime_hours }} hours
+              Top CPU Processes:
+              {% for proc in cpu.top_processes[:5] %}
+                {{ loop.index }}. {{ proc.command }} (PID {{ proc.pid }}) - CPU: {{ proc.cpu_percent }}%, Mem: {{ proc.mem_percent }}%, User: {{ proc.user }}
+              {% endfor %}
+              {% else %}
+              Processor: {{ cpu.cpu_metrics.processor_info.name }} ({{ cpu.cpu_metrics.processor_info.physical_count }} physical, {{ cpu.cpu_metrics.processor_info.cores_per_processor }} cores/proc, {{ cpu.cpu_metrics.processor_info.logical_processors }} logical)
+              Processor Queue Length: {{ cpu.cpu_metrics.performance_counters['Processor Queue Length'] | default('N/A') }}
+              % Privileged Time: {{ cpu.cpu_metrics.performance_counters['% Privileged Time'] | default('N/A') }}%, % User Time: {{ cpu.cpu_metrics.performance_counters['% User Time'] | default('N/A') }}%
+              Uptime: {{ cpu.system_info.uptime_hours }} hours (last boot {{ cpu.system_info.last_boot_time }})
+              Windows Update Service: {{ cpu.windows_update_status }}
+              Running Scheduled Tasks: {{ cpu.running_scheduled_tasks | length }}
+              Top CPU Processes:
+              {% for proc in cpu.top_processes[:5] %}
+                {{ loop.index }}. {{ proc.Name }} (PID {{ proc.Id }}) - CPU: {{ proc['CPU(s)'] }}s, Mem: {{ proc['Memory(MB)'] }} MB
+              {% endfor %}
+              {% endif %}
+
+        - name: Build memory section of the work note
+          ansible.builtin.set_fact:
+            memory_section: |
+              [code]<b>=== Memory Investigation ===</b>[/code]
+              Current Memory Usage: {{ memory.memory_metrics.percent_used }}% (threshold {{ memory.memory_metrics.threshold_percent }}%)
+              Total: {{ memory.memory_metrics.total_memory_gb }} GB, Used: {{ memory.memory_metrics.used_memory_gb }} GB, Free: {{ memory.memory_metrics.free_memory_gb }} GB
+              {% if memory.system_info.os_distribution is defined %}
+              Available: {{ memory.memory_metrics.available_memory_gb }} GB, Buffers: {{ memory.memory_metrics.buffers_gb }} GB, Cached: {{ memory.memory_metrics.cached_gb }} GB
+              Swap: {{ memory.memory_metrics.swap.used_gb }}/{{ memory.memory_metrics.swap.total_gb }} GB ({{ memory.memory_metrics.swap.percent_used }}%)
+              {% if memory.oom_killer_history | default([]) | length > 0 %}
+              OOM Killer History:
+              {% for line in memory.oom_killer_history %}
+                {{ line }}
+              {% endfor %}
+              {% endif %}
+              Top Memory Processes:
+              {% for proc in memory.top_processes[:5] %}
+                {{ loop.index }}. {{ proc.command }} (PID {{ proc.pid }}) - Mem: {{ proc.mem_percent }}%, RSS: {{ proc.rss_kb }} KB
+              {% endfor %}
+              {% if memory.memory_intensive_services | default([]) | length > 0 %}
+              Memory-Intensive Services:
+              {% for svc in memory.memory_intensive_services[:5] %}
+                - {{ svc.service }}: {{ svc.rss_kb }} KB
+              {% endfor %}
+              {% endif %}
+              {% else %}
+              Page File Usage:
+              {% for pf in memory.page_file | default([]) %}
+                - {{ pf.Name }}: {{ pf.PercentUsed }}% ({{ pf.CurrentUsageMB }}/{{ pf.AllocatedMB }} MB, peak {{ pf.PeakUsageMB }} MB)
+              {% endfor %}
+              Top Memory Processes:
+              {% for proc in memory.top_processes[:5] %}
+                {{ loop.index }}. {{ proc.Name }} (PID {{ proc.Id }}) - Mem: {{ proc['Memory(MB)'] }} MB
+              {% endfor %}
+              {% if memory.memory_intensive_services | default([]) | length > 0 %}
+              Memory-Intensive Services:
+              {% for svc in memory.memory_intensive_services[:5] %}
+                - {{ svc.ServiceName }}: {{ svc.MemoryMB }} MB
+              {% endfor %}
+              {% endif %}
+              {% endif %}
+
+        - name: Build disk section of the work note
+          ansible.builtin.set_fact:
+            disk_section: |
+              [code]<b>=== Disk Investigation ===</b>[/code]
+              Threshold: {{ disk.threshold_percent }}%
+              {% if disk.system_info is defined %}
+              Critical Filesystems: {{ disk.critical_filesystems | join(', ') if disk.critical_filesystems | length > 0 else 'None' }}
+              Disk Volumes:
+              {% for vol in disk.disk_volumes %}
+                - {{ vol.mount_point }} ({{ vol.filesystem }}): {{ vol.percent_used }}% used ({{ vol.used }}/{{ vol.size }})
+              {% endfor %}
+              {% if disk.largest_directories | default([]) | length > 0 %}
+              Top Largest Directories:
+              {% for d in disk.largest_directories[:5] %}
+                {{ loop.index }}. {{ d.path }} - {{ d.size_mb }} MB
+              {% endfor %}
+              {% endif %}
+              {% if disk.large_files | default([]) | length > 0 %}
+              Large Files (>{{ disk.large_file_size_mb | default(100) }}MB):
+              {% for f in disk.large_files[:5] %}
+                {{ loop.index }}. {{ f.path }} - {{ f.size }}
+              {% endfor %}
+              {% endif %}
+              Systemd Journal Size: {{ disk.journal_size | default('N/A') }}
+              {% else %}
+              Critical Drives: {{ disk.critical_drives | join(', ') if disk.critical_drives | length > 0 else 'None' }}
+              Disk Volumes:
+              {% for vol in disk.disk_volumes %}
+                - {{ vol.DriveLetter }}: {{ vol.PercentUsed }}% used ({{ vol.UsedGB }}/{{ vol.SizeGB }} GB)
+              {% endfor %}
+              {% if disk.largest_folders | default([]) | length > 0 %}
+              Top Largest Folders:
+              {% for f in disk.largest_folders[:5] %}
+                {{ loop.index }}. {{ f.Path }} - {{ f.SizeGB }} GB
+              {% endfor %}
+              {% endif %}
+              {% if disk.large_files | default([]) | length > 0 %}
+              Large Files:
+              {% for f in disk.large_files[:5] %}
+                {{ loop.index }}. {{ f.FullName }} - {{ f.SizeGB }} GB
+              {% endfor %}
+              {% endif %}
+              {% if disk.windows_update_cache | default([]) | length > 0 %}
+              Windows Update Cache: {{ disk.windows_update_cache[0].SizeGB | default(0) }} GB
+              {% endif %}
+              {% endif %}
+
+        - name: Build work note from all investigation results
+          ansible.builtin.set_fact:
+            host_investigation_work_note: |
+              [code]<b>=== AAP Host Investigation ===</b>[/code]
+              Host: {{ diag.host | default(_hosts) }}
+              Issues Detected: {{ 'YES' if overall_issues_detected else 'No' }}
+
+              {{ host_health_section }}
+
+              {{ cpu_section }}
+
+              {{ memory_section }}
+
+              {{ disk_section }}
 
               {{ work_note_marker }}
 
-        - name: Update ServiceNow incident with host health findings
+        - name: Update ServiceNow incident with host investigation findings
           servicenow.itsm.incident:
             instance:
               host: "{{ sn_host }}"
@@ -126,9 +343,23 @@
               password: "{{ sn_password }}"
             number: "{{ incident_number }}"
             other:
-              work_notes: "{{ host_health_work_note }}"
+              work_notes: "{{ host_investigation_work_note }}"
           register: incident_update
+
+        - name: Extract sys_id from response
+          ansible.builtin.set_fact:
+            incident_sys_id: "{{ incident_update.record.sys_id }}"
 
         - name: Display result
           ansible.builtin.debug:
-            msg: "Updated ServiceNow incident {{ incident_number }} with host health findings."
+            msg: "Updated ServiceNow incident {{ incident_number }} with host investigation findings."
+
+        - name: Set stats so a downstream workflow node can reference the ServiceNow update
+          ansible.builtin.set_stats:
+            data:
+              incident_number: "{{ incident_number }}"
+              incident_sys_id: "{{ incident_sys_id }}"
+              servicenow_link: "https://{{ sn_host }}/nav_to.do?uri=incident.do?sys_id={{ incident_sys_id }}"
+              update_status: "success"
+              overall_issues_detected: "{{ overall_issues_detected }}"
+            aggregate: false
