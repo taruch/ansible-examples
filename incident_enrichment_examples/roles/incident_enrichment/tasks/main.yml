@@ -1,0 +1,28 @@
+---
+# Main tasks file for incident enrichment.
+# Supports CPU, memory, and disk investigation on Windows and Linux hosts
+# only - anything else fails fast.
+
+- name: Validate incident_type parameter
+  ansible.builtin.assert:
+    that:
+      - incident_type is defined
+      - incident_type in ['cpu', 'memory', 'disk']
+    fail_msg: "incident_type must be defined and set to 'cpu', 'memory', or 'disk'"
+
+- name: Fail fast on unsupported host type
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == 'Windows' or ansible_system == 'Linux'
+    fail_msg: >-
+      incident_enrichment only supports Windows and Linux hosts.
+      Detected os_family: {{ ansible_os_family | default('unknown') }},
+      system: {{ ansible_system | default('unknown') }}.
+
+- name: Include Windows-specific tasks
+  ansible.builtin.include_tasks: "{{ incident_type }}_windows.yml"
+  when: ansible_os_family == 'Windows'
+
+- name: Include Linux-specific tasks
+  ansible.builtin.include_tasks: "{{ incident_type }}_linux.yml"
+  when: ansible_os_family != 'Windows'

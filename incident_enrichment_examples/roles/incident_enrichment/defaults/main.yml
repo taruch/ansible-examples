@@ -1,0 +1,22 @@
+---
+# Default variables for incident enrichment (CPU, memory, disk)
+
+# Alert thresholds (percent used) per incident_type
+cpu_threshold: 80
+memory_threshold: 85
+disk_threshold: 85
+
+# CPU / memory: number of top resource-consuming processes to report
+top_process_count: 10
+
+# Disk: directories/filesystems to focus on (empty = inspect everything found)
+target_drives: []
+target_filesystems: []
+
+# Disk: large-file/large-directory reporting tuning
+large_file_size_mb: 100
+top_folder_count: 10
+top_directory_count: 10
+
+# Report output directory on the controller, one subdirectory per incident_type
+report_dir: "/tmp/{{ incident_type }}_reports"

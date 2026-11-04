@@ -1,0 +1,149 @@
+---
+# Linux CPU investigation tasks
+
+- name: Gather system facts
+  ansible.builtin.setup:
+    gather_subset:
+      - hardware
+      - processor
+      - date_time
+
+- name: Get current CPU usage from /proc/stat
+  ansible.builtin.shell: |
+    cpu_line=$(head -n 1 /proc/stat)
+    set -- $cpu_line
+    idle1=$5
+    total1=$(($2+$3+$4+$5+$6+$7+$8))
+    sleep 2
+    cpu_line=$(head -n 1 /proc/stat)
+    set -- $cpu_line
+    idle2=$5
+    total2=$(($2+$3+$4+$5+$6+$7+$8))
+    idle_delta=$((idle2-idle1))
+    total_delta=$((total2-total1))
+    cpu_usage=$((100 * (total_delta - idle_delta) / total_delta))
+    echo $cpu_usage
+  register: cpu_usage_raw
+  changed_when: false
+
+- name: Set CPU usage fact
+  ansible.builtin.set_fact:
+    current_cpu_percent: "{{ cpu_usage_raw.stdout | int }}"
+
+- name: Get top CPU consuming processes
+  ansible.builtin.shell: |
+    ps aux --sort=-%cpu | head -n {{ top_process_count + 1 }} | tail -n {{ top_process_count }} | awk '{print $1,$2,$3,$4,$11}'
+  register: top_cpu_processes_raw
+  changed_when: false
+
+- name: Parse top CPU processes
+  ansible.builtin.set_fact:
+    top_cpu_processes: "{{ top_cpu_processes | default([]) + [{'user': item.split()[0], 'pid': item.split()[1], 'cpu_percent': item.split()[2], 'mem_percent': item.split()[3], 'command': item.split()[4:] | join(' ')}] }}"
+  loop: "{{ top_cpu_processes_raw.stdout_lines }}"
+
+- name: Get load average
+  ansible.builtin.command: cat /proc/loadavg
+  register: loadavg
+  changed_when: false
+
+- name: Parse load average
+  ansible.builtin.set_fact:
+    load_avg_1min: "{{ loadavg.stdout.split()[0] }}"
+    load_avg_5min: "{{ loadavg.stdout.split()[1] }}"
+    load_avg_15min: "{{ loadavg.stdout.split()[2] }}"
+    running_processes: "{{ loadavg.stdout.split()[3].split('/')[0] }}"
+    total_processes: "{{ loadavg.stdout.split()[3].split('/')[1] }}"
+
+- name: Get CPU context switches and interrupts
+  ansible.builtin.shell: |
+    grep -E '^(ctxt|intr|procs_running|procs_blocked)' /proc/stat
+  register: cpu_stats_raw
+  changed_when: false
+
+- name: Parse CPU stats
+  ansible.builtin.set_fact:
+    context_switches: "{{ (cpu_stats_raw.stdout_lines | select('match', '^ctxt') | first).split()[1] }}"
+    interrupts: "{{ (cpu_stats_raw.stdout_lines | select('match', '^intr') | first).split()[1] }}"
+
+- name: Get system uptime
+  ansible.builtin.command: cat /proc/uptime
+  register: uptime_raw
+  changed_when: false
+
+- name: Calculate uptime in hours
+  ansible.builtin.set_fact:
+    uptime_seconds: "{{ uptime_raw.stdout.split()[0] | float | int }}"
+    uptime_hours: "{{ (uptime_raw.stdout.split()[0] | float / 3600) | round(2) }}"
+
+- name: Get CPU info from lscpu
+  ansible.builtin.command: lscpu
+  register: lscpu_output
+  changed_when: false
+
+- name: Parse lscpu output
+  ansible.builtin.set_fact:
+    cpu_architecture: "{{ (lscpu_output.stdout_lines | select('match', '^Architecture:') | first).split(':')[1] | trim }}"
+    cpu_op_modes: "{{ (lscpu_output.stdout_lines | select('match', '^CPU op-mode') | first).split(':')[1] | trim }}"
+    cpu_cores: "{{ (lscpu_output.stdout_lines | select('match', '^Core\\(s\\) per socket:') | first).split(':')[1] | trim }}"
+    cpu_sockets: "{{ (lscpu_output.stdout_lines | select('match', '^Socket\\(s\\):') | first).split(':')[1] | trim }}"
+    cpu_model_name: "{{ (lscpu_output.stdout_lines | select('match', '^Model name:') | first).split(':')[1] | trim }}"
+
+- name: Get zombie processes
+  ansible.builtin.shell: |
+    ps aux | awk '{if ($8 == "Z") print $2,$11}'
+  register: zombie_procs
+  changed_when: false
+
+- name: Get CPU frequency scaling info
+  ansible.builtin.shell: |
+    if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ]; then
+      cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+    else
+      echo "N/A"
+    fi
+  register: cpu_freq
+  changed_when: false
+
+- name: Build full alert report for workflow
+  ansible.builtin.set_fact:
+    alert_report_json: |
+      {
+        "alert_type": "high_cpu",
+        "host": "{{ inventory_hostname }}",
+        "timestamp": "{{ ansible_date_time.iso8601 }}",
+        "cpu_metrics": {
+          "current_cpu_percent": {{ current_cpu_percent }},
+          "threshold_percent": {{ cpu_threshold }},
+          "load_average": {
+            "1min": {{ load_avg_1min }},
+            "5min": {{ load_avg_5min }},
+            "15min": {{ load_avg_15min }}
+          },
+          "processor_info": {
+            "model": "{{ cpu_model_name }}",
+            "architecture": "{{ cpu_architecture }}",
+            "sockets": {{ cpu_sockets }},
+            "cores_per_socket": {{ cpu_cores }},
+            "total_vcpus": {{ ansible_processor_vcpus }},
+            "op_modes": "{{ cpu_op_modes }}"
+          },
+          "stats": {
+            "context_switches": {{ context_switches }},
+            "interrupts": {{ interrupts }},
+            "running_processes": {{ running_processes }},
+            "total_processes": {{ total_processes }},
+            "zombie_processes": {{ zombie_procs.stdout_lines | length }}
+          }
+        },
+        "system_info": {
+          "uptime_hours": {{ uptime_hours }},
+          "uptime_seconds": {{ uptime_seconds }},
+          "os_distribution": "{{ ansible_distribution }}",
+          "os_version": "{{ ansible_distribution_version }}",
+          "kernel_version": "{{ ansible_kernel }}",
+          "hostname": "{{ ansible_hostname }}",
+          "fqdn": "{{ ansible_fqdn }}"
+        },
+        "top_processes": {{ top_cpu_processes | to_json }},
+        "zombie_processes": {{ zombie_procs.stdout_lines | to_json }}
+      }
