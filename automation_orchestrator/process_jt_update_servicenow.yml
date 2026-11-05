@@ -22,26 +22,66 @@
   tasks:
     # =========================================================================
     # Step -1: Parse triage_result into a native object.
-    # AO passes triage_result in via extra_vars as a JSON string - raw
-    # extra_vars don't get Ansible's "looks like JSON" auto type-casting the
-    # way a set_fact-templated value sometimes does, so it arrives as a plain
-    # string here, not a dict. Fail fast with a clear message if the upstream
-    # AI triage step produced invalid/malformed JSON, instead of a confusing
-    # "no attribute 'executed'" error later on.
+    # AO's "format decision as JSON" step uses a response schema, so
+    # triage_result normally already arrives as a native object - but keep
+    # the defensive fallback (string that needs from_json, or a
+    # truncated/duplicated response) since we've seen both happen.
     # =========================================================================
     - name: Parse triage_result into a native object
       block:
-        - name: Parse triage_result into a native object
+        - name: Attempt direct parse of triage_result
           ansible.builtin.set_fact:
             triage: "{{ triage_result if triage_result is mapping else (triage_result | from_json) }}"
       rescue:
-        - name: Fail with a clear diagnostic when triage_result is not valid JSON
-          ansible.builtin.fail:
-            msg: >-
-              triage_result could not be parsed as JSON - this usually means
-              the upstream AI triage step produced malformed or truncated
-              output. Raw value (first 500 chars):
-              {{ triage_result | default('') | string | truncate(500) }}
+        - name: Recover by parsing only the last complete JSON object in triage_result
+          block:
+            - name: Extract and parse the last {...} object in triage_result
+              ansible.builtin.set_fact:
+                triage: "{{ ('{' ~ (triage_result.split('{') | last)) | from_json }}"
+          rescue:
+            - name: Fail with a clear diagnostic when triage_result cannot be recovered
+              # Two distinct failure signatures observed in practice:
+              #   1. No '{' anywhere - plain prose, not a failed JSON attempt.
+              #      The JSON-formatting step either didn't run, or its
+              #      output isn't what's wired into this job template's
+              #      triage_result extra_var - check the AO workflow graph.
+              #   2. Has '{' but still won't parse - a genuine malformed/
+              #      truncated JSON response from the formatting step itself.
+              ansible.builtin.fail:
+                msg: >-
+                  {% if '{' not in (triage_result | default('') | string) -%}
+                  triage_result does not look like JSON at all (no '{' found
+                  anywhere) - it looks like plain text, e.g. a raw decision
+                  note. This usually means the JSON-formatting step in AO
+                  either did not run, or its output is not what's wired into
+                  this job template's triage_result extra_var (it may still
+                  be bound to an earlier step's raw output). Check the AO
+                  workflow graph before changing this playbook or that
+                  step's prompt. Raw value (first 500 chars):
+                  {{ triage_result | default('') | string | truncate(500) }}
+                  {%- else -%}
+                  triage_result could not be parsed as JSON, even after
+                  attempting to recover a truncated/duplicated AI response by
+                  taking the last complete JSON object. This usually means
+                  the upstream AI triage step hit a token limit or produced
+                  something more mangled than a simple duplication. Raw
+                  value (first 500 chars):
+                  {{ triage_result | default('') | string | truncate(500) }}
+                  {%- endif %}
+
+    - name: Fail fast if job_launched is true but job_id is missing
+      ansible.builtin.assert:
+        that:
+          - triage.job_id is defined and triage.job_id
+        fail_msg: >-
+          triage.job_launched is true but triage.job_id is missing.
+          template_id ({{ triage.template_id | default('?') }}) is the job
+          TEMPLATE's ID, not the specific job run that was launched - the
+          "format decision as JSON" schema/prompt needs to also capture the
+          actual job ID (mentioned in Step 1's note, e.g. "Job 6817
+          launched...") as its own field for this playbook to wait on it and
+          fetch its artifacts.
+      when: triage.job_launched | bool
 
     # =========================================================================
     # Step 0: Exchange username/password for a Gateway OAuth token.
@@ -70,12 +110,12 @@
           no_log: true
 
     # =========================================================================
-    # Step 1: Wait for Controller Job (Runs ONLY if triage executed a job)
+    # Step 1: Wait for Controller Job (Runs ONLY if triage launched a job)
     # =========================================================================
     - name: Wait for troubleshooting job to finish
-      when: triage.executed | bool
+      when: triage.job_launched | bool
       ansible.controller.job_wait:
-        job_id: "{{ triage.launched_job.job_id }}"
+        job_id: "{{ triage.job_id }}"
         controller_oauthtoken: "{{ controller_oauthtoken }}"
         timeout: 600
         request_timeout: 10
@@ -85,9 +125,9 @@
     # elapsed, started, finished) - no artifacts. Fetch the full job record
     # directly to get artifacts.
     - name: Get finished job details
-      when: triage.executed | bool
+      when: triage.job_launched | bool
       ansible.builtin.uri:
-        url: "https://{{ controller_hostname }}/api/controller/v2/jobs/{{ triage.launched_job.job_id }}/"
+        url: "https://{{ controller_hostname }}/api/controller/v2/jobs/{{ triage.job_id }}/"
         headers:
           Authorization: "Bearer {{ controller_oauthtoken }}"
         validate_certs: "{{ controller_validate_certs }}"
@@ -95,7 +135,7 @@
       register: job_details
 
     - name: Extract apache_diagnostics artifact
-      when: triage.executed | bool
+      when: triage.job_launched | bool
       ansible.builtin.set_fact:
         # Resolves artifact whether Controller stored it globally or keyed under host
         diag: >-
@@ -113,14 +153,16 @@
         other:
           work_notes: |
             [code]<b>=== AI Triage Summary ===</b>[/code]
-            * Root Cause: {{ triage.root_cause | default('Unknown') }}
-            * Action Taken: {{ triage.action_type | upper }}
-            * Decision: {{ triage.reasoning }}
+            {{ triage.servicenow_work_notes }}
 
-            {% if triage.executed | bool %}
+            * Priority: {{ triage.selected_priority }}
+            * Justification: {{ triage.justification }}
+            * Execution Summary: {{ triage.execution_summary }}
+
+            {% if triage.job_launched | bool %}
             [code]<b>=== Execution Details ===</b>[/code]
-            * Template: {{ triage.launched_job.template_name }} (ID: {{ triage.launched_job.template_id }})
-            * Controller Job ID: {{ triage.launched_job.job_id }}
+            * Template: {{ triage.template_name }} (ID: {{ triage.template_id }})
+            * Controller Job ID: {{ triage.job_id }}
             * Status: {{ finished_job.status | upper }}
 
             {% if diag | length > 0 %}
@@ -151,9 +193,9 @@
             No automated job was executed.
             {% endif %}
 
-            {% if triage.manual_remediation_steps | default([]) | length > 0 %}
+            {% if triage.manual_steps | default([]) | length > 0 %}
             [code]<b>=== Prescribed Manual Next Steps ===</b>[/code]
-            {% for step in triage.manual_remediation_steps %}
+            {% for step in triage.manual_steps %}
             {{ loop.index }}. {{ step }}
             {% endfor %}
             {% endif %}
