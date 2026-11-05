@@ -5,7 +5,6 @@
   vars:
     # Passed in from AO via extra_vars
     snow_incident: "{{ incident_number }}"
-    triage: "{{ triage_result }}"
 
     # Injected by the "Controller Credential" (Red Hat Ansible Automation
     # Platform credential type) on the job template.
@@ -14,7 +13,36 @@
     controller_password: "{{ aap_password | default(lookup('env', 'CONTROLLER_PASSWORD')) }}"
     controller_validate_certs: "{{ aap_validate_certs | default(lookup('env', 'CONTROLLER_VERIFY_SSL')) }}"
 
+    # A real newline character. YAML double-quoted scalars decode \n to an
+    # actual newline byte; a Jinja string literal like join('\n') written
+    # inside a template does NOT - Ansible's templating leaves it as the two
+    # literal characters \ and n. Pass this var into join() instead.
+    nl: "\n"
+
   tasks:
+    # =========================================================================
+    # Step -1: Parse triage_result into a native object.
+    # AO passes triage_result in via extra_vars as a JSON string - raw
+    # extra_vars don't get Ansible's "looks like JSON" auto type-casting the
+    # way a set_fact-templated value sometimes does, so it arrives as a plain
+    # string here, not a dict. Fail fast with a clear message if the upstream
+    # AI triage step produced invalid/malformed JSON, instead of a confusing
+    # "no attribute 'executed'" error later on.
+    # =========================================================================
+    - name: Parse triage_result into a native object
+      block:
+        - name: Parse triage_result into a native object
+          ansible.builtin.set_fact:
+            triage: "{{ triage_result if triage_result is mapping else (triage_result | from_json) }}"
+      rescue:
+        - name: Fail with a clear diagnostic when triage_result is not valid JSON
+          ansible.builtin.fail:
+            msg: >-
+              triage_result could not be parsed as JSON - this usually means
+              the upstream AI triage step produced malformed or truncated
+              output. Raw value (first 500 chars):
+              {{ triage_result | default('') | string | truncate(500) }}
+
     # =========================================================================
     # Step 0: Exchange username/password for a Gateway OAuth token.
     # AAP 2.5+ Gateway does not support Basic auth for token creation, so
@@ -104,15 +132,15 @@
             * SELinux Mode: {{ diag.selinux.mode | default('unknown') }}
 
             {% if not diag.config_test.passed and (diag.config_test.output | default([]) | length > 0) %}
-            [code]<b>Config Test Errors:</b><pre>{{ diag.config_test.output | join('\n') }}</pre>[/code]
+            [code]<b>Config Test Errors:</b><pre>{{ diag.config_test.output | join(nl) }}</pre>[/code]
             {% endif %}
 
             {% if diag.error_log_recent | default([]) | length > 0 %}
-            [code]<b>Recent Error Log Lines:</b><pre>{{ diag.error_log_recent[-10:] | join('\n') }}</pre>[/code]
+            [code]<b>Recent Error Log Lines:</b><pre>{{ diag.error_log_recent[-10:] | join(nl) }}</pre>[/code]
             {% endif %}
 
             {% if diag.selinux.recent_denials | default([]) | length > 0 %}
-            [code]<b>SELinux Denials Detected:</b><pre>{{ diag.selinux.recent_denials | join('\n') }}</pre>[/code]
+            [code]<b>SELinux Denials Detected:</b><pre>{{ diag.selinux.recent_denials | join(nl) }}</pre>[/code]
             {% endif %}
             {% else %}
             <i>Warning: Job finished with status '{{ finished_job.status }}' but produced no artifact data.</i>
