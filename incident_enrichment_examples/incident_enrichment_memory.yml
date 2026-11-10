@@ -1,11 +1,21 @@
 ---
-# Memory Investigation Report - OS-agnostic wrapper using incident_enrichment_memory role
+# Memory Investigation Report - OS-agnostic wrapper using the incident_enrichment role
 # Use case: Alert system detects high memory and triggers this playbook via AAP webhook
 # Works on both Windows and Linux systems by detecting OS and running appropriate tasks
 
 - name: Memory Investigation Report
-  hosts: "{{ _hosts | default('all') }}"
+  hosts: "{{ _hosts }}"
   gather_facts: true
 
   roles:
-    - roles/incident_enrichment_memory
+    - role: roles/incident_enrichment
+      vars:
+        incident_type: memory
+
+  post_tasks:
+    - name: Set stats for AAP dashboard and workflow
+      ansible.builtin.set_stats:
+        data:
+          alert_data: "{{ alert_report_json }}"
+        per_host: false
+        aggregate: true
