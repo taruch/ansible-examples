@@ -1,0 +1,76 @@
+---
+# Restart a single named service on a Linux host, given via an extra var -
+# unlike restart_linux_services.yml's hardcoded services_to_restart list,
+# this is meant to be driven by an external caller (e.g. an alert/webhook,
+# or an AAP workflow) that already knows which one service failed.
+#
+# Required extra_vars:
+#   - _hosts: target host - REQUIRED. Deliberately has no 'all' default,
+#     since this is a mutating action, not a read-only investigation.
+#   - failed_service: name of the service/systemd unit to restart.
+#
+# Usage:
+#   ansible-playbook restart_failed_service.yml \
+#     -e "_hosts=node1" \
+#     -e "failed_service=httpd"
+
+- name: Validate required variables
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Fail fast if _hosts was not provided
+      ansible.builtin.assert:
+        that:
+          - _hosts is defined
+          - _hosts | length > 0
+        fail_msg: >-
+          _hosts must be set to the target host for a service restart -
+          refusing to default to 'all' for a mutating action.
+
+    - name: Fail fast if failed_service was not provided
+      ansible.builtin.assert:
+        that:
+          - failed_service is defined
+          - failed_service | length > 0
+        fail_msg: "failed_service must be set to the name of the service to restart."
+
+- name: Restart Failed Service
+  hosts: "{{ _hosts }}"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: "Restart {{ failed_service }}"
+      ansible.builtin.systemd:
+        name: "{{ failed_service }}"
+        state: restarted
+      register: restart_result
+      ignore_errors: true
+
+    - name: "Get systemctl status for {{ failed_service }} (only if the restart failed)"
+      # Combine stdout and stderr: a running/crashed unit's status prints to
+      # stdout, but a missing/typo'd unit name's "could not be found" error
+      # prints to stderr instead.
+      ansible.builtin.command: "systemctl status {{ failed_service }} --no-pager -l"
+      register: status_result
+      changed_when: false
+      failed_when: false
+      when: restart_result is failed
+
+    - name: Report restart success
+      ansible.builtin.debug:
+        msg: "Successfully restarted {{ failed_service }} on {{ inventory_hostname }}"
+      when: restart_result is not failed
+
+    - name: Report restart failure with diagnostic output
+      ansible.builtin.debug:
+        msg:
+          - "Failed to restart {{ failed_service }} on {{ inventory_hostname }}: {{ restart_result.msg | default('') }}"
+          - "{{ (status_result.stdout_lines | default([])) + (status_result.stderr_lines | default([])) }}"
+      when: restart_result is failed
+
+    - name: Fail the job if the restart did not succeed
+      ansible.builtin.fail:
+        msg: "Failed to restart {{ failed_service }}: {{ restart_result.msg | default('unknown error') }}"
+      when: restart_result is failed
