@@ -1,0 +1,146 @@
+---
+# Restart failing service(s) identified by AO's root-cause-analysis step.
+# OS-agnostic (Windows and Linux) via the restart_failed_service role, which
+# detects the host type and uses systemd or win_service accordingly.
+# Use case: launched by AO as the "Priority 1 (Resolution)" job template
+# once an upstream AI step has already decided a service restart is the
+# right remediation - this playbook does not re-evaluate that decision, it
+# just extracts the service name(s) and restarts them.
+#
+# Expected extra_vars:
+#   - _hosts: target host - REQUIRED. Deliberately has no 'all' default,
+#     since this is a mutating action, not a read-only investigation.
+#   - root_cause_analysis: REQUIRED. The output of AO's root-cause-analysis
+#     step. Handles all of the shapes that step has been observed to
+#     produce:
+#       - the full AO step wrapper, e.g.
+#         {"result": {"content": "...```json\n{...}\n```..."}}
+#       - just the inner analysis object directly, e.g.
+#         {"failing_services": ["jws.service"], ...}
+#       - either of the above as a JSON string instead of a native object
+#     In every case, the object (wherever it ends up) must contain a
+#     "failing_services" list of service names (systemd units on Linux,
+#     service names on Windows).
+#
+# Usage:
+#   ansible-playbook restart_failed_service.yml \
+#     -e "_hosts=node1" \
+#     -e 'root_cause_analysis={"failing_services": ["jws.service"]}'
+
+- name: Validate required variables
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Fail fast if _hosts was not provided
+      ansible.builtin.assert:
+        that:
+          - _hosts is defined
+          - _hosts | length > 0
+        fail_msg: >-
+          _hosts must be set to the target host for a service restart -
+          refusing to default to 'all' for a mutating action.
+
+    - name: Fail fast if root_cause_analysis was not provided
+      ansible.builtin.assert:
+        that:
+          - root_cause_analysis is defined
+        fail_msg: "root_cause_analysis must be set (the output of AO's root-cause-analysis step)."
+
+- name: Restart Failed Service(s)
+  hosts: "{{ _hosts }}"
+  gather_facts: true
+  become: true
+
+  tasks:
+    # =========================================================================
+    # Step 1: Parse root_cause_analysis into a native object, however AO
+    # happened to shape it this time.
+    # =========================================================================
+    - name: Parse root cause analysis output
+      block:
+        - name: Normalize root_cause_analysis wrapper to a native object
+          ansible.builtin.set_fact:
+            _rca_outer: "{{ root_cause_analysis if root_cause_analysis is mapping else (root_cause_analysis | from_json) }}"
+
+        - name: Extract the raw model content string, if this is the full step wrapper
+          ansible.builtin.set_fact:
+            _rca_raw_content: "{{ _rca_outer.result.content | default(_rca_outer.content, true) }}"
+          when: _rca_outer.failing_services is not defined
+
+        - name: Strip markdown code fences and parse the embedded JSON, if needed
+          ansible.builtin.set_fact:
+            root_cause: "{{ _rca_raw_content[_rca_raw_content.index('{'):_rca_raw_content.rindex('}') + 1] | from_json }}"
+          when: _rca_outer.failing_services is not defined
+
+        - name: Use root_cause_analysis directly if it was already the inner analysis object
+          ansible.builtin.set_fact:
+            root_cause: "{{ _rca_outer }}"
+          when: _rca_outer.failing_services is defined
+      rescue:
+        - name: Fail with a clear diagnostic when root_cause_analysis cannot be parsed
+          ansible.builtin.fail:
+            msg: >-
+              root_cause_analysis could not be parsed. Expected either the
+              full AO step wrapper ({"result": {"content": "...```json
+              {...}```..."}}) or the inner analysis object directly, and in
+              either case a "failing_services" list inside it. Raw value
+              (first 500 chars):
+              {{ root_cause_analysis | default('') | string | truncate(500) }}
+
+    - name: Fail fast if no failing services were identified
+      ansible.builtin.assert:
+        that:
+          - root_cause.failing_services | default([]) | length > 0
+        fail_msg: "root_cause_analysis did not include any failing_services to restart."
+
+    # =========================================================================
+    # Step 2: Restart the identified service(s) via the OS-agnostic
+    # restart_failed_service role (systemd on Linux, win_service on
+    # Windows). The role itself handles per-service failure diagnostics and
+    # appends each attempt's result to service_restart_results.
+    # =========================================================================
+    - name: Restart each failing service
+      ansible.builtin.include_role:
+        name: roles/restart_failed_service
+      vars:
+        service_name: "{{ item }}"
+      loop: "{{ root_cause.failing_services }}"
+
+    # =========================================================================
+    # Step 3: Report the outcome and publish it for the next AO/AAP workflow
+    # node (e.g. a ServiceNow update step or an AI re-triage step), then
+    # fail the job if anything didn't restart cleanly.
+    # =========================================================================
+    - name: Build restart report
+      ansible.builtin.set_fact:
+        service_restart_report:
+          alert_type: "service_restart"
+          host: "{{ inventory_hostname }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          root_cause: "{{ root_cause.root_cause | default('') }}"
+          confidence: "{{ root_cause.confidence | default(0) }}"
+          recommended_action: "{{ root_cause.recommended_action | default('') }}"
+          services_requested: "{{ root_cause.failing_services }}"
+          services_restarted: "{{ service_restart_results | selectattr('succeeded', 'equalto', true) | map(attribute='service') | list }}"
+          services_failed: "{{ service_restart_results | selectattr('succeeded', 'equalto', false) | map(attribute='service') | list }}"
+          service_restart_results: "{{ service_restart_results }}"
+          all_succeeded: "{{ service_restart_results | selectattr('succeeded', 'equalto', false) | list | length == 0 }}"
+          servicenow_summary: "{{ root_cause.servicenow_summary | default('') }}"
+
+    - name: Display restart report
+      ansible.builtin.debug:
+        var: service_restart_report
+
+    - name: Set stats for AAP dashboard / downstream workflow node
+      ansible.builtin.set_stats:
+        data:
+          alert_data: "{{ service_restart_report | to_json }}"
+          service_restart_report: "{{ service_restart_report }}"
+        per_host: false
+        aggregate: false
+
+    - name: Fail the job if any service failed to restart
+      ansible.builtin.fail:
+        msg: "Failed to restart: {{ service_restart_report.services_failed | join(', ') }}"
+      when: not service_restart_report.all_succeeded
