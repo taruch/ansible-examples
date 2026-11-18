@@ -10,9 +10,10 @@ These playbooks are designed to work in AAP workflows:
 
 ## Playbooks
 
-### Investigation Playbook (OS-Agnostic)
+### Investigation Playbooks (OS-Agnostic)
 
-- **`incident_enrichment.yml`** - Main playbook that routes to CPU/Memory/Disk roles based on `issue` parameter (Windows & Linux)
+- **`incident_enrichment.yml`** - Main playbook that routes to the `incident_enrichment` role based on the `issue` parameter (`cpu`, `memory`, or `storage`) (Windows & Linux)
+- **`incident_enrichment_cpu.yml`** / **`incident_enrichment_memory.yml`** / **`incident_enrichment_disk.yml`** - Single-metric wrappers around the same role, for AAP job templates dedicated to one metric (Windows & Linux)
 
 ### ServiceNow Integration
 
@@ -30,19 +31,28 @@ The following OS-specific playbooks are deprecated. Use the OS-agnostic versions
 
 ## Roles
 
-The investigation playbooks use these roles from `../roles/`:
+The investigation playbooks use a single role from `roles/`:
 
-- **`incident_enrichment_cpu`** - CPU investigation role
-- **`incident_enrichment_memory`** - Memory investigation role
-- **`incident_enrichment_disk`** - Disk investigation role
+- **`incident_enrichment`** - CPU, memory, and disk investigation role. The
+  caller selects which via the `incident_type` variable (`cpu`, `memory`, or
+  `disk`).
 
-Each role contains:
-- `tasks/linux.yml` - Linux-specific tasks
-- `tasks/windows.yml` - Windows-specific tasks
-- `tasks/main.yml` - OS detection and task routing
-- `defaults/main.yml` - Default variables
+The role contains:
+- `tasks/main.yml` - validates `incident_type` and host OS, then routes to
+  the matching task file
+- `tasks/cpu_linux.yml` / `tasks/cpu_windows.yml`
+- `tasks/memory_linux.yml` / `tasks/memory_windows.yml`
+- `tasks/disk_linux.yml` / `tasks/disk_windows.yml`
+- `defaults/main.yml` - default variables
 
-Note: The main playbook (`incident_enrichment.yml`) handles `set_stats` to pass data to the next workflow node. Roles focus on data gathering only.
+Note: The role focuses on data gathering only. Every calling playbook
+(`incident_enrichment.yml`, and the three per-metric wrappers below) handles
+`set_stats` itself to pass `alert_data` to the next workflow node.
+
+There is also a separate **`incident_enrichment_host`** role (general host
+health - failed services, full filesystems, recent error logs) used by
+`incident_enrichment_host.yml`. It is not part of the CPU/memory/disk
+consolidation above.
 
 ## Usage
 
@@ -91,13 +101,14 @@ ansible-playbook incident_enrichment.yml -e "issue=cpu _hosts=server01"
 
 ### Investigation Playbook Variables
 
-- `issue`: Alert type - **Required** - must be `cpu`, `memory`, or `storage`
+- `issue`: Alert type - **Required** (via `incident_enrichment.yml`) - must be `cpu`, `memory`, or `storage`
+- `incident_type`: Alert type - **Required** (via the role directly, or the per-metric wrappers set this for you) - must be `cpu`, `memory`, or `disk`
 - `_hosts`: Target host or group (default: 'all')
 - `cpu_threshold`: CPU alert threshold % (default: 80)
 - `memory_threshold`: Memory alert threshold % (default: 85)
-- `alert_threshold`: Disk alert threshold % (default: 85)
+- `disk_threshold`: Disk alert threshold % (default: 85)
 - `top_process_count`: Number of top processes to report (default: 10)
-- `report_dir`: Output directory on controller (default: /tmp/*_reports)
+- `report_dir`: Output directory on controller (default: /tmp/{{ incident_type }}_reports)
 
 ### ServiceNow Playbook Variables
 

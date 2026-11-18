@@ -109,6 +109,11 @@
 
   vars:
     work_note_marker: "[AAP-REVIEWED]"
+    # A real newline character. YAML double-quoted scalars decode \n to an
+    # actual newline byte; a Jinja string literal like join('\n') written
+    # inside a template does NOT - Ansible's templating leaves it as the two
+    # literal characters \ and n. Pass this var into join()/~ instead.
+    nl: "\n"
 
   tasks:
     - name: Update ServiceNow incident with host investigation findings
@@ -201,7 +206,7 @@
 
               {% if log_errors_display | default([]) | length > 0 %}
               Recent Error Log Entries ({{ log_errors_display | length }} total, showing last 10):
-              [code]<pre>{{ log_errors_display[-10:] | join('\n') }}</pre>[/code]
+              [code]<pre>{{ log_errors_display[-10:] | join(nl) }}</pre>[/code]
               {% endif %}
 
         - name: Build CPU section of the work note

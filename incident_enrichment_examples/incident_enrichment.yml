@@ -3,6 +3,13 @@
   hosts: "{{ _hosts | default('all') }}"
   gather_facts: true
 
+  vars:
+    # issue (webhook/workflow-facing term) -> incident_type (role-facing term)
+    _incident_type_map:
+      cpu: cpu
+      memory: memory
+      storage: disk
+
   tasks:
     - name: Validate issue parameter
       ansible.builtin.assert:
@@ -12,20 +19,11 @@
         fail_msg: "Issue must be defined and set to 'cpu', 'memory', or 'storage'"
         success_msg: "Valid issue type: {{ issue }}"
 
-    - name: Include CPU enrichment role
+    - name: Include incident enrichment role
       ansible.builtin.include_role:
-        name: incident_enrichment_cpu
-      when: issue == 'cpu'
-
-    - name: Include memory enrichment role
-      ansible.builtin.include_role:
-        name: incident_enrichment_memory
-      when: issue == 'memory'
-
-    - name: Include disk/storage enrichment role
-      ansible.builtin.include_role:
-        name: incident_enrichment_disk
-      when: issue == 'storage'
+        name: incident_enrichment
+      vars:
+        incident_type: "{{ _incident_type_map[issue] }}"
 
     - name: Set workflow artifacts for next node (ServiceNow update)
       ansible.builtin.set_stats:

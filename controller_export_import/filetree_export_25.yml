@@ -57,7 +57,7 @@
           # - controller_roles
           # - controller_teams
           # - controller_users
-          - controller_workflow_job_templates
+          # - controller_workflow_job_templates
           # - controller_instance_groups
           # - controller_applications
           # - controller_labels
@@ -65,7 +65,7 @@
           # - controller_gateway_authenticator
           # - controller_gateway_authenticator_maps
           # - "workflow_job_templates"
-          # - gateway
+          - gateway
           # - gateway_applications
           # - gateway_authenticator_maps
           # - gateway_authenticators
@@ -98,8 +98,8 @@
         organization_filter: ""  # Specify the organization to filter the export, if needed
         secrets_as_variables: true
         # flatten_output: true
-        workflow_job_template_id: "207"
-        output_path: "./export_25_20260707_1"
+        # workflow_job_template_id: "207"
+        output_path: "./export_25_20261103_1"
 
     - name: "Delete the Authentication Token used"
       ansible.builtin.uri:

@@ -5,8 +5,8 @@
 General-purpose, OS-agnostic incident enrichment role for Windows and Linux
 hosts only. Automatically detects the host type via `ansible_os_family` /
 `ansible_system` and runs the matching investigation tasks. Unlike the
-single-metric roles (`incident_enrichment_cpu`, `_memory`, `_disk`) or the
-service-specific `apache_troubleshoot.yml`/`tomcat_troubleshoot.yml`
+metric-specific `incident_enrichment` role (`incident_type: cpu|memory|disk`)
+or the service-specific `apache_troubleshoot.yml`/`tomcat_troubleshoot.yml`
 playbooks, this role gathers a broad snapshot intended to answer "what's
 wrong with this host" in general:
 

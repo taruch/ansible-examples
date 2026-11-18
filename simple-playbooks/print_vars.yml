@@ -1,6 +1,8 @@
 ---
 - name: Print Variables
-  hosts: all
+  hosts: "{{ _hosts | default('all') }}"
+  strategy: free
+  serial: '{{ batch_size | int }}'
   gather_facts: false
   tasks:
     - name: Print all variables

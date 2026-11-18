@@ -1,5 +1,5 @@
 ---
-# CPU Investigation Report - OS-agnostic wrapper using incident_enrichment_cpu role
+# CPU Investigation Report - OS-agnostic wrapper using the incident_enrichment role
 # Use case: Alert system detects high CPU and triggers this playbook via AAP webhook
 # Works on both Windows and Linux systems by detecting OS and running appropriate tasks
 
@@ -8,4 +8,14 @@
   gather_facts: true
 
   roles:
-    - roles/incident_enrichment_cpu
+    - role: roles/incident_enrichment
+      vars:
+        incident_type: cpu
+
+  post_tasks:
+    - name: Set stats for AAP dashboard and workflow
+      ansible.builtin.set_stats:
+        data:
+          alert_data: "{{ alert_report_json }}"
+        per_host: false
+        aggregate: true

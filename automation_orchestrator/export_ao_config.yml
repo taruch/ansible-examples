@@ -71,6 +71,12 @@
           - ao_password | length > 0
         fail_msg: "ao_base_url, ao_username, and ao_password are required"
 
+    - name: Strip any trailing slash from ao_base_url
+      # Every request below concatenates "{{ ao_base_url }}/api/v1/...", so a
+      # trailing slash produces a double "//" that the API rejects.
+      ansible.builtin.set_fact:
+        ao_base_url: "{{ ao_base_url | regex_replace('/+$', '') }}"
+
     - name: Log in with username and password
       ansible.builtin.uri:
         url: "{{ ao_base_url }}/api/v1/auth/login"
