@@ -31,6 +31,10 @@ Tests the `set_stats` module behavior in isolation.
 
 This pattern enables targeted retry or remediation workflows without re-running tasks on already-successful hosts.
 
+## Walkthrough Video
+
+[`workflow_failure.mp4`](./workflow_failure.mp4) walks through setting up and running this workflow failure pattern end-to-end.
+
 ## See Also
 
 For real-world (non-simulated) uses of `block`/`rescue` and `assert` elsewhere in this repo:
